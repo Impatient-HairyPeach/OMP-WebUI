@@ -1,0 +1,7 @@
+{
+  "name": "OMP Studio",
+  "description": "Developer-grade orchestration management platform for Model Context Protocol (MCP) servers, plugins, and sub-agent skills.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

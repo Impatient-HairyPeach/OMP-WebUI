@@ -1,0 +1,190 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --theme-bg: #09090b;
+    --theme-surface: #0c0c0e;
+    --theme-card: #121215;
+    --theme-card-hover: #18181b;
+    --theme-border: #27272a;
+    --theme-border-subtle: #1e1e24;
+    --theme-border-hover: #3f3f46;
+    --theme-text-primary: #fafafa;
+    --theme-text-muted: #a1a1aa;
+    --theme-text-subtle: #71717a;
+    --theme-accent: #a78bfa;
+    --theme-accent-soft: rgba(167, 139, 250, 0.15);
+    --theme-secondary: #34d399;
+    --theme-terminal-bg: #070709;
+    --theme-code-bg: #050507;
+    --font-mono: 'Geist Mono', monospace;
+    --density-padding: 0.75rem;
+    --density-gap: 0.5rem;
+  }
+
+  /* Canonical Light System Tokens */
+  html.light,
+  [data-theme-mode="light"] {
+    --theme-bg: #f8fafc;
+    --theme-surface: #f1f5f9;
+    --theme-card: #ffffff;
+    --theme-card-hover: #f8fafc;
+    --theme-border: #e2e8f0;
+    --theme-border-subtle: #cbd5e1;
+    --theme-border-hover: #94a3b8;
+    --theme-text-primary: #0f172a;
+    --theme-text-muted: #475569;
+    --theme-text-subtle: #64748b;
+    --theme-terminal-bg: #f8fafc;
+    --theme-code-bg: #f1f5f9;
+  }
+
+  /* Density Scales */
+  [data-density="compact"] {
+    --density-padding: 0.5rem;
+    --density-gap: 0.375rem;
+    font-size: 13px;
+  }
+
+  [data-density="standard"] {
+    --density-padding: 0.75rem;
+    --density-gap: 0.5rem;
+    font-size: 14px;
+  }
+
+  [data-density="relaxed"] {
+    --density-padding: 1rem;
+    --density-gap: 0.75rem;
+    font-size: 15px;
+  }
+
+  body {
+    background-color: var(--theme-bg);
+    color: var(--theme-text-primary);
+    letter-spacing: -0.01em;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+
+  /* Custom scrollbar matching active theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--theme-bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--theme-border);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--theme-border-hover);
+  }
+}
+
+/* ========================================================== */
+/* GLOBAL COMPREHENSIVE LIGHT THEME ENGINE OVERRIDES          */
+/* Converts all hardcoded dark utility classes to theme vars */
+/* ========================================================== */
+html.light,
+[data-theme-mode="light"] {
+  color: var(--theme-text-primary);
+  background-color: var(--theme-bg);
+}
+
+/* Background overrides in Light Mode */
+html.light .bg-\[\#09090b\],
+[data-theme-mode="light"] .bg-\[\#09090b\] {
+  background-color: var(--theme-bg) !important;
+}
+
+html.light .bg-\[\#0c0c0e\],
+[data-theme-mode="light"] .bg-\[\#0c0c0e\] {
+  background-color: var(--theme-surface) !important;
+}
+
+html.light .bg-\[\#121215\],
+[data-theme-mode="light"] .bg-\[\#121215\] {
+  background-color: var(--theme-card) !important;
+}
+
+html.light .bg-\[\#18181b\],
+[data-theme-mode="light"] .bg-\[\#18181b\] {
+  background-color: var(--theme-card-hover) !important;
+}
+
+html.light .bg-\[\#070709\],
+[data-theme-mode="light"] .bg-\[\#070709\],
+html.light .bg-\[\#050507\],
+[data-theme-mode="light"] .bg-\[\#050507\] {
+  background-color: var(--theme-terminal-bg) !important;
+}
+
+html.light .bg-\[\#09090b\]\/80,
+[data-theme-mode="light"] .bg-\[\#09090b\]\/80 {
+  background-color: var(--theme-surface) !important;
+}
+
+/* Text overrides in Light Mode */
+html.light .text-\[\#fafafa\],
+[data-theme-mode="light"] .text-\[\#fafafa\] {
+  color: var(--theme-text-primary) !important;
+}
+
+html.light .text-\[\#a1a1aa\],
+[data-theme-mode="light"] .text-\[\#a1a1aa\] {
+  color: var(--theme-text-muted) !important;
+}
+
+html.light .text-\[\#71717a\],
+[data-theme-mode="light"] .text-\[\#71717a\] {
+  color: var(--theme-text-subtle) !important;
+}
+
+/* Border overrides in Light Mode */
+html.light .border-\[\#27272a\],
+[data-theme-mode="light"] .border-\[\#27272a\] {
+  border-color: var(--theme-border) !important;
+}
+
+html.light .border-\[\#1e1e24\],
+[data-theme-mode="light"] .border-\[\#1e1e24\] {
+  border-color: var(--theme-border-subtle) !important;
+}
+
+html.light .border-\[\#3f3f46\],
+[data-theme-mode="light"] .border-\[\#3f3f46\] {
+  border-color: var(--theme-border-hover) !important;
+}
+
+/* Hover overrides in Light Mode */
+html.light .hover\:bg-\[\#18181b\]:hover,
+[data-theme-mode="light"] .hover\:bg-\[\#18181b\]:hover,
+html.light .hover\:bg-\[\#121215\]:hover,
+[data-theme-mode="light"] .hover\:bg-\[\#121215\]:hover {
+  background-color: var(--theme-surface) !important;
+}
+
+html.light .hover\:text-\[\#fafafa\]:hover,
+[data-theme-mode="light"] .hover\:text-\[\#fafafa\]:hover {
+  color: var(--theme-text-primary) !important;
+}
+
+/* Input, select, and textarea contrast in Light Mode */
+html.light input,
+[data-theme-mode="light"] input,
+html.light select,
+[data-theme-mode="light"] select,
+html.light textarea,
+[data-theme-mode="light"] textarea {
+  background-color: var(--theme-card) !important;
+  color: var(--theme-text-primary) !important;
+  border-color: var(--theme-border) !important;
+}
+
+html.light input::placeholder,
+[data-theme-mode="light"] input::placeholder,
+html.light textarea::placeholder,
+[data-theme-mode="light"] textarea::placeholder {
+  color: var(--theme-text-subtle) !important;
+}
