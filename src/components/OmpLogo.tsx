@@ -1,14 +1,13 @@
 /**
  * omp's mark (oh-my-pi): the pi symbol with its plugin connector, drawn inline
  * so it follows the surrounding text colour while the connector keeps omp's
- * orange. Same geometry as `public/omp-logo.svg` / `public/favicon.svg`.
+ * orange. Same geometry as `public/omp-logo.svg` and `public/favicon.svg`.
  */
 import React from 'react';
 
 interface OmpLogoProps {
   className?: string;
   style?: React.CSSProperties;
-  /** Draw the bars in the current text colour instead of omp's white. */
   inherit?: boolean;
   title?: string;
 }

@@ -110,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="truncate">{t.searchPlaceholder}</span>
           </div>
           <div className="flex items-center gap-0.5 text-[10px] font-mono text-[#71717a] bg-[#18181b] border border-[#27272a] px-1 py-0.2 rounded">
-            <span>⌘K</span>
+            <span>⌘/Ctrl+K</span>
           </div>
         </button>
       </div>

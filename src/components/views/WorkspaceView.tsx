@@ -682,17 +682,26 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   /** A few slash commands worth one click on an empty conversation (only real ones). */
   const QUICK_COMMANDS: Array<{ name: string; labelZh: string; labelEn: string }> = [
     // Labels follow omp's own wording; the tooltip is omp's own description.
-    { name: 'skillful', labelZh: '技能清单开关', labelEn: 'skill listing' },
+    { name: 'skill', labelZh: '挑技能', labelEn: 'pick a skill' },
     { name: 'todo', labelZh: '任务', labelEn: 'todos' },
     { name: 'compact', labelZh: '压缩上下文', labelEn: 'compact' },
     { name: 'context', labelZh: '上下文用量', labelEn: 'context' },
   ];
+  // `skill` is a prefix of every `/skill:<name>` command: clicking it opens the
+  // composer's completion list already filtered to the skills.
   const quickCommands = QUICK_COMMANDS.filter((entry) =>
-    omp.slashCommands.some((command) => command.name === entry.name)
+    entry.name === 'skill'
+      ? omp.slashCommands.some((command) => command.name.startsWith('skill:'))
+      : omp.slashCommands.some((command) => command.name === entry.name)
   );
   const insertCommand = (name: string) => {
-    setInputPrompt((prev) => (prev ? `${prev} /${name}` : `/${name} `));
+    const text = name === 'skill' ? '/skill:' : `/${name} `;
+    setInputPrompt((prev) => (prev ? `${prev}${text}` : text));
     textareaRef.current?.focus();
+    window.setTimeout(() => {
+      const caret = (textareaRef.current?.value.length ?? 0);
+      textareaRef.current?.setSelectionRange(caret, caret);
+    }, 0);
   };
 
   const noActiveSession = !omp.resumePath && !omp.sessionId;
@@ -1226,7 +1235,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
             {!sessionActive && transcript.length === 0 ? (
               /* New conversation: omp's mark plus a few quick slash commands. */
               <div className="h-full min-h-[320px] flex flex-col items-center justify-center gap-7 select-none">
-                <OmpLogo className="w-20 h-15 opacity-90" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} />
+                <OmpLogo className="w-20 h-15 opacity-95" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} />
                 <div className="flex items-center justify-center gap-2 flex-wrap text-[11px] font-mono">
                   {quickCommands.map((entry) => (
                     <button
@@ -1249,7 +1258,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
               </div>
             ) : transcript.length === 0 ? (
               <div className="h-full min-h-[320px] flex flex-col items-center justify-center gap-7 select-none">
-                <OmpLogo className="w-20 h-15 opacity-90" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} />
+                <OmpLogo className="w-20 h-15 opacity-95" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} />
                 <div className="flex items-center justify-center gap-2 flex-wrap text-[11px] font-mono">
                   {quickCommands.map((entry) => (
                     <button
