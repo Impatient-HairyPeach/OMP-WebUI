@@ -65,6 +65,8 @@ export interface OmpSkillEntry {
   path: string;
   /** false when the skill carries omp's hide / disable-model-invocation flag. */
   enabled: boolean;
+  /** false when this project switched the skill off (`.omp/omp-studio.json`). */
+  projectEnabled: boolean;
 }
 
 export interface OmpAgentEntry {
@@ -77,10 +79,11 @@ export interface OmpAgentEntry {
 export interface OmpPluginEntry {
   name: string;
   version: string;
+  /** Global state, from omp's own plugin lock. */
   enabled: boolean;
   features: string[] | null;
-  /** global = loaded in every project · project = only in this workspace · off = disabled. */
-  scope: "global" | "project" | "off";
+  /** false when this project switched the extension off. */
+  projectEnabled: boolean;
 }
 
 export interface OmpUsagePayload {
@@ -158,22 +161,26 @@ export const checkOmpUpdate = (force = false) => postJson<OmpUpdateStatus>("/api
 /** Run `omp update`; the bridge stops the session first and restarts it afterwards. */
 export const installOmpUpdate = (force = false) => postJson<OmpUpdateResult>("/api/omp/update", { action: "update", force });
 
-export type ScopeName = "global" | "project" | "off";
-
-/** Move a skill between the global and the project skills root, then reload the session. */
-export const setSkillScope = (name: string, scope: "global" | "project") =>
-  postJson<{ ok: boolean; name: string; scope: string; restarted: boolean }>("/api/skills/scope", { name, scope });
-
-/** Turn one skill on/off (writes the front-matter flag omp reads). */
+/** Turn one skill on/off globally (writes the front-matter flag omp reads). */
 export const setSkillEnabled = (name: string, enabled: boolean) =>
   postJson<{ ok: boolean; name: string; enabled: boolean; restarted: boolean; path: string }>("/api/skills/enable", {
     name,
     enabled,
   });
 
-/** Global / this-project-only / off for an installed extension. */
-export const setExtensionScope = (name: string, scope: ScopeName) =>
-  postJson<{ ok: boolean; name: string; scope: string; restarted: boolean }>("/api/extensions/scope", { name, scope });
+/** Switch one skill or extension on/off **for this project only**.
+ *  The bridge stores the opt-out and applies it with omp's own `--skills=` /
+ *  `--no-extensions -e` flags on the next launch. */
+export const setProjectScope = (kind: "skill" | "extension", name: string, enabled: boolean) =>
+  postJson<{ ok: boolean; kind: string; name: string; projectEnabled: boolean; restarted: boolean }>("/api/project/scope", {
+    kind,
+    name,
+    enabled,
+  });
+
+/** Global enable/disable for an installed extension (`omp plugin enable|disable`). */
+export const setExtensionEnabled = (name: string, enabled: boolean) =>
+  postJson<{ ok: boolean; name: string; enabled: boolean; restarted: boolean }>("/api/extensions/scope", { name, enabled });
 
 export interface OmpScopeModel {
   provider: string;

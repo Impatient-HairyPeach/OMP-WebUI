@@ -36,6 +36,7 @@ import {
   Layers,
   Activity,
   Coins,
+  Loader2,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
@@ -132,6 +133,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [inputPrompt, setInputPrompt] = useState('');
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  /** Label of the model being switched to, while omp applies it. */
+  const [modelSwitching, setModelSwitching] = useState<string | null>(null);
   const [compactMenuOpen, setCompactMenuOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [sessionViewMode, setSessionViewMode] = useState<'chat' | 'diffs'>('chat');
@@ -1885,14 +1888,27 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                       type="button"
                       onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
                       disabled={omp.models.length === 0}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[11px] font-mono text-[#a1a1aa] hover:text-[#fafafa] cursor-pointer transition-colors disabled:opacity-40 max-w-[280px]"
-                      title={omp.modelLabel ?? undefined}
+                      aria-busy={modelSwitching !== null}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[11px] font-mono cursor-pointer transition-colors disabled:opacity-40 max-w-[280px] ${
+                        modelSwitching
+                          ? 'text-[#71717a] opacity-70 border-dashed'
+                          : 'text-[#a1a1aa] hover:text-[#fafafa]'
+                      }`}
+                      title={modelSwitching ? `${modelSwitching} …` : omp.modelLabel ?? undefined}
                     >
-                      <Brain className="w-3 h-3 text-[#a78bfa] shrink-0" />
+                      {modelSwitching ? (
+                        <Loader2 className="w-3 h-3 animate-spin shrink-0" style={{ color: accentColor }} />
+                      ) : (
+                        <Brain className="w-3 h-3 text-[#a78bfa] shrink-0" />
+                      )}
                       <span className="truncate">
-                        {currentModel ? currentModel.name ?? currentModel.id : omp.modelLabel ?? (language === 'zh-CN' ? '模型目录加载中…' : 'loading models…')}
+                        {modelSwitching
+                          ? modelSwitching
+                          : currentModel
+                          ? currentModel.name ?? currentModel.id
+                          : omp.modelLabel ?? (language === 'zh-CN' ? '模型目录加载中…' : 'loading models…')}
                       </span>
-                      <ChevronDown className="w-3 h-3 text-[#71717a] shrink-0" />
+                      {!modelSwitching && <ChevronDown className="w-3 h-3 text-[#71717a] shrink-0" />}
                     </button>
 
                     {modelDropdownOpen && (
@@ -1914,7 +1930,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                                     key={`${model.provider}/${model.id}`}
                                     onClick={() => {
                                       setModelDropdownOpen(false);
-                                      void omp.setModel(model.provider, model.id);
+                                      const label = model.name ?? model.id;
+                                      setModelSwitching(label);
+                                      const started = Date.now();
+                                      void omp.setModel(model.provider, model.id).finally(() => {
+                                        // Keep the indicator visible long enough to read.
+                                        const elapsed = Date.now() - started;
+                                        window.setTimeout(() => setModelSwitching(null), Math.max(0, 260 - elapsed));
+                                      });
                                     }}
                                     className={`w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer flex items-center justify-between gap-2 transition-colors ${
                                       isCurrent ? 'bg-[#27272a]/60' : ''

@@ -343,6 +343,12 @@ export function useOmpSession(): OmpSessionApi {
           if (Array.isArray(frame.commands)) setSlashCommands(frame.commands as OmpSlashCommand[]);
           break;
         }
+        case "model_changed":
+        case "thinking_level_changed": {
+          // omp reports the change; pull the authoritative state so the UI label follows.
+          void refreshState();
+          break;
+        }
         case "notice": {
           const level = frame.level === "error" ? "error" : frame.level === "warning" ? "warn" : "info";
           pushLog(level, `${frame.source ? `[${String(frame.source)}] ` : ""}${String(frame.message ?? "")}`);
@@ -538,9 +544,14 @@ export function useOmpSession(): OmpSessionApi {
     [pushLog, refreshState]
   );
 
-  const setModel = useCallback(async (provider: string, modelId: string) => {
-    await bridgeRef.current?.command({ type: "set_model", provider, modelId });
-  }, []);
+  const setModel = useCallback(
+    async (provider: string, modelId: string) => {
+      await bridgeRef.current?.command({ type: "set_model", provider, modelId });
+      // The switch is only "done" once the session state reports the new model.
+      await refreshState();
+    },
+    [refreshState]
+  );
 
   const setThinkingLevel = useCallback(async (level: string) => {
     await bridgeRef.current?.command({ type: "set_thinking_level", level });

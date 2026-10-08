@@ -3,7 +3,7 @@ import { Upload, Plus, Search, RefreshCw, Loader2, AlertCircle, Trash2, FileCode
 import { useI18n } from '../context/I18nContext';
 import { useTheme } from '../context/ThemeContext';
 import { ScopeSwitch } from './ScopeSwitch';
-import { fetchSkills, runOmpCli, setSkillEnabled, setSkillScope, OmpSkillEntry } from '../omp/cli';
+import { fetchSkills, runOmpCli, setSkillEnabled, OmpSkillEntry } from '../omp/cli';
 
 interface SkillsSectionProps {
   onUploadSkill: () => void;
@@ -54,26 +54,6 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
           skill.path.toLowerCase().includes(query)
       )
     : skills;
-
-  /** Move a skill between the global root omp discovers and this project's root. */
-  const handleScope = async (skill: OmpSkillEntry, scope: 'global' | 'project') => {
-    if (actionBusy) return;
-    setActionBusy(skill.name);
-    setOutput(null);
-    try {
-      await setSkillScope(skill.name, scope);
-      setOutput(
-        zh
-          ? `已将 ${skill.name} 移动到${scope === 'global' ? '全局' : '本项目'}作用域，omp 会话已重启。`
-          : `${skill.name} moved to the ${scope} scope; the omp session was restarted.`
-      );
-      await load();
-    } catch (err) {
-      setOutput(err instanceof Error ? err.message : String(err));
-    } finally {
-      setActionBusy(null);
-    }
-  };
 
   /** Turn one skill on/off (omp reads hide / disable-model-invocation). */
   const handleToggle = async (skill: OmpSkillEntry) => {
@@ -267,23 +247,15 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
               </div>
 
               <div className="pt-2 border-t border-[#1e1e24] flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleScope(skill, skill.source === 'project' ? 'global' : 'project')}
-                  disabled={actionBusy !== null}
-                  title={
-                    skill.source === 'project'
-                      ? zh
-                        ? '移动到全局（~/.agents/skills）'
-                        : 'Move to the global scope (~/.agents/skills)'
-                      : zh
-                      ? '移动到这里安装（<项目>/.agents/skills）'
-                      : 'Install for this project (<project>/.agents/skills)'
-                  }
-                  className="text-[10px] font-mono text-[#a1a1aa] hover:text-[#fafafa] cursor-pointer disabled:opacity-50 truncate"
-                >
-                  {skill.source === 'project' ? (zh ? '移到全局' : 'move global') : zh ? '移到本项目' : 'move project'}
-                </button>
+                <span className="text-[10px] text-[#52525b] font-mono truncate" title={skill.path}>
+                  {skill.source === 'project'
+                    ? zh
+                      ? '安装于项目目录 .agents/skills'
+                      : 'in this project (.agents/skills)'
+                    : zh
+                    ? '安装于 ~/.agents/skills'
+                    : 'in ~/.agents/skills'}
+                </span>
 
                 <button
                   type="button"

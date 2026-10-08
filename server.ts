@@ -183,8 +183,8 @@ function startChild() {
   emit("status", { status: childStatus, workspace, resumePath });
   const args = ["--mode", "rpc-ui", "--cwd", workspace];
   if (resumePath) args.push("--resume", resumePath);
-  // Extensions pinned to this project are loaded explicitly (omp's own -e flag).
-  args.push(...projectExtensionArgs());
+  // This project's opt-outs are applied with omp's own flags.
+  args.push(...projectScopeArgs());
   args.push(...OMP_ARGS);
   const target = resolveOmpCommand();
   launchArgs = [...target.args, ...args];
@@ -347,18 +347,22 @@ async function checkOmpUpdate(force = false): Promise<OmpUpdateStatus> {
   return ompUpdateInFlight;
 }
 
-/** Project-scope extension pins, kept beside omp's own project config. */
+/** Project-scope pins, kept beside omp's own project config.
+ *  A pin only ever records "switched off in THIS project"; everything else
+ *  follows the global install/enable state. */
 const PROJECT_SCOPE_FILE = () => path.join(workspace, ".omp", "omp-studio.json");
 
 interface ProjectScopeFile {
-  extensions?: Record<string, "project">;
+  extensions?: Record<string, "off" | "project">;
+  skills?: Record<string, "off">;
 }
 
 function readProjectScope(): ProjectScopeFile {
   const file = PROJECT_SCOPE_FILE();
   if (!existsSync(file)) return {};
   try {
-    return JSON.parse(readFileSync(file, "utf8")) as ProjectScopeFile;
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as ProjectScopeFile;
+    return { extensions: parsed.extensions ?? {}, skills: parsed.skills ?? {} };
   } catch {
     return {};
   }
@@ -368,6 +372,24 @@ function writeProjectScope(next: ProjectScopeFile): void {
   const file = PROJECT_SCOPE_FILE();
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+}
+
+/** `true` when this project switched the item off (only the off state is stored). */
+const isSwitchedOffHere = (map: Record<string, string> | undefined, name: string) => map?.[name] === "off";
+
+/** Names under the two skill roots omp discovers. */
+function discoverSkillNames(): string[] {
+  const names = new Set<string>();
+  for (const root of [USER_SKILLS, path.join(workspace, ".agents", "skills"), path.join(workspace, ".omp", "skills")]) {
+    try {
+      for (const entry of readdirSync(root, { withFileTypes: true })) {
+        if (entry.isDirectory() && existsSync(path.join(root, entry.name, "SKILL.md"))) names.add(entry.name);
+      }
+    } catch {
+      /* root missing */
+    }
+  }
+  return [...names];
 }
 
 /** Installed plugin entry points, straight from `omp plugin list --json` (short cache). */
@@ -396,30 +418,33 @@ async function installedPluginEntries(): Promise<Map<string, string[]>> {
   return entries;
 }
 
-/** `-e <entry>` for every extension pinned to this project (omp loads those per project). */
-function projectExtensionArgs(): string[] {
-  const pinned = Object.entries(readProjectScope().extensions ?? {}).filter(([, scope]) => scope === "project");
-  if (pinned.length === 0) return [];
+/** Launch flags that apply THIS project's opt-outs, using omp's own switches.
+ *  - skills: `--skills=<allowlist>` for everything not switched off here
+ *  - extensions: `--no-extensions` plus `-e` for everything not switched off here */
+function projectScopeArgs(): string[] {
+  const scope = readProjectScope();
   const args: string[] = [];
-  for (const [name] of pinned) {
-    for (const entry of pluginCatalogCache?.entries.get(name) ?? []) args.push("-e", entry);
+
+  const skills = discoverSkillNames();
+  const offSkills = skills.filter((name) => isSwitchedOffHere(scope.skills, name));
+  if (offSkills.length > 0) {
+    const keep = skills.filter((name) => !isSwitchedOffHere(scope.skills, name));
+    args.push(...(keep.length > 0 ? [`--skills=${keep.join(",")}`] : ["--no-skills"]));
+  }
+
+  const lock = readJsonFile<{ plugins?: Record<string, { enabled?: boolean }> }>(PLUGIN_LOCK, {});
+  const globallyEnabled = Object.entries(lock.plugins ?? {})
+    .filter(([, meta]) => meta.enabled !== false)
+    .map(([name]) => name);
+  const offExtensions = globallyEnabled.filter((name) => isSwitchedOffHere(scope.extensions, name));
+  if (offExtensions.length > 0) {
+    args.push("--no-extensions");
+    for (const name of globallyEnabled) {
+      if (isSwitchedOffHere(scope.extensions, name)) continue;
+      for (const entry of pluginCatalogCache?.entries.get(name) ?? []) args.push("-e", entry);
+    }
   }
   return args;
-}
-
-/** Move a skill directory between the global and the project skills root omp discovers. */
-function moveSkillDir(name: string, source: string, target: string) {
-  const from = path.join(source, name);
-  const to = path.join(target, name);
-  mkdirSync(target, { recursive: true });
-  if (existsSync(to)) throw new Error(`a skill named "${name}" already exists in the target scope`);
-  try {
-    renameSync(from, to);
-  } catch {
-    // Different volumes: copy the tree, then drop the original.
-    cpSync(from, to, { recursive: true });
-    rmSync(from, { recursive: true, force: true });
-  }
 }
 
 // ---------------------------------------------------------------- model scope (enabledModels)
@@ -1310,7 +1335,14 @@ app.get("/api/omp/skills", (_req, res) => {
     { root: path.join(workspace, ".agents", "skills"), source: "project" as const },
     { root: path.join(workspace, ".omp", "skills"), source: "project" as const },
   ];
-  const skills: Array<{ name: string; description?: string; source: string; path: string; enabled: boolean }> = [];
+  const skills: Array<{
+    name: string;
+    description?: string;
+    source: string;
+    path: string;
+    enabled: boolean;
+    projectEnabled: boolean;
+  }> = [];
   for (const { root, source } of roots) {
     let entries;
     try {
@@ -1329,6 +1361,7 @@ app.get("/api/omp/skills", (_req, res) => {
         source,
         path: skillFile,
         enabled: meta.hidden !== true,
+        projectEnabled: !isSwitchedOffHere(readProjectScope().skills, meta.name || entry.name),
       });
     }
   }
@@ -1396,10 +1429,11 @@ app.get("/api/omp/plugins", (_req, res) => {
   const plugins = Object.entries(lock.plugins ?? {}).map(([name, meta]) => ({
     name,
     version: meta.version ?? "",
+    /** Global state from omp's own plugin lock. */
     enabled: meta.enabled !== false,
     features: meta.enabledFeatures ?? null,
-    /** global = loaded everywhere · project = only in this workspace · off = disabled. */
-    scope: pinned[name] === "project" ? "project" : meta.enabled !== false ? "global" : "off",
+    /** false when this project switched the extension off (stored in .omp/omp-studio.json). */
+    projectEnabled: !isSwitchedOffHere(pinned, name),
   }));
   res.json({ path: PLUGIN_LOCK, plugins, exists: existsSync(PLUGIN_LOCK), projectScopeFile: PROJECT_SCOPE_FILE() });
 });
@@ -1637,71 +1671,22 @@ app.post("/api/omp/update", async (req, res) => {
   }
 });
 
-/** Skills are discovered from a global root and a project root; move one between them. */
-app.post("/api/skills/scope", async (req, res) => {
-  const name = String(req.body?.name || "").trim();
-  const scope = String(req.body?.scope || "");
-  if (!name || name === "." || name === ".." || /[\\/]/.test(name)) {
-    res.status(400).json({ error: "invalid skill name" });
-    return;
-  }
-  if (scope !== "global" && scope !== "project") {
-    res.status(400).json({ error: "expected scope global|project" });
-    return;
-  }
-  if (existsSync(path.join(USER_SKILLS, name)) && existsSync(path.join(workspace, ".agents", "skills", name))) {
-    res.status(409).json({ error: `"${name}" exists in both scopes — remove one first` });
-    return;
-  }
-  const source = existsSync(path.join(USER_SKILLS, name))
-    ? USER_SKILLS
-    : existsSync(path.join(workspace, ".agents", "skills", name))
-    ? path.join(workspace, ".agents", "skills")
-    : null;
-  if (!source) {
-    res.status(404).json({ error: `skill not found on disk: ${name}` });
-    return;
-  }
-  const target = scope === "global" ? USER_SKILLS : path.join(workspace, ".agents", "skills");
-  try {
-    if (path.resolve(source) !== path.resolve(target)) moveSkillDir(name, source, target);
-    // omp discovers skills when a session starts: reload the session to apply the move.
-    await enqueue(() => restartChild({}));
-    emit("log", { level: "info", message: `skill.scope: ${name} -> ${scope}` });
-    res.json({ ok: true, name, scope, restarted: true });
-  } catch (error) {
-    res.status(400).json({ error: String(error instanceof Error ? error.message : error) });
-  }
-});
-
-/** Extension enablement scope: global (omp's own lock), project-pinned, or off. */
+/** Global enablement of one extension: `omp plugin enable|disable` (the lock file).
+ *  Per-project opt-outs live in /api/project/scope. */
 app.post("/api/extensions/scope", async (req, res) => {
   const name = String(req.body?.name || "").trim();
-  const scope = String(req.body?.scope || "");
+  const enabled = req.body?.enabled !== false;
   if (!name || /[\\/]/.test(name)) {
     res.status(400).json({ error: "invalid extension name" });
     return;
   }
-  if (scope !== "global" && scope !== "project" && scope !== "off") {
-    res.status(400).json({ error: "expected scope global|project|off" });
-    return;
-  }
   try {
-    if (scope === "global") {
-      await runOmpCli(["plugin", "enable", name, "--json"], { timeoutMs: 60_000 });
-    } else {
-      await runOmpCli(["plugin", "disable", name, "--json"], { timeoutMs: 60_000 });
-    }
-    const current = readProjectScope();
-    const extensions = { ...(current.extensions ?? {}) };
-    if (scope === "project") extensions[name] = "project";
-    else delete extensions[name];
-    writeProjectScope({ ...current, extensions });
+    await runOmpCli(["plugin", enabled ? "enable" : "disable", name, "--json"], { timeoutMs: 60_000 });
     pluginCatalogCache = null;
     await installedPluginEntries();
     await enqueue(() => restartChild({}));
-    emit("log", { level: "info", message: `extension.scope: ${name} -> ${scope}` });
-    res.json({ ok: true, name, scope, restarted: true });
+    emit("log", { level: "info", message: `extension.global: ${name} ${enabled ? "on" : "off"}` });
+    res.json({ ok: true, name, enabled, restarted: true });
   } catch (error) {
     res.status(400).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
   }
@@ -1780,6 +1765,46 @@ app.post("/api/omp/models/scope", async (req, res) => {
           : `model.scope: ${String(req.body?.selector)} ${enabled ? "enabled" : "disabled"}`,
     });
     res.json({ ok: true, ...next, restarted: true });
+  } catch (error) {
+    res.status(400).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
+  }
+});
+
+/** Enable/disable one skill or extension **for this project only**.
+ *  Only the off state is stored; everything else follows the global state. */
+app.post("/api/project/scope", async (req, res) => {
+  const kind = String(req.body?.kind || "");
+  const name = String(req.body?.name || "").trim();
+  const enabled = req.body?.enabled !== false;
+  if (kind !== "skill" && kind !== "extension") {
+    res.status(400).json({ error: "expected kind skill|extension" });
+    return;
+  }
+  if (!name || /[\\/]/.test(name)) {
+    res.status(400).json({ error: "invalid name" });
+    return;
+  }
+  try {
+    const current = readProjectScope();
+    const extensions = { ...(current.extensions ?? {}) };
+    const skills = { ...(current.skills ?? {}) };
+    if (kind === "skill") {
+      if (enabled) delete skills[name];
+      else skills[name] = "off";
+    } else {
+      if (enabled) delete extensions[name];
+      else extensions[name] = "off";
+    }
+    writeProjectScope({ extensions, skills });
+    pluginCatalogCache = null;
+    await installedPluginEntries();
+    // The flags are applied when the agent starts.
+    await enqueue(() => restartChild({}));
+    emit("log", {
+      level: "info",
+      message: `project.scope: ${kind} ${name} ${enabled ? "enabled here" : "disabled here"}`,
+    });
+    res.json({ ok: true, kind, name, projectEnabled: enabled, restarted: true });
   } catch (error) {
     res.status(400).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
   }

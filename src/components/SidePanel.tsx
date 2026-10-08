@@ -44,8 +44,8 @@ import {
   fetchPlugins,
   fetchSkills,
   fetchWorkspaceFiles,
-  setExtensionScope,
-  setSkillScope,
+  setExtensionEnabled,
+  setProjectScope,
   type GitDiffFile,
   type OmpPluginEntry,
   type OmpSkillEntry,
@@ -248,21 +248,16 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     void loadExtras();
   }, [isOpen, activeTab, loadExtras, git.snapshot?.current]);
 
-  /** This project's availability for one skill (project install) or extension (pin). */
-  const applyProjectScope = async (
-    kind: 'skill' | 'extension',
-    name: string,
-    enabled: boolean
-  ) => {
+  /** This project's opt-in/out for one skill or extension (global state untouched). */
+  const applyProjectScope = async (kind: 'skill' | 'extension', name: string, enabled: boolean) => {
     setScopeBusy(name);
     setScopeMessage(null);
     try {
-      if (kind === 'skill') await setSkillScope(name, enabled ? 'project' : 'global');
-      else await setExtensionScope(name, enabled ? 'project' : 'global');
+      await setProjectScope(kind, name, enabled);
       setScopeMessage(
         zh
-          ? `${name} 已${enabled ? '在本项目启用' : '恢复为全局状态'}，omp 会话已重启。`
-          : `${name} ${enabled ? 'enabled for this project' : 'restored to the global state'}; the omp session was restarted.`
+          ? `${name} 已在本项目${enabled ? '启用' : '停用'}（其它项目不受影响），omp 会话已重启。`
+          : `${name} ${enabled ? 'enabled' : 'disabled'} in this project only; the omp session was restarted.`
       );
       await loadExtras();
     } catch (error) {
@@ -511,12 +506,15 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-3 text-[11px]">
             <p className="text-[10px] text-[#71717a] leading-relaxed">
               {zh
-                ? '这里控制的是「本项目」：技能是否安装在本项目里、扩展是否只在本项目加载。全局开关在「设置」里。'
-                : 'This tab is about the current project: whether a skill is installed here and whether an extension loads only here. Global switches live in Settings.'}
+                ? '每一项只问一件事：在本项目里用不用。全局安装与全局开关在「设置」里管理；这里关掉不会影响其它项目。'
+                : 'Each switch is about this project only: whether the item is used here. Install and global on/off live in Settings; switching off here never affects other projects.'}
             </p>
 
             {scopeMessage && (
-              <div className="px-2 py-1.5 rounded border text-[10px]" style={{ borderColor: `${accentColor}55`, color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+              <div
+                className="px-2 py-1.5 rounded border text-[10px]"
+                style={{ borderColor: `${accentColor}55`, color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}
+              >
                 {scopeMessage}
               </div>
             )}
@@ -524,7 +522,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             <div>
               <div className="flex items-center justify-between text-[10px] font-mono uppercase text-[#71717a] mb-1.5">
                 <span>{zh ? '技能' : 'Skills'}</span>
-                <span>{projectSkills.filter((skill) => skill.source === 'project').length}/{projectSkills.length}</span>
+                <span>
+                  {projectSkills.filter((skill) => skill.projectEnabled).length}/{projectSkills.length}
+                </span>
               </div>
               <div className="space-y-1">
                 {projectSkills.map((skill) => (
@@ -534,25 +534,26 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         {skill.name}
                       </div>
                       <div className="text-[10px] text-[#52525b] truncate">
-                        {skill.source === 'project' ? (zh ? '已安装到本项目' : 'installed here') : zh ? '全局安装' : 'global'}
-                        {skill.enabled ? '' : zh ? ' · 全局已停用' : ' · globally off'}
+                        {skill.source === 'project' ? (zh ? '安装于项目目录' : 'installed here') : zh ? '全局安装' : 'installed globally'}
+                        {' · '}
+                        {skill.enabled ? (zh ? '全局已开启' : 'on globally') : zh ? '全局已停用' : 'off globally'}
                       </div>
                     </div>
                     <ScopeSwitch
                       accentColor={accentColor}
-                      checked={skill.source === 'project'}
+                      checked={skill.projectEnabled}
                       busy={scopeBusy === skill.name}
                       icon={<FolderGit2 className="w-2 h-2" />}
                       title={
-                        skill.source === 'project'
+                        skill.projectEnabled
                           ? zh
-                            ? '本项目已安装 — 点击移回全局（~/.agents/skills）'
-                            : 'Installed for this project — click to move it back to the global scope'
+                            ? '在本项目中启用 — 点击在本项目中停用'
+                            : 'Used in this project — click to switch it off here'
                           : zh
-                          ? '点击安装到本项目（<项目>/.agents/skills）'
-                          : 'Click to install it into this project (<project>/.agents/skills)'
+                          ? '在本项目中停用 — 点击恢复（跟随全局）'
+                          : 'Switched off in this project — click to follow the global state again'
                       }
-                      onToggle={() => void applyProjectScope('skill', skill.name, skill.source !== 'project')}
+                      onToggle={() => void applyProjectScope('skill', skill.name, !skill.projectEnabled)}
                     />
                   </div>
                 ))}
@@ -565,7 +566,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             <div className="pt-2 border-t" style={{ borderColor: theme.border }}>
               <div className="flex items-center justify-between text-[10px] font-mono uppercase text-[#71717a] mb-1.5">
                 <span>{zh ? '扩展' : 'Extensions'}</span>
-                <span>{projectPlugins.filter((plugin) => plugin.scope === 'project').length}/{projectPlugins.length}</span>
+                <span>
+                  {projectPlugins.filter((plugin) => plugin.projectEnabled).length}/{projectPlugins.length}
+                </span>
               </div>
               <div className="space-y-1">
                 {projectPlugins.map((plugin) => (
@@ -575,35 +578,24 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         {plugin.name}
                       </div>
                       <div className="text-[10px] text-[#52525b] truncate">
-                        v{plugin.version} ·{' '}
-                        {plugin.scope === 'project'
-                          ? zh
-                            ? '仅本项目'
-                            : 'project only'
-                          : plugin.scope === 'global'
-                          ? zh
-                            ? '全局启用'
-                            : 'global'
-                          : zh
-                          ? '全局已停用'
-                          : 'off'}
+                        v{plugin.version} · {plugin.enabled ? (zh ? '全局已启用' : 'on globally') : zh ? '全局已停用' : 'off globally'}
                       </div>
                     </div>
                     <ScopeSwitch
                       accentColor={accentColor}
-                      checked={plugin.scope === 'project'}
+                      checked={plugin.projectEnabled}
                       busy={scopeBusy === plugin.name}
                       icon={<FolderGit2 className="w-2 h-2" />}
                       title={
-                        plugin.scope === 'project'
+                        plugin.projectEnabled
                           ? zh
-                            ? '仅本项目加载 — 点击恢复全局状态'
-                            : 'Loaded only here — click to restore the global state'
+                            ? '在本项目中启用 — 点击在本项目中停用'
+                            : 'Used in this project — click to switch it off here'
                           : zh
-                          ? '点击只在本项目加载（omp -e）'
-                          : 'Click to load it only in this project (omp -e)'
+                          ? '在本项目中停用 — 点击恢复（跟随全局）'
+                          : 'Switched off in this project — click to follow the global state again'
                       }
-                      onToggle={() => void applyProjectScope('extension', plugin.name, plugin.scope !== 'project')}
+                      onToggle={() => void applyProjectScope('extension', plugin.name, !plugin.projectEnabled)}
                     />
                   </div>
                 ))}
@@ -615,82 +607,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           </div>
         )}
 
-        {/* ============================= TASKS ============================ */}
-        {activeTab === 'tasks' && (
-          <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-3 text-[11px]">
-            {!work.todos?.length && work.subagents.length === 0 && (
-              <p className="text-[10px] text-[#71717a]">
-                {zh ? '本轮对话还没有任务列表或子代理。' : 'No task list or subagents in this conversation yet.'}
-              </p>
-            )}
-
-            {work.todos && work.todos.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between text-[10px] font-mono uppercase text-[#71717a] mb-1.5">
-                  <span>{zh ? '任务列表' : 'Task list'}</span>
-                  <span>
-                    {work.todos.flatMap((group) => group.tasks).filter((task) => task.status === 'done').length}/
-                    {work.todos.flatMap((group) => group.tasks).length}
-                  </span>
-                </div>
-                {work.todos.map((group, groupIndex) => (
-                  <div key={`${group.phase ?? 'phase'}-${groupIndex}`} className="mb-2 space-y-0.5">
-                    {group.phase && <div className="text-[10px] text-[#52525b] font-mono">{group.phase}</div>}
-                    {group.tasks.map((task, taskIndex) => (
-                      <div key={`${task.text}-${taskIndex}`} className="flex items-start gap-1.5">
-                        <span className="shrink-0 mt-0.5">
-                          {task.status === 'done' ? (
-                            <Check className="w-3 h-3 text-[#34d399]" />
-                          ) : task.status === 'in_progress' ? (
-                            <Loader2 className="w-3 h-3 animate-spin" style={{ color: accentColor }} />
-                          ) : (
-                            <span className="block w-3 h-3 rounded-full border border-[#52525b]" />
-                          )}
-                        </span>
-                        <span className={`${task.status === 'done' ? 'text-[#71717a] line-through' : 'text-[#d4d4d8]'}`}>
-                          {task.text}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {work.subagents.length > 0 && (
-              <div className="pt-2 border-t" style={{ borderColor: theme.border }}>
-                <div className="text-[10px] font-mono uppercase text-[#71717a] mb-1.5">
-                  {zh ? `子代理 ${work.subagents.length}` : `Subagents ${work.subagents.length}`}
-                </div>
-                <div className="space-y-1.5">
-                  {work.subagents.map((agent, index) => (
-                    <div key={`${agent.id ?? index}`} className="rounded border p-2 space-y-0.5" style={{ borderColor: theme.border }}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono truncate" style={{ color: accentColor }}>
-                          {String(agent.name ?? agent.agent ?? agent.id ?? `#${index + 1}`)}
-                        </span>
-                        <span className="text-[10px] text-[#71717a] shrink-0">{String(agent.status ?? 'running')}</span>
-                      </div>
-                      {typeof agent.task === 'string' && agent.task && (
-                        <div className="text-[10px] text-[#a1a1aa]">{agent.task}</div>
-                      )}
-                      <div className="text-[10px] text-[#52525b] font-mono">
-                        {[
-                          typeof agent.model === 'string' ? agent.model : null,
-                          typeof agent.tokens === 'number' ? `${agent.tokens.toLocaleString()} tok` : null,
-                          typeof agent.cost === 'number' ? `$${agent.cost.toFixed(4)}` : null,
-                          typeof agent.durationMs === 'number' ? `${Math.round(agent.durationMs / 1000)}s` : null,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* ============================== GIT ============================== */}
         {activeTab === 'git' && (

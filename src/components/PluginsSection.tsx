@@ -14,7 +14,7 @@ import {
 import { useI18n } from '../context/I18nContext';
 import { useTheme } from '../context/ThemeContext';
 import { ScopeSwitch } from './ScopeSwitch';
-import { fetchPlugins, installPlugin, runOmpCli, setExtensionScope, OmpPluginEntry, type ScopeName } from '../omp/cli';
+import { fetchPlugins, installPlugin, runOmpCli, setExtensionEnabled, OmpPluginEntry } from '../omp/cli';
 
 interface PluginsPayload {
   path: string;
@@ -70,19 +70,17 @@ export const PluginsSection: React.FC = () => {
     }
   };
 
-  /** Where an extension applies: every project, only this workspace, or nowhere. */
-  const handleScope = async (plugin: OmpPluginEntry, scope: ScopeName) => {
+  /** Global enable/disable of one extension (omp's own plugin lock). */
+  const handleToggleEnabled = async (plugin: OmpPluginEntry) => {
     if (actionBusy) return;
     setActionBusy(plugin.name);
     setOutput(null);
     try {
-      await setExtensionScope(plugin.name, scope);
+      await setExtensionEnabled(plugin.name, !plugin.enabled);
       setOutput(
         zh
-          ? `${plugin.name} 已设为${
-              scope === 'global' ? '全局启用' : scope === 'project' ? '仅本项目启用' : '停用'
-            }，omp 会话已重启。`
-          : `${plugin.name} → ${scope}; the omp session was restarted.`
+          ? `${plugin.name} 已全局${plugin.enabled ? '停用' : '启用'}，omp 会话已重启。`
+          : `${plugin.name} ${plugin.enabled ? 'disabled' : 'enabled'} globally; the omp session was restarted.`
       );
       await load();
     } catch (err) {
@@ -267,28 +265,29 @@ export const PluginsSection: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-[10px] font-mono text-[#71717a] uppercase">{zh ? '启用' : 'enabled'}</span>
+                  <span className="text-[10px] font-mono text-[#71717a] uppercase">{zh ? '全局启用' : 'global'}</span>
                   <ScopeSwitch
                     accentColor={accentColor}
-                    checked={plugin.scope !== 'off'}
+                    checked={plugin.enabled}
                     busy={actionBusy === plugin.name}
                     icon={<Globe className="w-2 h-2" />}
                     title={
-                      plugin.scope === 'off'
+                      plugin.enabled
                         ? zh
-                          ? '已停用 — 点击启用（写入 omp 插件锁）'
-                          : 'Disabled — click to enable (writes the omp plugin lock)'
-                        : plugin.scope === 'project'
-                        ? zh
-                          ? '已启用（仅本项目）— 点击停用'
-                          : 'Enabled for this project — click to disable'
+                          ? '已全局启用（omp 插件锁）— 点击全局停用'
+                          : 'Enabled globally (omp plugin lock) — click to disable everywhere'
                         : zh
-                        ? '已全局启用 — 点击停用'
-                        : 'Enabled globally — click to disable'
+                        ? '已全局停用 — 点击全局启用'
+                        : 'Disabled globally — click to enable everywhere'
                     }
-                    onToggle={() => void handleScope(plugin, plugin.scope === 'off' ? 'global' : 'off')}
+                    onToggle={() => void handleToggleEnabled(plugin)}
                   />
                 </div>
+                {!plugin.projectEnabled && (
+                  <div className="text-[10px] text-[#71717a] mb-2">
+                    {zh ? '已在本项目中停用（右侧「扩展」面板可改）' : 'switched off in this project (right panel → Extras)'}
+                  </div>
+                )}
 
                 <div className="pt-2 border-t border-[#1e1e24] flex items-center justify-between text-[11px]">
                   <div className="flex items-center gap-1.5">
