@@ -227,7 +227,7 @@ export const ProvidersView: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: theme.border }}>
         <div>
-          <h2 className="text-base font-semibold tracking-tight text-[#fafafa] flex items-center gap-2">
+          <h2 className="text-sm font-semibold tracking-tight text-[#fafafa] flex items-center gap-2">
             <Cpu className="w-5 h-5" style={{ color: accentColor }} />
             {t.providersTitle}
           </h2>

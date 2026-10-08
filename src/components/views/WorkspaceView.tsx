@@ -1445,7 +1445,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                           </div>
 
                           <div
-                            className={`text-xs leading-relaxed ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
+                            className={`text-[13.5px] leading-[1.7] ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
                           >
                             {/* Agent execution stream: one collapsed fold per turn */}
                             {!isUser && (msg.currentCommand || steps.length > 0 || tools.length > 0) && (

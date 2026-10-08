@@ -5,6 +5,13 @@ Settings (`v<version> · <build date>`).
 
 ## 0.3.5
 
+- Settings: every module title is the same size (`text-sm`), and section titles
+  consistently sit one step below (`text-xs`) — the providers page was the last
+  outlier. Sizes follow the 排版密度 setting (compact 14px root → titles 12.25px,
+  standard 16px → 14px), which is the intended way to scale the whole UI.
+- Conversation text is larger: message bodies render at 13.5px with 1.7 line
+  height instead of inheriting the 10.5px label size.
+
 - Header: the top-left logo image is gone; the wordmark `OMP WebUI` stays (the
   mark is still the favicon and the new-conversation logo).
 
