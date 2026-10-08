@@ -285,7 +285,7 @@ const zhCN: Translations = {
 
   uiThemeStudio: '界面与主题控制台 (UI & Theme Studio)',
   uiThemeDesc: '自定义开发者工作区视觉主题、经典明暗色板、字体与排版密度。',
-  languageSelect: '界面显示语言 (Language)',
+  languageSelect: '界面语言',
   languageSelectDesc: '选择控制台界面语言，支持简体中文与英文无缝切换。',
   simplifiedChinese: '🇨🇳 简体中文 (Chinese)',
   englishUS: '🇺🇸 English (US)',

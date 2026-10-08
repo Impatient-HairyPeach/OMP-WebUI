@@ -3,6 +3,21 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.3
+
+- Header: the search hint reads **⌘/Ctrl+K** (works on macOS and Windows).
+- New conversations: the first quick chip is **挑技能** — it inserts `/skill:` and
+  opens the completion list already filtered to skills.
+- Settings: Chinese labels no longer carry trailing English parentheses
+  (技能库 · 智能体编排 · 提供商与模型 · 主题色调 · 显示与事件流偏好 · 界面语言).
+- Theme settings: the `Active:` badge, the curated palette gallery and the
+  custom-studio blurb are gone; the language choice is a list; the accent
+  section is titled **主题色调** and accepts any colour through a colour picker
+  in addition to the swatches.
+- Logo: the mark was switched to the supplied `logo.webp`, but that file was
+  overwritten while trimming its whitespace and could not be recovered from git,
+  the omp blob store or the image caches — the SVG mark is back in the meantime.
+
 ## 0.3.2
 
 Choice prompts

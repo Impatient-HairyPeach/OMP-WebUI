@@ -74,78 +74,6 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
   const [customTextMuted, setCustomTextMuted] = useState(activeTheme.textMuted || '#a1a1aa');
   const [customAppliedNotice, setCustomAppliedNotice] = useState(false);
 
-  // Quick preset inspirations for custom builder
-  const customPresets = [
-    {
-      name: 'Emerald Matrix',
-      mode: 'dark' as const,
-      bg: '#04130e',
-      card: '#092119',
-      border: '#12382c',
-      accent: '#10b981',
-      secondary: '#34d399',
-      text: '#ecfdf5',
-      textMuted: '#6ee7b7',
-    },
-    {
-      name: 'Royal Indigo',
-      mode: 'dark' as const,
-      bg: '#0c0e1a',
-      card: '#141829',
-      border: '#252b47',
-      accent: '#6366f1',
-      secondary: '#38bdf8',
-      text: '#f8fafc',
-      textMuted: '#94a3b8',
-    },
-    {
-      name: 'Crimson Velvet',
-      mode: 'dark' as const,
-      bg: '#18080c',
-      card: '#251016',
-      border: '#3f1a24',
-      accent: '#f43f5e',
-      secondary: '#fb7185',
-      text: '#fff1f2',
-      textMuted: '#fda4af',
-    },
-    {
-      name: 'Nordic Frost Light',
-      mode: 'light' as const,
-      bg: '#f1f5f9',
-      card: '#ffffff',
-      border: '#cbd5e1',
-      accent: '#0284c7',
-      secondary: '#0d9488',
-      text: '#0f172a',
-      textMuted: '#64748b',
-    },
-    {
-      name: 'Warm Amber Parchment',
-      mode: 'light' as const,
-      bg: '#fdfbf7',
-      card: '#f5f0e6',
-      border: '#e6dac8',
-      accent: '#d97706',
-      secondary: '#059669',
-      text: '#451a03',
-      textMuted: '#78350f',
-    },
-  ];
-
-  const handleApplyPresetToBuilder = (p: typeof customPresets[0]) => {
-    setCustomName(p.name);
-    setCustomMode(p.mode);
-    setCustomBg(p.bg);
-    setCustomCard(p.card);
-    setCustomBorder(p.border);
-    setCustomAccent(p.accent);
-    setCustomSecondary(p.secondary);
-    setCustomTextColor(p.text);
-    setCustomTextMuted(p.textMuted);
-  };
-
-  /** Apply the custom studio: persist its tokens and switch to the custom theme. */
   const handleSaveAndApplyCustomTheme = () => {
     saveCustomPalette({
       mode: customMode === 'light' ? 'light' : 'dark',
@@ -185,20 +113,6 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
           </p>
         </div>
 
-        {/* Current Active Badge */}
-        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-[#121215] border border-[#27272a] text-xs font-mono">
-          <span className="text-[10px] text-[#71717a] uppercase">Active:</span>
-          <div className="flex items-center gap-1.5 font-semibold text-[#fafafa]">
-            <span
-              className="w-2.5 h-2.5 rounded-full"
-              style={{ backgroundColor: customAccent }}
-            />
-            <span>{activeTheme.name}</span>
-          </div>
-          <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#18181b] text-[#a1a1aa] border border-[#27272a]">
-            {activeTheme.mode === 'light' ? 'Light' : 'Dark'} · {uiDensity}
-          </span>
-        </div>
       </div>
 
       {/* ======================================================== */}
@@ -296,43 +210,20 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setLanguage('zh-CN')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-medium transition-all cursor-pointer ${
-                language === 'zh-CN'
-                  ? 'font-semibold shadow-sm'
-                  : 'text-[#71717a] hover:text-[#a1a1aa]'
-              }`}
-              style={{
-                backgroundColor: language === 'zh-CN' ? (activeTheme.mode === 'light' ? '#f1f5f9' : '#18181b') : 'transparent',
-                borderColor: language === 'zh-CN' ? customAccent : activeTheme.border,
-                color: language === 'zh-CN' ? customAccent : undefined,
-              }}
-            >
-              <span>🇨🇳 简体中文</span>
-              {language === 'zh-CN' && <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setLanguage('en-US')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-medium transition-all cursor-pointer ${
-                language === 'en-US'
-                  ? 'font-semibold shadow-sm'
-                  : 'text-[#71717a] hover:text-[#a1a1aa]'
-              }`}
-              style={{
-                backgroundColor: language === 'en-US' ? (activeTheme.mode === 'light' ? '#f1f5f9' : '#18181b') : 'transparent',
-                borderColor: language === 'en-US' ? customAccent : activeTheme.border,
-                color: language === 'en-US' ? customAccent : undefined,
-              }}
-            >
-              <span>🇺🇸 English (US)</span>
-              {language === 'en-US' && <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
-            </button>
-          </div>
+          <select
+            value={language}
+            onChange={(event) => setLanguage(event.target.value === 'en-US' ? 'en-US' : 'zh-CN')}
+            aria-label={t.languageSelect}
+            className="h-8 px-2.5 rounded border text-xs font-medium cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
+            style={{
+              backgroundColor: activeTheme.mode === 'light' ? '#ffffff' : '#121215',
+              borderColor: activeTheme.border,
+              color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa',
+            }}
+          >
+            <option value="zh-CN">简体中文</option>
+            <option value="en-US">English (US)</option>
+          </select>
         </div>
       </div>
 
@@ -344,39 +235,11 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
         className="p-4 rounded-lg border space-y-4 transition-colors"
         style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.border }}
       >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: activeTheme.border }}>
-          <div>
-            <h3 className="text-xs font-semibold flex items-center gap-1.5" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
-              <Palette className="w-4 h-4" style={{ color: customAccent }} />
-              {t.customTheme}
-            </h3>
-            <p className="text-[11px] mt-0.5" style={{ color: activeTheme.mode === 'light' ? '#64748b' : '#71717a' }}>
-              {t.customThemeDesc}
-            </p>
-          </div>
-
-          {/* Quick preset templates */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] font-mono" style={{ color: activeTheme.mode === 'light' ? '#64748b' : '#71717a' }}>
-              {t.themeQuickPresets}:
-            </span>
-            {customPresets.map((preset) => (
-              <button
-                key={preset.name}
-                type="button"
-                onClick={() => handleApplyPresetToBuilder(preset)}
-                className="px-2 py-1 rounded text-[10px] font-mono border transition-all cursor-pointer hover:scale-105"
-                style={{
-                  backgroundColor: preset.card,
-                  borderColor: preset.border,
-                  color: preset.accent,
-                }}
-                title={`Apply ${preset.name} palette to customizer`}
-              >
-                {preset.name}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-col gap-1 border-b pb-3" style={{ borderColor: activeTheme.border }}>
+          <h3 className="text-xs font-semibold flex items-center gap-1.5" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+            <Palette className="w-4 h-4" style={{ color: customAccent }} />
+            {t.customTheme}
+          </h3>
         </div>
 
         {/* Custom Theme Inputs Grid */}
@@ -705,6 +568,27 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
                 </button>
               );
             })}
+
+            {/* Any colour, not just the curated swatches */}
+            <label
+              className={`p-2 rounded border flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
+                ACCENT_SWATCHES.some((swatch) => swatch.color.toLowerCase() === customAccent.toLowerCase())
+                  ? 'bg-[#121215] border-[#27272a] hover:border-[#3f3f46]'
+                  : 'bg-[#18181b] border-white/40 shadow-sm'
+              }`}
+              title={language === 'zh-CN' ? '自定义颜色' : 'Custom colour'}
+            >
+              <input
+                type="color"
+                value={customAccent}
+                onChange={(event) => handleChooseAccent(event.target.value)}
+                className="w-4 h-4 rounded-full border border-black/30 bg-transparent cursor-pointer p-0"
+                aria-label={language === 'zh-CN' ? '自定义主题色调' : 'Custom accent colour'}
+              />
+              <span className="text-[10px] text-[#a1a1aa] truncate max-w-full font-mono">
+                {language === 'zh-CN' ? '自定义' : 'custom'}
+              </span>
+            </label>
           </div>
         </div>
 
