@@ -282,6 +282,37 @@ export const checkoutGitBranch = (branch: string) =>
 export const commitGitChanges = (message: string) =>
   postJson<GitSnapshot & { ok: boolean; output: string }>("/api/git/commit", { message });
 
+export type ProviderUsageWindowId = "5h" | "7d" | "30d" | "monthly" | string;
+
+export interface ProviderUsageLimit {
+  id?: string;
+  label?: string;
+  status?: string;
+  scope?: { provider?: string; windowId?: string; shared?: boolean };
+  window?: { id?: string; label?: string; resetsAt?: number; durationMs?: number };
+  amount?: { used?: number; usedFraction?: number; remainingFraction?: number; unit?: string };
+}
+
+export interface ProviderUsageReport {
+  provider: string;
+  fetchedAt?: number;
+  limits?: ProviderUsageLimit[];
+  metadata?: Record<string, unknown>;
+  resetCredits?: number;
+}
+
+export interface ProviderUsagePayload {
+  generatedAt?: number;
+  reports: ProviderUsageReport[];
+  accountsWithoutUsage?: unknown[];
+  disabledCredentials?: unknown[];
+  capacity?: Record<string, Array<{ window: string; accounts: number; usedAccounts: number; remainingAccounts: number }>>;
+}
+
+/** Real quota windows from omp (`omp usage --json --redact`), cached server side for 5 minutes. */
+export const fetchProviderUsage = (force = false) =>
+  getJson<ProviderUsagePayload>(`/api/omp/provider-usage${force ? "?force=1" : ""}`);
+
 export const fetchMcpServers = () => getJson<{ path: string; exists: boolean; servers: OmpMcpServer[]; raw: string }>("/api/omp/mcp");
 
 /** Reveal one of omp's own configuration files in the OS file manager. */

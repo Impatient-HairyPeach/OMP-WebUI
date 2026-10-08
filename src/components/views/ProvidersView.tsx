@@ -17,8 +17,8 @@ import {
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
 import { ScopeSwitch } from '../ScopeSwitch';
-import { fetchModelScope, fetchUsage, setModelScope } from '../../omp/cli';
-import type { OmpModelScope, OmpUsagePayload } from '../../omp/cli';
+import { fetchModelScope, fetchProviderUsage, fetchUsage, setModelScope } from '../../omp/cli';
+import type { OmpModelScope, OmpUsagePayload, ProviderUsageReport } from '../../omp/cli';
 import { ModelsView, fetchModelCatalog } from './ModelsView';
 import type { CatalogModel } from './ModelsView';
 
@@ -39,8 +39,35 @@ const formatCost = (n?: number): string => {
 
 const basename = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() || p;
 
+const WINDOW_LABEL: Record<string, { en: string; zh: string }> = {
+  '5h': { en: '5-hour window', zh: '5 小时窗口' },
+  '7d': { en: 'Weekly window', zh: '每周窗口' },
+  '30d': { en: '30-day window', zh: '30 天窗口' },
+  monthly: { en: 'Monthly window', zh: '每月窗口' },
+  daily: { en: 'Daily window', zh: '每日窗口' },
+};
+
+const windowLabel = (id: string | undefined, fallback: string | undefined, zh: boolean): string => {
+  const key = (id ?? '').toLowerCase();
+  const known = WINDOW_LABEL[key];
+  if (known) return zh ? known.zh : known.en;
+  return fallback ?? (zh ? '额度窗口' : 'limit window');
+};
+
+/** "3h 12m" until the window resets. */
+const untilReset = (resetsAt: number | undefined): string | null => {
+  if (!resetsAt || !Number.isFinite(resetsAt)) return null;
+  const minutes = Math.max(0, Math.round((resetsAt - Date.now()) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ${minutes % 60}m`;
+  return `${Math.round(hours / 24)}d`;
+};
+
 interface ProviderRow {
   id: string;
+  /** Quota windows omp reports for this provider, when it exposes any. */
+  usage?: ProviderUsageReport;
   models: Array<{ id: string; name?: string; api?: string }>;
   apis: string[];
   baseUrl?: string;
@@ -59,6 +86,8 @@ export const ProvidersView: React.FC = () => {
   const [usage, setUsage] = useState<OmpUsagePayload | null>(null);
   const [catalog, setCatalog] = useState<CatalogModel[] | null>(null);
   const [scope, setScope] = useState<OmpModelScope | null>(null);
+  /** Real quota windows reported by omp for the providers that expose them. */
+  const [providerUsage, setProviderUsage] = useState<ProviderUsageReport[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'providers' | 'models'>('providers');
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
@@ -68,7 +97,7 @@ export const ProvidersView: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.allSettled([fetchUsage(), fetchModelCatalog(), fetchModelScope()]).then(([u, c, s]) => {
+    Promise.allSettled([fetchUsage(), fetchModelCatalog(), fetchModelScope(), fetchProviderUsage()]).then(([u, c, s, p]) => {
       if (cancelled) return;
       if (u.status === 'fulfilled') setUsage(u.value);
       else setLoadError(u.reason instanceof Error ? u.reason.message : String(u.reason));
@@ -76,6 +105,8 @@ export const ProvidersView: React.FC = () => {
       else setLoadError((prev) => prev ?? (c.reason instanceof Error ? c.reason.message : String(c.reason)));
       if (s.status === 'fulfilled') setScope(s.value);
       else setLoadError((prev) => prev ?? (s.reason instanceof Error ? s.reason.message : String(s.reason)));
+      // Quota windows are optional: a provider simply may not report any.
+      setProviderUsage(p.status === 'fulfilled' ? p.value.reports : []);
     });
     return () => {
       cancelled = true;
@@ -117,6 +148,11 @@ export const ProvidersView: React.FC = () => {
       }
     }
 
+    for (const report of providerUsage ?? []) {
+      const row = ensure(report.provider);
+      row.usage = report;
+    }
+
     for (const u of usage?.byModel ?? []) {
       const row = ensure(u.provider);
       row.cost += u.cost;
@@ -127,7 +163,7 @@ export const ProvidersView: React.FC = () => {
     }
 
     return [...rows.values()].sort((a, b) => b.cost - a.cost);
-  }, [catalog, usage, scope]);
+  }, [catalog, usage, scope, providerUsage]);
 
   // --- model scope (omp's native enabledModels / disabledProviders) ---
   const disabledProviders = useMemo(() => new Set(scope?.disabledProviders ?? []), [scope]);
@@ -513,13 +549,88 @@ export const ProvidersView: React.FC = () => {
                   <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCompact(p.cacheRead) : '—'}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? '可用余额' : 'Balance'}</div>
-                  <div className="text-sm font-semibold text-[#71717a]">—</div>
-                  <div className="text-[9px] text-[#52525b] mt-0.5">
-                    {zh ? '提供商未暴露余额接口' : 'no balance API exposed'}
-                  </div>
+                  <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? '额度用量' : 'Quota used'}</div>
+                  {(() => {
+                    const limits = p.usage?.limits ?? [];
+                    const worst = limits.reduce<typeof limits[number] | null>(
+                      (acc, limit) =>
+                        (limit.amount?.usedFraction ?? 0) > (acc?.amount?.usedFraction ?? -1) ? limit : acc,
+                      null
+                    );
+                    if (!worst) {
+                      return (
+                        <>
+                          <div className="text-sm font-semibold text-[#71717a]">—</div>
+                          <div className="text-[9px] text-[#52525b] mt-0.5">
+                            {zh ? 'omp 未报告该提供商的额度' : 'omp reports no quota for this provider'}
+                          </div>
+                        </>
+                      );
+                    }
+                    const percent = ((worst.amount?.usedFraction ?? 0) * 100);
+                    const reset = untilReset(worst.window?.resetsAt);
+                    return (
+                      <>
+                        <div
+                          className="text-sm font-semibold"
+                          style={{ color: percent >= 90 ? '#ef4444' : percent >= 70 ? '#f59e0b' : '#34d399' }}
+                        >
+                          {percent.toFixed(0)}%
+                        </div>
+                        <div className="text-[9px] text-[#52525b] mt-0.5 truncate" title={worst.label ?? worst.window?.label}>
+                          {windowLabel(worst.window?.id ?? worst.scope?.windowId, worst.window?.label ?? worst.label, zh)}
+                          {reset ? ` · ${reset}` : ''}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
+
+              {/* Real quota windows (5h / weekly / monthly / 30d) from omp */}
+              {(p.usage?.limits?.length ?? 0) > 0 && (
+                <div className="p-3 rounded bg-[#121215] border border-[#27272a] space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] text-[#71717a] uppercase">
+                    <span>{zh ? '额度窗口' : 'Quota windows'}</span>
+                    <span className="normal-case text-[#52525b]">
+                      {[
+                        typeof p.usage?.metadata?.planType === 'string' ? String(p.usage.metadata.planType) : null,
+                        typeof p.usage?.metadata?.email === 'string' ? String(p.usage.metadata.email) : null,
+                        typeof p.usage?.resetCredits === 'number' ? `${p.usage.resetCredits} ${zh ? '次重置额度' : 'reset credits'}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  </div>
+                  {p.usage!.limits!.map((limit, index) => {
+                    const used = (limit.amount?.usedFraction ?? 0) * 100;
+                    const reset = untilReset(limit.window?.resetsAt);
+                    return (
+                      <div key={limit.id ?? index} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
+                          <span className="text-[#a1a1aa] truncate">
+                            {windowLabel(limit.window?.id ?? limit.scope?.windowId, limit.window?.label ?? limit.label, zh)}
+                          </span>
+                          <span className="text-[#71717a] shrink-0">
+                            {used.toFixed(0)}% {zh ? '已用' : 'used'}
+                            {reset ? ` · ${zh ? '还有' : 'resets in'} ${reset}` : ''}
+                            {limit.status && limit.status !== 'ok' ? ` · ${limit.status}` : ''}
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-[#27272a] overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.min(100, Math.max(2, used))}%`,
+                              backgroundColor: used >= 90 ? '#ef4444' : used >= 70 ? '#f59e0b' : accentColor,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Expandable model list with per-model toggles */}
               {(() => {

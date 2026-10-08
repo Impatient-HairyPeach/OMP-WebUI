@@ -46,6 +46,9 @@ export const COMPOSER_BOX: PanelSizeConfig & { storageKey: string } = {
 /** Project folders expanded in the session list (JSON array of directory paths). */
 export const EXPANDED_PROJECTS_KEY = 'omp-studio:expanded-projects';
 
+/** Project folders removed from the session list (sessions stay on disk). */
+export const HIDDEN_PROJECTS_KEY = 'omp-studio:hidden-projects';
+
 export function clampPanelSize(value: number, config: PanelSizeConfig): number {
   if (!Number.isFinite(value)) return config.defaultSize;
   return Math.min(config.max, Math.max(config.min, Math.round(value)));
@@ -99,4 +102,34 @@ export function saveExpandedProjects(keys: Iterable<string>): void {
   } catch {
     // storage unavailable — the preference simply won't persist
   }
+}
+
+function readKeys(key: string): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((value): value is string => typeof value === 'string').map(comparableDirKey);
+  } catch {
+    return [];
+  }
+}
+
+function writeKeys(key: string, values: Iterable<string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify([...values]));
+  } catch {
+    // storage unavailable — the preference simply won't persist
+  }
+}
+
+export function loadHiddenProjects(): string[] {
+  return readKeys(HIDDEN_PROJECTS_KEY);
+}
+
+export function saveHiddenProjects(keys: Iterable<string>): void {
+  writeKeys(HIDDEN_PROJECTS_KEY, keys);
 }

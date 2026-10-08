@@ -87,6 +87,11 @@ export interface OmpSessionApi {
   searchSessionContent: (query: string) => Promise<Array<{ path: string; snippet: string; hits: number }>>;
 }
 
+/** `auto` is a valid thinking level for every model; keep it first. */
+function withAuto(levels: string[]): string[] {
+  return ["auto", ...levels.filter((level) => level !== "auto")];
+}
+
 const DIALOG_METHODS: ReadonlyArray<OmpDialogRequest["method"]> = ["confirm", "select", "input", "editor", "ask"];
 
 function isDialogMethod(method: OmpExtensionUIRequest["method"]): method is OmpDialogRequest["method"] {
@@ -203,7 +208,16 @@ export function useOmpSession(): OmpSessionApi {
     const modelData = modelResponse.data as { models?: OmpModelOption[] } | undefined;
     const levelData = levelResponse.data as { levels?: string[] } | undefined;
     if (modelData?.models) setModels(modelData.models);
-    if (levelData?.levels) setThinkingLevels(levelData.levels);
+    if (levelData?.levels) setThinkingLevels(withAuto(levelData.levels));
+  }, []);
+
+  /** omp reports the levels the *active model* supports; `auto` is always valid. */
+  const refreshThinkingLevels = useCallback(async () => {
+    const bridge = bridgeRef.current;
+    if (!bridge) return;
+    const response = await bridge.command({ type: "get_available_thinking_levels" });
+    const data = response.data as { levels?: string[] } | undefined;
+    if (data?.levels) setThinkingLevels(withAuto(data.levels));
   }, []);
 
   const refreshDiffs = useCallback(async () => {
@@ -547,10 +561,12 @@ export function useOmpSession(): OmpSessionApi {
   const setModel = useCallback(
     async (provider: string, modelId: string) => {
       await bridgeRef.current?.command({ type: "set_model", provider, modelId });
-      // The switch is only "done" once the session state reports the new model.
+      // The switch is only "done" once the session state reports the new model,
+      // and the selectable thinking levels follow the new model's capabilities.
       await refreshState();
+      await refreshThinkingLevels();
     },
-    [refreshState]
+    [refreshState, refreshThinkingLevels]
   );
 
   const setThinkingLevel = useCallback(async (level: string) => {

@@ -11,3 +11,6 @@ coverage/
 # project-scope extension pins are machine state, not app source.
 .agents/
 .omp/
+
+# Local safety copies of user-supplied art (never committed).
+.assets-backup/

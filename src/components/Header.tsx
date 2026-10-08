@@ -9,7 +9,6 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 import type { GitRepoApi } from '../hooks/useGitRepo';
-import { OmpLogo } from './OmpLogo';
 
 interface HeaderProps {
   activeTab: TopNavTab;
@@ -78,7 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => onTabChange('Workspace')}
           title="OMP WebUI"
         >
-          <OmpLogo className="w-5 h-4 shrink-0" style={{ color: theme.text || '#fafafa' }} />
+          <img src={theme.mode === 'light' ? '/logo-light.png' : '/logo-dark.png'} alt="omp" className="h-[18px] w-auto shrink-0" />
           <span
             className="font-semibold text-[13px] tracking-[-0.01em]"
             style={{ color: theme.text || '#fafafa' }}
@@ -108,9 +107,6 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-2 truncate">
             <Search className="w-3.5 h-3.5 shrink-0 text-[#71717a] group-hover:text-[#a1a1aa]" />
             <span className="truncate">{t.searchPlaceholder}</span>
-          </div>
-          <div className="flex items-center gap-0.5 text-[10px] font-mono text-[#71717a] bg-[#18181b] border border-[#27272a] px-1 py-0.2 rounded">
-            <span>⌘/Ctrl+K</span>
           </div>
         </button>
       </div>

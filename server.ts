@@ -1810,6 +1810,40 @@ app.post("/api/project/scope", async (req, res) => {
   }
 });
 
+/** Real provider quota/usage windows, straight from omp's own `usage --json`.
+ *  Reports the 5h / weekly / monthly / 30d windows, plan type and reset credits
+ *  for the providers that expose them (opencode zen, OpenAI accounts, …). */
+let providerUsageCache: { at: number; payload: Json } | null = null;
+let providerUsageInFlight: Promise<Json> | null = null;
+
+app.get("/api/omp/provider-usage", async (req, res) => {
+  const force = req.query.force === "1";
+  if (!force && providerUsageCache && Date.now() - providerUsageCache.at < 5 * 60_000) {
+    res.json(providerUsageCache.payload);
+    return;
+  }
+  try {
+    if (!providerUsageInFlight) {
+      providerUsageInFlight = (async () => {
+        try {
+          const raw = await runOmpCli(["usage", "--json", "--redact"], { timeoutMs: 40_000 });
+          const parsed = JSON.parse(raw) as Json;
+          providerUsageCache = { at: Date.now(), payload: parsed };
+          return parsed;
+        } finally {
+          providerUsageInFlight = null;
+        }
+      })();
+    }
+    res.json(await providerUsageInFlight);
+  } catch (error) {
+    res.status(502).json({
+      error: String(error instanceof Error ? error.message : error).slice(0, 1000),
+      code: "usage_unavailable",
+    });
+  }
+});
+
 /** Workspace file list for @-completion (tracked files first, then a shallow walk). */
 app.get("/api/omp/files", async (req, res) => {
   const query = String(req.query.q ?? "").toLowerCase();

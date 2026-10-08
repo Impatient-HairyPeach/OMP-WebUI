@@ -104,7 +104,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#27272a] pb-4">
         <div>
-          <h2 className="text-base font-semibold tracking-tight text-[#fafafa] flex items-center gap-2">
+          <h2 className="text-sm font-semibold tracking-tight text-[#fafafa] flex items-center gap-2">
             <Palette className="w-5 h-5 text-[#a78bfa]" style={{ color: customAccent }} />
             {t.uiThemeStudio}
           </h2>
@@ -127,7 +127,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
             <div className="text-xs font-semibold" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
               {language === 'zh-CN' ? '配色方案 (Palette)' : 'Palette'}
             </div>
-            <div className="text-[11px] text-[#71717a] mt-0.5">
+            <div className="text-[10px] text-[#71717a] mt-0.5">
               {language === 'zh-CN'
                 ? '一个选择决定整套界面的底色、边框、文字层级与强调色；标记本身不写死颜色。'
                 : 'One choice drives every surface, border, text tier and accent — markup never hardcodes a colour.'}
@@ -146,7 +146,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
                 key={id}
                 type="button"
                 onClick={() => setPaletteId(id)}
-                className={`flex items-center justify-between gap-2 p-2.5 rounded border text-[11px] transition-colors cursor-pointer ${
+                className={`flex items-center justify-between gap-2 p-2.5 rounded border text-[10px] transition-colors cursor-pointer ${
                   isActive ? 'font-semibold' : ''
                 }`}
                 style={{
@@ -184,7 +184,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
         </div>
 
         {paletteId === 'custom' && (
-          <p className="text-[11px] text-[#71717a]">
+          <p className="text-[10px] text-[#71717a]">
             {language === 'zh-CN'
               ? `自定义沿用「${resolvedPalette === 'light' ? '浅色' : '深色'}」的底色，强调色取下方所选颜色。`
               : `Custom keeps the ${resolvedPalette === 'light' ? 'light' : 'dark'} base and uses the accent chosen below.`}
@@ -205,7 +205,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
               <Globe className="w-4 h-4" style={{ color: customAccent }} />
               <span>{t.languageSelect}</span>
             </div>
-            <p className="text-[11px] mt-0.5" style={{ color: activeTheme.mode === 'light' ? '#64748b' : '#71717a' }}>
+            <p className="text-[10px] mt-0.5" style={{ color: activeTheme.mode === 'light' ? '#64748b' : '#71717a' }}>
               {t.languageSelectDesc}
             </p>
           </div>
@@ -247,7 +247,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
           {/* Col 1: Basic Info & Mode */}
           <div className="space-y-3">
             <div>
-              <label className="block text-[11px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
+              <label className="block text-[10px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
                 {t.customThemeName}
               </label>
               <input
@@ -265,7 +265,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
             </div>
 
             <div>
-              <label className="block text-[11px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
+              <label className="block text-[10px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
                 {t.customBaseMode}
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -304,7 +304,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
           {/* Col 2: Surfaces & Borders */}
           <div className="space-y-3">
             <div>
-              <label className="block text-[11px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
+              <label className="block text-[10px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
                 {t.customBgColor}
               </label>
               <div className="flex items-center gap-2">
@@ -329,7 +329,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
             </div>
 
             <div>
-              <label className="block text-[11px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
+              <label className="block text-[10px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
                 {t.customCardColor}
               </label>
               <div className="flex items-center gap-2">
@@ -354,7 +354,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
             </div>
 
             <div>
-              <label className="block text-[11px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
+              <label className="block text-[10px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
                 {t.customBorderColor}
               </label>
               <div className="flex items-center gap-2">
@@ -382,7 +382,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
           {/* Col 3: Accents & Text Colors */}
           <div className="space-y-3">
             <div>
-              <label className="block text-[11px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
+              <label className="block text-[10px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
                 {t.customAccentColor}
               </label>
               <div className="flex items-center gap-2">
@@ -407,7 +407,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
             </div>
 
             <div>
-              <label className="block text-[11px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
+              <label className="block text-[10px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
                 {t.customSecondaryColor}
               </label>
               <div className="flex items-center gap-2">
@@ -432,7 +432,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
             </div>
 
             <div>
-              <label className="block text-[11px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
+              <label className="block text-[10px] font-medium mb-1" style={{ color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}>
                 {t.customTextColor}
               </label>
               <div className="flex items-center gap-2">
@@ -537,7 +537,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
               {customAccent}
             </span>
           </div>
-          <p className="text-[11px] text-[#71717a]">
+          <p className="text-[10px] text-[#71717a]">
             {t.accentTintDesc}
           </p>
 
@@ -601,7 +601,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
 
           {/* Density Selection */}
           <div>
-            <div className="text-[11px] text-[#a1a1aa] mb-1.5 font-medium">{t.uiDensityLabel}</div>
+            <div className="text-[10px] text-[#a1a1aa] mb-1.5 font-medium">{t.uiDensityLabel}</div>
             <div className="grid grid-cols-3 gap-2">
               {(['compact', 'standard', 'relaxed'] as const).map((density) => (
                 <button
@@ -627,14 +627,14 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
 
           {/* Font Selection */}
           <div className="pt-2 border-t border-[#1e1e24]">
-            <div className="text-[11px] text-[#a1a1aa] mb-1.5 font-medium">{t.editorFontLabel}</div>
+            <div className="text-[10px] text-[#a1a1aa] mb-1.5 font-medium">{t.editorFontLabel}</div>
             <div className="grid grid-cols-2 gap-2">
               {['System Mono', 'Consolas', 'Cascadia Mono', 'Menlo', 'Courier New'].map((font) => (
                 <button
                   key={font}
                   type="button"
                   onClick={() => setEditorFont(font)}
-                  className={`px-2.5 py-1.5 rounded border text-[11px] font-mono transition-colors cursor-pointer truncate ${
+                  className={`px-2.5 py-1.5 rounded border text-[10px] font-mono transition-colors cursor-pointer truncate ${
                     editorFont === font
                       ? 'bg-[#18181b] text-[#fafafa] border-[#a78bfa] font-semibold'
                       : 'bg-[#121215] text-[#71717a] border-[#27272a] hover:text-[#a1a1aa]'
@@ -700,7 +700,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
 
           {/* Mock Code Block */}
           <div
-            className="p-3 rounded border text-[11px] leading-relaxed"
+            className="p-3 rounded border text-[10px] leading-relaxed"
             style={{
               backgroundColor: activeTheme.mode === 'light' ? '#f1f5f9' : '#050507',
               borderColor: activeTheme.border,
@@ -768,7 +768,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
           <div className="flex items-center justify-between pt-1">
             <div>
               <div className="text-xs font-medium text-[#fafafa]">{t.toggleAutoScroll}</div>
-              <div className="text-[11px] text-[#71717a]">
+              <div className="text-[10px] text-[#71717a]">
                 {t.toggleAutoScrollDesc}
               </div>
             </div>
@@ -793,7 +793,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
           <div className="flex items-center justify-between pt-3">
             <div>
               <div className="text-xs font-medium text-[#fafafa]">{t.toggleLatency}</div>
-              <div className="text-[11px] text-[#71717a]">
+              <div className="text-[10px] text-[#71717a]">
                 {t.toggleLatencyDesc}
               </div>
             </div>
@@ -818,7 +818,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
           <div className="flex items-center justify-between pt-3">
             <div>
               <div className="text-xs font-medium text-[#fafafa]">{t.toggleGlow}</div>
-              <div className="text-[11px] text-[#71717a]">
+              <div className="text-[10px] text-[#71717a]">
                 {t.toggleGlowDesc}
               </div>
             </div>

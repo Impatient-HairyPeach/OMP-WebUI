@@ -3,6 +3,35 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.5
+
+- Providers: the balance slot is real now. `GET /api/omp/provider-usage` runs
+  omp's own `omp usage --json --redact` (cached five minutes) and each provider
+  card shows every quota window omp reports — 5-hour / weekly / monthly / 30-day
+  — with used percentage, remaining time until reset, plan type, the redacted
+  account and reset credits (opencode zen, OpenAI/Codex accounts, …). Providers
+  that report nothing say so honestly instead of "no balance API".
+- Session sidebar: project folders can be removed from the list (hover the
+  folder row → eye-off). The removal is a UI preference stored in
+  `omp-studio:hidden-projects`; session files stay on disk, a "Removed projects"
+  row puts them back, and opening one of its sessions restores it automatically.
+
+## 0.3.4
+
+- Logo: the full `logo.png` lockup (prompt ring + wordmark) is used in the header
+  and on new conversations, with per-theme variants derived from it
+  (`logo-dark.png` light glyphs / `logo-light.png` navy glyphs, transparent) and
+  `logo.png` as the favicon. The supplied original is kept in `.assets-backup/`
+  (git-ignored) and every derived file is written to a new path.
+- New conversations: the quick chips are plain commands (`/skill` `/todo`
+  `/compact` `/context`) — no descriptions; `/skill` still opens the
+  skill-filtered completion.
+- Header: the global-search shortcut hint is gone.
+- Thinking level: the picker lists the levels omp reports for the active model
+  and refreshes when the model changes, with `auto` always available first.
+- Settings: Chinese strings no longer carry English parentheses anywhere, and
+  the theme module now uses the same type scale as the other settings pages.
+
 ## 0.3.3
 
 - Header: the search hint reads **⌘/Ctrl+K** (works on macOS and Windows).

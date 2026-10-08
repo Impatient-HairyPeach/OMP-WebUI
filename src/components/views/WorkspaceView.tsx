@@ -31,6 +31,8 @@ import {
   RotateCcw,
   Square,
   ChevronsDown,
+  Eye,
+  EyeOff,
   Brain,
   Gauge,
   Layers,
@@ -44,7 +46,6 @@ import { DiffViewer } from '../DiffViewer';
 import { MessageActivity } from '../MessageActivity';
 import { ExtensionRequest } from '../ExtensionRequest';
 import { TaskHud } from '../TaskHud';
-import { OmpLogo } from '../OmpLogo';
 import { PanelResizeHandle } from '../PanelResizeHandle';
 import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, fetchSubagents } from '../../omp/cli';
 import type { SubagentRow } from '../../omp/cli';
@@ -58,7 +59,9 @@ import {
   SESSION_PANEL,
   comparableDirKey,
   loadExpandedProjects,
+  loadHiddenProjects,
   saveExpandedProjects,
+  saveHiddenProjects,
 } from '../../lib/panelLayout';
 import {
   SLASH_CATEGORY_LABEL,
@@ -117,6 +120,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [archivedExpanded, setArchivedExpanded] = useState(false);
   /** Project folders the session list has open; only the active project starts open. */
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set(loadExpandedProjects()));
+  /** Project folders removed from the list (the sessions stay on disk). */
+  const [hiddenProjects, setHiddenProjects] = useState<Set<string>>(() => new Set(loadHiddenProjects()));
+  const [hiddenExpanded, setHiddenExpanded] = useState(false);
 
   // Resizable surfaces: session list (x), composer textarea (y).
   const sessionPanel = useResizablePanel({
@@ -164,10 +170,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     void recent();
   }, [recent]);
 
-  // Which project folders are open is a UI preference, kept across reloads.
+  // Which project folders are open (and which are removed) are UI preferences.
   useEffect(() => {
     saveExpandedProjects(expandedProjects);
   }, [expandedProjects]);
+
+  useEffect(() => {
+    saveHiddenProjects(hiddenProjects);
+  }, [hiddenProjects]);
 
   // Opening a session (or switching workspace) opens that project's folder.
   useEffect(() => {
@@ -175,6 +185,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     if (!activeDir) return;
     const key = comparableDirKey(activeDir);
     setExpandedProjects((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+    setHiddenProjects((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
   }, [omp.resumePath, omp.sessions, omp.workspace]);
 
   // The diffs view shows the real working-tree diff of the agent's workspace.
@@ -202,6 +218,20 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       cancelled = true;
     };
   }, [sessionViewMode, omp.workspace]);
+
+  /** Remove a project folder from the list / put it back (sessions are untouched). */
+  const hideProject = (key: string) => {
+    setHiddenProjects((prev) => new Set(prev).add(key));
+    onDispatchLog('INFO', `sessions: hid project folder from the list (sessions kept on disk)`);
+  };
+
+  const unhideProject = (key: string) => {
+    setHiddenProjects((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  };
 
   const toggleProjectExpanded = (key: string) => {
     setExpandedProjects((prev) => {
@@ -322,8 +352,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       if (bucket) bucket.push(session);
       else groups.set(session.cwd, [session]);
     }
-    return [...groups.entries()];
-  }, [omp.sessions, searchHistory, contentHits]);
+    return [...groups.entries()].filter(([cwd]) => !hiddenProjects.has(comparableDirKey(cwd || '(unknown)')));
+  }, [omp.sessions, searchHistory, contentHits, hiddenProjects]);
 
   const modelGroups = useMemo(() => {
     const groups = new Map<string, OmpModelOption[]>();
@@ -680,19 +710,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   }, [transcript.length, omp.resumePath, sessionViewMode, omp.isStreaming, atBottom]);
 
   /** A few slash commands worth one click on an empty conversation (only real ones). */
-  const QUICK_COMMANDS: Array<{ name: string; labelZh: string; labelEn: string }> = [
-    // Labels follow omp's own wording; the tooltip is omp's own description.
-    { name: 'skill', labelZh: '挑技能', labelEn: 'pick a skill' },
-    { name: 'todo', labelZh: '任务', labelEn: 'todos' },
-    { name: 'compact', labelZh: '压缩上下文', labelEn: 'compact' },
-    { name: 'context', labelZh: '上下文用量', labelEn: 'context' },
-  ];
+  // Plain command chips; the tooltip carries omp's own description.
+  const QUICK_COMMANDS = ['skill', 'todo', 'compact', 'context'];
   // `skill` is a prefix of every `/skill:<name>` command: clicking it opens the
   // composer's completion list already filtered to the skills.
-  const quickCommands = QUICK_COMMANDS.filter((entry) =>
-    entry.name === 'skill'
+  const quickCommands = QUICK_COMMANDS.filter((name) =>
+    name === 'skill'
       ? omp.slashCommands.some((command) => command.name.startsWith('skill:'))
-      : omp.slashCommands.some((command) => command.name === entry.name)
+      : omp.slashCommands.some((command) => command.name === name)
   );
   const insertCommand = (name: string) => {
     const text = name === 'skill' ? '/skill:' : `/${name} `;
@@ -832,31 +857,46 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                   const alertCount = sessions.filter(isSessionRunning).length;
                   return (
                   <div key={cwd || '(unknown)'} className="space-y-0.5">
-                    <button
-                      type="button"
-                      onClick={() => toggleProjectExpanded(groupKey)}
-                      aria-expanded={groupOpen}
-                      title={cwd}
-                      className="w-full flex items-center gap-1.5 px-1 py-1 rounded text-[10px] font-mono uppercase text-[#71717a] hover:text-[#a1a1aa] hover:bg-[#121215] transition-colors cursor-pointer"
-                    >
-                      {groupOpen ? (
-                        <ChevronDown className="w-3 h-3 shrink-0" />
-                      ) : (
-                        <ChevronRight className="w-3 h-3 shrink-0" />
-                      )}
-                      <FolderKanban className="w-3 h-3 shrink-0" />
-                      <span className="truncate">
-                        {cwd ? basename(cwd) : language === 'zh-CN' ? '未知目录' : 'unknown'}
-                      </span>
-                      {alertCount > 0 && (
-                        <span
-                          className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
-                          style={{ backgroundColor: accentColor }}
-                          title={language === 'zh-CN' ? `${alertCount} 个会话正在运行` : `${alertCount} running session(s)`}
-                        />
-                      )}
-                      <span className="ml-auto text-[#52525b]">{sessions.length}</span>
-                    </button>
+                    <div className="group/project flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => toggleProjectExpanded(groupKey)}
+                        aria-expanded={groupOpen}
+                        title={cwd}
+                        className="flex-1 min-w-0 flex items-center gap-1.5 px-1 py-1 rounded text-[10px] font-mono uppercase text-[#71717a] hover:text-[#a1a1aa] hover:bg-[#121215] transition-colors cursor-pointer"
+                      >
+                        {groupOpen ? (
+                          <ChevronDown className="w-3 h-3 shrink-0" />
+                        ) : (
+                          <ChevronRight className="w-3 h-3 shrink-0" />
+                        )}
+                        <FolderKanban className="w-3 h-3 shrink-0" />
+                        <span className="truncate">
+                          {cwd ? basename(cwd) : language === 'zh-CN' ? '未知目录' : 'unknown'}
+                        </span>
+                        {alertCount > 0 && (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
+                            style={{ backgroundColor: accentColor }}
+                            title={language === 'zh-CN' ? `${alertCount} 个会话正在运行` : `${alertCount} running session(s)`}
+                          />
+                        )}
+                        <span className="ml-auto text-[#52525b]">{sessions.length}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => hideProject(groupKey)}
+                        title={
+                          language === 'zh-CN'
+                            ? '从列表中移除该项目（只隐藏，会话文件保留在磁盘上）'
+                            : 'Remove this project from the list (hidden only — session files stay on disk)'
+                        }
+                        aria-label={language === 'zh-CN' ? '从列表中移除项目' : 'Remove project from list'}
+                        className="p-1 rounded text-[#52525b] opacity-0 group-hover/project:opacity-100 hover:text-[#fafafa] hover:bg-[#18181b] transition-opacity cursor-pointer shrink-0"
+                      >
+                        <EyeOff className="w-3 h-3" />
+                      </button>
+                    </div>
 
                     {groupOpen && sessions.map((session) => {
                       const isSelected = session.path === omp.resumePath;
@@ -950,6 +990,42 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                   </div>
                   );
                 })
+              )}
+
+              {/* Project folders removed from the list */}
+              {hiddenProjects.size > 0 && (
+                <div className="space-y-0.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setHiddenExpanded((prev) => !prev)}
+                    className="flex w-full items-center gap-1.5 px-1 py-1 text-[10px] font-mono uppercase text-[#71717a] hover:text-[#a1a1aa] cursor-pointer"
+                  >
+                    <EyeOff className="w-3 h-3 shrink-0" />
+                    <span>{language === 'zh-CN' ? '已移除的项目' : 'Removed projects'}</span>
+                    <span className="ml-auto text-[#52525b]">{hiddenProjects.size}</span>
+                    {hiddenExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  </button>
+
+                  {hiddenExpanded &&
+                    [...hiddenProjects].map((key) => (
+                      <div
+                        key={key}
+                        className="group flex items-center justify-between p-2 rounded text-[#71717a] hover:text-[#a1a1aa] hover:bg-[#121215] transition-colors text-xs"
+                      >
+                        <span className="truncate text-[11px] font-mono" title={key}>
+                          {basename(key)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => unhideProject(key)}
+                          title={language === 'zh-CN' ? '放回列表' : 'Put it back in the list'}
+                          className="p-0.5 rounded text-[#71717a] hover:text-[#34d399] cursor-pointer shrink-0"
+                        >
+                          <Eye className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                </div>
               )}
 
               {/* Archived sessions (omp gc archive: gzipped logs, restorable) */}
@@ -1235,14 +1311,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
             {!sessionActive && transcript.length === 0 ? (
               /* New conversation: omp's mark plus a few quick slash commands. */
               <div className="h-full min-h-[320px] flex flex-col items-center justify-center gap-7 select-none">
-                <OmpLogo className="w-20 h-15 opacity-95" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} />
+                <img
+                  src={theme.mode === 'light' ? '/logo-light.png' : '/logo-dark.png'}
+                  alt="omp"
+                  className="h-14 w-auto opacity-95"
+                />
                 <div className="flex items-center justify-center gap-2 flex-wrap text-[11px] font-mono">
-                  {quickCommands.map((entry) => (
+                  {quickCommands.map((name) => (
                     <button
-                      key={entry.name}
+                      key={name}
                       type="button"
-                      onClick={() => insertCommand(entry.name)}
-                      title={omp.slashCommands.find((command) => command.name === entry.name)?.description}
+                      onClick={() => insertCommand(name)}
+                      title={
+                        omp.slashCommands.find((command) => command.name === name)?.description ??
+                        omp.slashCommands.find((command) => command.name === `skill:${name}`)?.description
+                      }
                       className="px-2.5 py-1 rounded-md border hover:border-[#a78bfa] transition-colors cursor-pointer"
                       style={{
                         backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
@@ -1250,22 +1333,28 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                         color: theme.mode === 'light' ? '#475569' : '#a1a1aa',
                       }}
                     >
-                      /{entry.name}
-                      <span className="ml-1.5 text-[10px] text-[#71717a]">{language === 'zh-CN' ? entry.labelZh : entry.labelEn}</span>
+                      /{name}
                     </button>
                   ))}
                 </div>
               </div>
             ) : transcript.length === 0 ? (
               <div className="h-full min-h-[320px] flex flex-col items-center justify-center gap-7 select-none">
-                <OmpLogo className="w-20 h-15 opacity-95" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} />
+                <img
+                  src={theme.mode === 'light' ? '/logo-light.png' : '/logo-dark.png'}
+                  alt="omp"
+                  className="h-14 w-auto opacity-95"
+                />
                 <div className="flex items-center justify-center gap-2 flex-wrap text-[11px] font-mono">
-                  {quickCommands.map((entry) => (
+                  {quickCommands.map((name) => (
                     <button
-                      key={entry.name}
+                      key={name}
                       type="button"
-                      onClick={() => insertCommand(entry.name)}
-                      title={omp.slashCommands.find((command) => command.name === entry.name)?.description}
+                      onClick={() => insertCommand(name)}
+                      title={
+                        omp.slashCommands.find((command) => command.name === name)?.description ??
+                        omp.slashCommands.find((command) => command.name === `skill:${name}`)?.description
+                      }
                       className="px-2.5 py-1 rounded-md border hover:border-[#a78bfa] transition-colors cursor-pointer"
                       style={{
                         backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
@@ -1273,8 +1362,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                         color: theme.mode === 'light' ? '#475569' : '#a1a1aa',
                       }}
                     >
-                      /{entry.name}
-                      <span className="ml-1.5 text-[10px] text-[#71717a]">{language === 'zh-CN' ? entry.labelZh : entry.labelEn}</span>
+                      /{name}
                     </button>
                   ))}
                 </div>
