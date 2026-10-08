@@ -26,7 +26,6 @@ export type TerminalType = 'mcp' | 'bash' | 'pwsh' | 'debugger';
 interface EventStreamTerminalProps {
   logs: LogEntry[];
   projectName: string;
-  toolsCachedCount: number;
   onClearLogs: () => void;
   onAddLog: (level: LogEntry['level'], message: string) => void;
 }
@@ -40,7 +39,6 @@ interface ShellHistoryItem {
 export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
   logs,
   projectName,
-  toolsCachedCount,
   onClearLogs,
   onAddLog,
 }) => {
@@ -49,7 +47,7 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
 
   // Terminal state
   const [terminalType, setTerminalType] = useState<TerminalType>('mcp');
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [isStreaming, setIsStreaming] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -361,12 +359,6 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
         <div className="flex items-center gap-3 font-mono text-[11px] text-[#71717a]">
           {terminalType === 'mcp' && (
             <>
-              <span className="text-[#a1a1aa]">
-                {toolsCachedCount} {t.toolsCached}
-              </span>
-
-              <div className="h-3 w-[1px] bg-[#27272a]" />
-
               {/* Trigger test event button */}
               <button
                 onClick={() => onAddLog('INFO', `manual.ping: diagnostic pulse sent to /var/run/omp.sock`)}

@@ -12,7 +12,11 @@ import {
   Palette,
   Sliders,
   FileCode,
+  RefreshCw,
 } from 'lucide-react';
+import { PanelResizeHandle } from './PanelResizeHandle';
+import { useResizablePanel } from '../hooks/useResizablePanel';
+import { SETTINGS_PANEL } from '../lib/panelLayout';
 
 interface SidebarProps {
   activeTab: SettingsSidebarTab;
@@ -31,6 +35,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { theme, accentColor } = useTheme();
   const { t, language } = useI18n();
+
+  const settingsPanel = useResizablePanel({ ...SETTINGS_PANEL, axis: 'x', edge: 'end' });
 
   const navItems: {
     id: SettingsSidebarTab;
@@ -72,12 +78,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: t.themePreferences,
       icon: <Palette className="w-4 h-4" />,
     },
+    {
+      id: 'updates',
+      label: language === 'zh-CN' ? '更新与版本' : 'Updates & versions',
+      icon: <RefreshCw className="w-4 h-4" />,
+    },
   ];
 
   return (
+    <>
     <aside
-      className="w-60 border-r border-[#27272a] bg-[#0c0c0e] flex flex-col justify-between shrink-0 select-none min-h-[calc(100vh-3rem)] transition-colors"
-      style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
+      ref={(el) => {
+        settingsPanel.elementRef.current = el;
+      }}
+      className="border-r border-[#27272a] bg-[#0c0c0e] flex flex-col justify-between shrink-0 select-none min-h-[calc(100vh-3rem)] transition-colors"
+      style={{ backgroundColor: theme.cardBg, borderColor: theme.border, width: settingsPanel.size }}
     >
       {/* Top Header & Navigation */}
       <div className="p-3">
@@ -143,10 +158,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
             borderColor: theme.border,
           }}
         >
-          <span className="truncate">IPC Socket: /var/run/omp.sock</span>
-          <span className="text-[#34d399] font-medium shrink-0 ml-1">v2.4-ok</span>
+          <span className="truncate">OMP Studio</span>
+          <span className="font-medium shrink-0 ml-1" style={{ color: accentColor }}>
+            v{__APP_VERSION__} · {__APP_BUILD_DATE__}
+          </span>
         </div>
       </div>
     </aside>
+    <PanelResizeHandle
+      side="right"
+      label={language === 'zh-CN' ? '调整设置侧栏宽度' : 'Resize settings sidebar'}
+      active={settingsPanel.dragging}
+      handleProps={settingsPanel.handleProps}
+    />
+    </>
   );
 };

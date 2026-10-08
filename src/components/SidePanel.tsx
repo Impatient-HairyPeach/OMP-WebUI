@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   MessageSquare,
   Activity,
@@ -24,6 +24,11 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
+import { PanelResizeHandle } from './PanelResizeHandle';
+import { useResizablePanel } from '../hooks/useResizablePanel';
+import type { GitRepoApi } from '../hooks/useGitRepo';
+import { fetchGitDiff, type GitDiffFile } from '../omp/cli';
+import { SIDE_PANEL } from '../lib/panelLayout';
 
 export type SidePanelTab = 'side_chat' | 'current_task' | 'git';
 
@@ -32,7 +37,8 @@ interface SidePanelProps {
   onClose: () => void;
   activeTab: SidePanelTab;
   onTabChange: (tab: SidePanelTab) => void;
-  currentBranch: string;
+  /** Real repository state shared with the header and the git dialog. */
+  git: GitRepoApi;
   onDispatchLog?: (level: 'INFO' | 'OK' | 'CALL' | 'OVERRIDE', message: string) => void;
 }
 
@@ -41,11 +47,14 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   onClose,
   activeTab,
   onTabChange,
-  currentBranch,
+  git,
   onDispatchLog,
 }) => {
   const { theme, accentColor, editorFont } = useTheme();
   const { t, language } = useI18n();
+
+  // The panel's left edge is draggable; the width is remembered per browser.
+  const sidePanel = useResizablePanel({ ...SIDE_PANEL, axis: 'x', edge: 'start' });
 
   // Side Chat state
   const [sideMessages, setSideMessages] = useState<
@@ -77,19 +86,30 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     { id: 5, title: language === 'zh-CN' ? '生成 Git Patch 与 Pull Request 变更建议' : 'Generate Git Patch & PR review diff', done: false },
   ]);
 
-  // Git state
+  // Git state: real changed files + commit history from the bridge.
   const [commitMessage, setCommitMessage] = useState('');
-  const [stagedFiles, setStagedFiles] = useState([
-    { name: 'src/auth/jwt.ts', status: 'M', additions: 18, deletions: 4 },
-    { name: 'src/middleware/auth.ts', status: 'M', additions: 6, deletions: 2 },
-    { name: 'tests/jwt_leak.test.ts', status: 'A', additions: 42, deletions: 0 },
-  ]);
-  const [commitHistory, setCommitHistory] = useState([
-    { hash: 'f8b9a21', message: 'feat: add mcp filesystem permission whitelist', time: '2h ago' },
-    { hash: 'c4e109d', message: 'fix: handle redis heartbeat disconnect timeout', time: '5h ago' },
-    { hash: '9b28a11', message: 'chore: bump omp-core runtime engine to v2.4.9', time: '1d ago' },
-  ]);
-  const [commitSuccess, setCommitSuccess] = useState(false);
+  const [diffFiles, setDiffFiles] = useState<GitDiffFile[]>([]);
+  const [diffError, setDiffError] = useState<string | null>(null);
+  const [commitOutput, setCommitOutput] = useState<string | null>(null);
+  const currentBranch = git.snapshot?.current ?? (git.loading ? '…' : '—');
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'git') return;
+    let cancelled = false;
+    fetchGitDiff()
+      .then((payload) => {
+        if (!cancelled) {
+          setDiffFiles(payload.files);
+          setDiffError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setDiffError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, activeTab, git.snapshot?.current]);
 
   if (!isOpen) return null;
 
@@ -131,26 +151,42 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     );
   };
 
-  const handleCommitAndPush = (e: React.FormEvent) => {
+  /** Real `git add -A` + `git commit -m` through the bridge. */
+  const handleCommit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commitMessage.trim()) return;
-
-    const newHash = Math.random().toString(16).substring(2, 9);
-    setCommitHistory([
-      { hash: newHash, message: commitMessage.trim(), time: 'Just now' },
-      ...commitHistory,
-    ]);
-    setCommitMessage('');
-    setCommitSuccess(true);
-    onDispatchLog?.('OK', `git: commit [${newHash}] created and pushed to origin/${currentBranch}`);
-    setTimeout(() => setCommitSuccess(false), 2500);
+    const message = commitMessage.trim();
+    if (!message || git.busy === 'commit') return;
+    const ok = await git.commit(message);
+    if (ok) {
+      setCommitMessage('');
+      setCommitOutput(
+        language === 'zh-CN' ? `已提交：${message}` : `Committed: ${message}`
+      );
+      onDispatchLog?.('OK', `git: committed "${message.slice(0, 48)}"`);
+      const payload = await fetchGitDiff().catch(() => null);
+      if (payload) setDiffFiles(payload.files);
+    } else {
+      setCommitOutput(git.error ?? (language === 'zh-CN' ? '提交失败' : 'commit failed'));
+    }
   };
 
   return (
-    <aside
-      className="w-96 border-l flex flex-col justify-between shrink-0 h-full z-30 transition-all select-none shadow-xl"
-      style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-    >
+    <>
+      <PanelResizeHandle
+        side="left"
+        label={language === 'zh-CN' ? '调整侧边面板宽度' : 'Resize side panel'}
+        active={sidePanel.dragging}
+        handleProps={sidePanel.handleProps}
+      />
+      <aside
+        ref={(el) => {
+          sidePanel.elementRef.current = el;
+        }}
+        className={`border-l flex flex-col justify-between shrink-0 min-w-0 h-full z-30 select-none shadow-xl${
+          sidePanel.dragging ? '' : ' transition-all'
+        }`}
+        style={{ backgroundColor: theme.cardBg, borderColor: theme.border, width: sidePanel.size }}
+      >
       {/* Top Header: Title & Close */}
       <div
         className="h-10 px-3.5 border-b flex items-center justify-between shrink-0"
@@ -243,7 +279,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             className="text-[9px] font-mono px-1 rounded"
             style={{ backgroundColor: `${accentColor}18`, color: accentColor }}
           >
-            {stagedFiles.length}
+            {diffFiles.length}
           </span>
         </button>
       </div>
@@ -511,7 +547,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         )}
 
         {/* ======================================================== */}
-        {/* TAB 3: GIT CHANGES & VERSION CONTROL                     */}
+        {/* TAB 3: GIT CHANGES & VERSION CONTROL (real git)          */}
         {/* ======================================================== */}
         {activeTab === 'git' && (
           <div className="space-y-4 font-mono text-xs">
@@ -520,60 +556,83 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               className="p-3 rounded-lg border flex items-center justify-between"
               style={{ backgroundColor: theme.mode === 'light' ? '#f8fafc' : '#121215', borderColor: theme.border }}
             >
-              <div className="flex items-center gap-2">
-                <GitBranch className="w-4 h-4" style={{ color: accentColor }} />
-                <div>
+              <div className="flex items-center gap-2 min-w-0">
+                <GitBranch className="w-4 h-4 shrink-0" style={{ color: accentColor }} />
+                <div className="min-w-0">
                   <div className="text-[10px] text-[#71717a] uppercase">{t.currentBranch}</div>
-                  <div className="font-bold text-xs" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+                  <div className="font-bold text-xs truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
                     {currentBranch}
                   </div>
                 </div>
               </div>
-              <span className="text-[10px] text-[#34d399] px-2 py-0.5 rounded bg-[#34d399]/10 border border-[#34d399]/30">
-                In-Sync · clean
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded border shrink-0 ${
+                  git.snapshot?.dirty
+                    ? 'text-[#f59e0b] bg-[#f59e0b]/10 border-[#f59e0b]/30'
+                    : 'text-[#34d399] bg-[#34d399]/10 border-[#34d399]/30'
+                }`}
+              >
+                {git.snapshot?.dirty
+                  ? language === 'zh-CN'
+                    ? `${git.snapshot.changedCount} 个文件改动`
+                    : `${git.snapshot.changedCount} changed`
+                  : language === 'zh-CN'
+                  ? '工作区干净'
+                  : 'clean'}
               </span>
             </div>
 
-            {/* Changed Files */}
+            {git.error && (
+              <div className="p-2 rounded border border-[#ef4444]/40 bg-[#ef4444]/10 text-[10px] text-[#f87171] whitespace-pre-wrap break-words">
+                {git.error}
+              </div>
+            )}
+
+            {/* Changed Files (real `git diff HEAD`) */}
             <div>
               <div className="flex items-center justify-between text-[11px] mb-2 font-sans font-semibold" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
                 <span>{t.changedFiles}</span>
-                <span className="font-mono text-[10px] text-[#71717a]">{stagedFiles.length} files</span>
+                <span className="font-mono text-[10px] text-[#71717a]">{diffFiles.length} files</span>
               </div>
 
               <div className="space-y-1.5">
-                {stagedFiles.map((f) => (
+                {diffFiles.map((file) => (
                   <div
-                    key={f.name}
-                    className="p-2 rounded border flex items-center justify-between"
+                    key={file.path}
+                    className="p-2 rounded border flex items-center justify-between gap-2"
                     style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
                   >
-                    <div className="flex items-center gap-2 truncate">
+                    <div className="flex items-center gap-2 truncate min-w-0">
                       <span
-                        className="text-[10px] font-bold px-1.5 py-0.2 rounded"
+                        className="text-[10px] font-bold px-1.5 py-0.2 rounded shrink-0"
                         style={{
-                          backgroundColor: f.status === 'M' ? '#f59e0b18' : '#34d39918',
-                          color: f.status === 'M' ? '#f59e0b' : '#34d399',
+                          backgroundColor: file.status === 'added' ? '#34d39918' : '#f59e0b18',
+                          color: file.status === 'added' ? '#34d399' : '#f59e0b',
                         }}
                       >
-                        {f.status}
+                        {file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : 'M'}
                       </span>
-                      <span className="text-[11px] truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
-                        {f.name}
+                      <span className="text-[11px] truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} title={file.path}>
+                        {file.path}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5 text-[10px] shrink-0 font-mono">
-                      <span className="text-[#34d399]">+{f.additions}</span>
-                      <span className="text-[#ef4444]">-{f.deletions}</span>
+                      <span className="text-[#34d399]">+{file.additions}</span>
+                      <span className="text-[#ef4444]">-{file.deletions}</span>
                     </div>
                   </div>
                 ))}
+                {diffFiles.length === 0 && (
+                  <div className="p-2 rounded border text-[10px] text-[#52525b]" style={{ borderColor: theme.border }}>
+                    {diffError ?? (language === 'zh-CN' ? '工作区没有未提交改动。' : 'No uncommitted changes.')}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Commit Message & Action Form */}
-            <form onSubmit={handleCommitAndPush} className="space-y-2 pt-1 border-t" style={{ borderColor: theme.border }}>
+            {/* Commit form (real `git add -A && git commit`) */}
+            <form onSubmit={(e) => void handleCommit(e)} className="space-y-2 pt-1 border-t" style={{ borderColor: theme.border }}>
               <div>
                 <input
                   type="text"
@@ -591,58 +650,62 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => onDispatchLog?.('INFO', 'git: all working directory modifications staged')}
-                  className="px-2.5 py-1.5 rounded border text-[11px] hover:bg-[#18181b] transition-colors cursor-pointer"
-                  style={{
-                    backgroundColor: theme.cardBg,
-                    borderColor: theme.border,
-                    color: theme.mode === 'light' ? '#0f172a' : '#fafafa',
-                  }}
+                <span
+                  className="px-2.5 py-1.5 rounded border text-[10px] text-[#71717a]"
+                  style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
+                  title={language === 'zh-CN' ? '提交会暂存所有改动（git add -A）' : 'Committing stages everything (git add -A)'}
                 >
                   {t.stageAll}
-                </button>
+                </span>
 
                 <button
                   type="submit"
-                  disabled={!commitMessage.trim()}
+                  disabled={!commitMessage.trim() || diffFiles.length === 0 || git.busy === 'commit'}
                   className="flex-1 py-1.5 rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 shadow transition-opacity cursor-pointer disabled:opacity-40"
                   style={{ backgroundColor: accentColor, color: '#09090b' }}
                 >
                   <GitCommit className="w-3.5 h-3.5" />
-                  <span>{t.commitAndPush}</span>
+                  <span>{git.busy === 'commit' ? (language === 'zh-CN' ? '提交中…' : 'committing…') : language === 'zh-CN' ? '提交 (git commit)' : 'Commit (git commit)'}</span>
                 </button>
               </div>
 
-              {commitSuccess && (
-                <div className="p-2 rounded bg-[#34d399]/15 border border-[#34d399]/40 text-[#34d399] text-[11px] flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Changes committed &amp; branch pushed to remote.</span>
+              {commitOutput && (
+                <div className="p-2 rounded bg-[#34d399]/15 border border-[#34d399]/40 text-[#34d399] text-[11px] flex items-start gap-1.5">
+                  <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span className="break-words">{commitOutput}</span>
                 </div>
               )}
             </form>
 
-            {/* Recent Commit History */}
+            {/* Recent Commit History (real `git log`) */}
             <div className="pt-2 border-t" style={{ borderColor: theme.border }}>
-              <div className="text-[11px] font-sans font-semibold mb-2 text-[#71717a]">
-                {t.recentCommits}
+              <div className="flex items-center justify-between text-[11px] font-sans font-semibold mb-2 text-[#71717a]">
+                <span>{t.recentCommits}</span>
+                <button
+                  type="button"
+                  onClick={() => void git.refresh()}
+                  className="font-mono text-[10px] hover:text-[#fafafa] cursor-pointer"
+                >
+                  {language === 'zh-CN' ? '刷新' : 'refresh'}
+                </button>
               </div>
               <div className="space-y-1.5">
-                {commitHistory.map((c) => (
-                  <div key={c.hash} className="text-[10px] text-[#71717a] flex items-center justify-between">
-                    <span className="text-[#a1a1aa] font-bold shrink-0">{c.hash}</span>
-                    <span className="truncate mx-2 text-left flex-1" style={{ color: theme.mode === 'light' ? '#475569' : '#a1a1aa' }}>
-                      {c.message}
+                {git.commits.map((commit) => (
+                  <div key={commit.hash} className="text-[10px] text-[#71717a] flex items-center justify-between gap-2">
+                    <span className="text-[#a1a1aa] font-bold shrink-0">{commit.hash}</span>
+                    <span className="truncate text-left flex-1" style={{ color: theme.mode === 'light' ? '#475569' : '#a1a1aa' }}>
+                      {commit.subject}
                     </span>
-                    <span className="shrink-0">{c.time}</span>
+                    <span className="shrink-0">{commit.when}</span>
                   </div>
                 ))}
+                {git.commits.length === 0 && <div className="text-[10px] text-[#52525b]">{language === 'zh-CN' ? '暂无提交记录。' : 'No commits yet.'}</div>}
               </div>
             </div>
           </div>
         )}
       </div>
     </aside>
+    </>
   );
 };

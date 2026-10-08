@@ -1,42 +1,108 @@
-import React, { useState } from 'react';
-import { PluginItem } from '../types';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  GitBranch,
-  CloudCog,
-  ArrowLeftRight,
+  Puzzle,
   RefreshCw,
-  Sliders,
-  Check,
+  Github,
+  Download,
+  Trash2,
+  Loader2,
+  AlertCircle,
+  FileJson,
 } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
+import { useTheme } from '../context/ThemeContext';
+import { ScopeToggle } from './ScopeToggle';
+import { fetchPlugins, installPlugin, runOmpCli, setExtensionScope, OmpPluginEntry, type ScopeName } from '../omp/cli';
 
-interface PluginsSectionProps {
-  plugins: PluginItem[];
-  onTogglePlugin: (id: string) => void;
-  onConfigurePlugin: (plugin: PluginItem) => void;
-  onCheckUpdates: () => void;
-  isCheckingUpdates: boolean;
+interface PluginsPayload {
+  path: string;
+  exists: boolean;
+  plugins: OmpPluginEntry[];
 }
 
-export const PluginsSection: React.FC<PluginsSectionProps> = ({
-  plugins,
-  onTogglePlugin,
-  onConfigurePlugin,
-  onCheckUpdates,
-  isCheckingUpdates,
-}) => {
+export const PluginsSection: React.FC = () => {
   const { t, language } = useI18n();
+  const { accentColor } = useTheme();
+  const zh = language === 'zh-CN';
 
-  const getPluginIcon = (type: PluginItem['iconType']) => {
-    switch (type) {
-      case 'git':
-        return <GitBranch className="w-4 h-4 text-[#a78bfa]" />;
-      case 'k8s':
-        return <CloudCog className="w-4 h-4 text-[#a1a1aa]" />;
-      case 'linear':
-        return <ArrowLeftRight className="w-4 h-4 text-[#a78bfa]" />;
-      default:
-        return <Sliders className="w-4 h-4 text-[#a1a1aa]" />;
+  const [data, setData] = useState<PluginsPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [importSpec, setImportSpec] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [output, setOutput] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await fetchPlugins());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const plugins = data?.plugins ?? [];
+
+  const handleImport = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!importSpec.trim() || importBusy) return;
+    setImportBusy(true);
+    setOutput(null);
+    try {
+      const result = await installPlugin(importSpec.trim());
+      setOutput([result.stdout, result.stderr].filter(Boolean).join('\n').trim() || `exit ${result.code}`);
+      await load();
+    } catch (err) {
+      setOutput(err instanceof Error ? err.message : String(err));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  /** Where an extension applies: every project, only this workspace, or nowhere. */
+  const handleScope = async (plugin: OmpPluginEntry, scope: ScopeName) => {
+    if (actionBusy) return;
+    setActionBusy(plugin.name);
+    setOutput(null);
+    try {
+      await setExtensionScope(plugin.name, scope);
+      setOutput(
+        zh
+          ? `${plugin.name} 已设为${
+              scope === 'global' ? '全局启用' : scope === 'project' ? '仅本项目启用' : '停用'
+            }，omp 会话已重启。`
+          : `${plugin.name} → ${scope}; the omp session was restarted.`
+      );
+      await load();
+    } catch (err) {
+      setOutput(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const handleUninstall = async (plugin: OmpPluginEntry) => {
+    if (actionBusy) return;
+    if (!window.confirm(zh ? `卸载插件 ${plugin.name}？` : `Uninstall plugin ${plugin.name}?`)) return;
+    setActionBusy(plugin.name);
+    setOutput(null);
+    try {
+      const result = await runOmpCli(['plugin', 'uninstall', plugin.name]);
+      setOutput([result.stdout, result.stderr].filter(Boolean).join('\n').trim() || `exit ${result.code}`);
+      await load();
+    } catch (err) {
+      setOutput(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActionBusy(null);
     }
   };
 
@@ -47,135 +113,219 @@ export const PluginsSection: React.FC<PluginsSectionProps> = ({
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[#a78bfa] text-sm">🧩</span>
-            <h2 className="text-sm font-semibold tracking-tight text-[#fafafa]">
-              {t.pluginsTitle}
-            </h2>
+            <h2 className="text-sm font-semibold tracking-tight text-[#fafafa]">{t.pluginsTitle}</h2>
             <span className="px-1.5 py-0.5 text-[10px] font-mono bg-[#18181b] text-[#a1a1aa] border border-[#27272a] rounded">
-              {t.pluginsScopeBadge}
+              {plugins.length} {zh ? '已安装' : 'installed'}
             </span>
           </div>
-          <p className="text-xs text-[#a1a1aa] max-w-3xl leading-relaxed">
-            {t.pluginsDesc}
-          </p>
+          <p className="text-xs text-[#a1a1aa] max-w-3xl leading-relaxed">{t.pluginsDesc}</p>
         </div>
 
         <button
-          onClick={onCheckUpdates}
-          disabled={isCheckingUpdates}
+          type="button"
+          onClick={() => void load()}
+          disabled={loading}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-[#121215] hover:bg-[#18181b] border border-[#27272a] text-[#fafafa] text-xs font-medium rounded transition-colors cursor-pointer shrink-0 ml-4 disabled:opacity-50"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdates ? 'animate-spin text-[#a78bfa]' : 'text-[#a1a1aa]'}`} />
-          <span>{isCheckingUpdates ? t.pluginsChecking : t.pluginsCheckUpdates}</span>
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#a78bfa]' : 'text-[#a1a1aa]'}`} />
+          <span>{zh ? '重新加载' : 'Reload'}</span>
         </button>
       </div>
 
-      {/* Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {plugins.map((plugin) => {
-          const isEnabled = plugin.enabled;
+      {/* Real lock file source */}
+      {data && (
+        <div className="flex items-center gap-2 mb-2 text-[11px] font-mono text-[#71717a]">
+          <FileJson className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">{data.path}</span>
+          <span
+            className={`px-1.5 py-0.5 rounded border text-[10px] shrink-0 ${
+              data.exists
+                ? 'text-[#34d399] bg-[#34d399]/10 border-[#34d399]/30'
+                : 'text-[#f59e0b] bg-[#f59e0b]/10 border-[#f59e0b]/30'
+            }`}
+          >
+            {data.exists ? (zh ? '存在' : 'exists') : zh ? '不存在' : 'missing'}
+          </span>
+        </div>
+      )}
 
-          return (
-            <div
-              key={plugin.id}
-              className={`flex flex-col justify-between border rounded p-3 transition-colors ${
-                isEnabled
-                  ? 'border-[#27272a] bg-[#0c0c0e] hover:border-[#3f3f46]'
-                  : 'border-[#222226] bg-[#09090b]/70 opacity-90'
-              }`}
-            >
-              <div>
-                {/* Header Row: Icon + Title + Toggle */}
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <div className="flex items-start gap-2">
-                    <div className="p-1 rounded bg-[#18181b] border border-[#27272a] shrink-0 mt-0.5">
-                      {getPluginIcon(plugin.iconType)}
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-semibold text-[#fafafa] tracking-tight">
-                        {plugin.name}
-                      </h3>
-                      <div className="text-[11px] font-mono text-[#71717a]">
-                        {plugin.version} <span className="text-[#52525b]">{language === 'zh-CN' ? '由' : 'by'}</span> {plugin.author}
+      {/* Import from GitHub / npm — runs the real `omp plugin install` */}
+      <form
+        onSubmit={handleImport}
+        className="mb-4 p-3 rounded border border-[#27272a] bg-[#121215] flex flex-col gap-2"
+      >
+        <div className="flex items-center gap-2 text-xs text-[#a1a1aa]">
+          <Github className="w-3.5 h-3.5 text-[#a78bfa]" />
+          <span>
+            {zh
+              ? '从 GitHub / npm 安装插件（调用 omp plugin install）'
+              : 'Install a plugin from GitHub / npm (runs omp plugin install)'}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={importSpec}
+            onChange={(e) => setImportSpec(e.target.value)}
+            placeholder="https://github.com/owner/omp-plugin  ·  github:owner/repo  ·  omp-plugin-name"
+            className="flex-1 h-8 px-2.5 bg-[#0c0c0e] border border-[#27272a] rounded text-[#fafafa] font-mono text-[11px] focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
+          />
+          <button
+            type="submit"
+            disabled={!importSpec.trim() || importBusy}
+            className="flex items-center gap-1.5 px-3 h-8 rounded bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+          >
+            {importBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {zh ? (importBusy ? '安装中…' : '安装') : importBusy ? 'Installing…' : 'Install'}
+          </button>
+        </div>
+        {output && (
+          <pre className="max-h-40 overflow-auto p-2 rounded bg-[#09090b] border border-[#27272a] text-[10px] font-mono text-[#a1a1aa] whitespace-pre-wrap">
+            {output}
+          </pre>
+        )}
+      </form>
+
+      {/* Honest states */}
+      {loading && !data && (
+        <div className="flex items-center gap-2 p-4 border border-[#27272a] rounded bg-[#0c0c0e] text-xs text-[#a1a1aa] font-mono">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          {zh ? '正在读取 omp-plugins.lock.json…' : 'Reading omp-plugins.lock.json…'}
+        </div>
+      )}
+
+      {error && !loading && (
+        <div className="flex items-center gap-2 p-4 border border-[#ef4444]/30 rounded bg-[#ef4444]/5 text-xs text-[#ef4444] font-mono">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">{error}</span>
+        </div>
+      )}
+
+      {!error && data && plugins.length === 0 && (
+        <div className="p-4 border border-[#27272a] rounded bg-[#0c0c0e] text-xs text-[#71717a] font-mono">
+          {zh ? '未安装任何 omp 插件。' : 'No omp plugins installed.'}
+        </div>
+      )}
+
+      {/* Real plugin cards */}
+      {plugins.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {plugins.map((plugin) => {
+            const featureCount = plugin.features?.length ?? 0;
+            return (
+              <div
+                key={plugin.name}
+                className={`flex flex-col justify-between border rounded p-3 transition-colors ${
+                  plugin.enabled
+                    ? 'border-[#27272a] bg-[#0c0c0e] hover:border-[#3f3f46]'
+                    : 'border-[#222226] bg-[#09090b]/70 opacity-90'
+                }`}
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <div className="p-1 rounded bg-[#18181b] border border-[#27272a] shrink-0 mt-0.5">
+                        <Puzzle className="w-4 h-4 text-[#a78bfa]" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-xs font-semibold text-[#fafafa] tracking-tight font-mono truncate">
+                          {plugin.name}
+                        </h3>
+                        <div className="text-[11px] font-mono text-[#71717a]">v{plugin.version}</div>
                       </div>
                     </div>
+
+                    <span
+                      className={`px-1.5 py-0.5 text-[10px] font-mono rounded border shrink-0 ${
+                        plugin.enabled
+                          ? 'text-[#34d399] bg-[#34d399]/10 border-[#34d399]/30'
+                          : 'text-[#71717a] bg-[#121215] border-[#27272a]'
+                      }`}
+                    >
+                      {plugin.enabled ? (zh ? '已启用' : 'enabled') : zh ? '已禁用' : 'disabled'}
+                    </span>
                   </div>
 
-                  {/* Toggle switch */}
+                  <div className="flex items-center gap-1.5 flex-wrap my-2.5">
+                    {featureCount > 0 ? (
+                      plugin.features!.map((feature) => (
+                        <span
+                          key={feature}
+                          className="px-1.5 py-0.5 text-[10px] font-mono bg-[#18181b] text-[#71717a] border border-[#27272a] rounded"
+                        >
+                          {feature}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-[11px] text-[#52525b] font-mono">
+                        {zh ? '无特性元数据' : 'no feature metadata'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-[10px] text-[#71717a] font-mono uppercase">{zh ? '作用范围' : 'scope'}</span>
+                  <ScopeToggle
+                    accentColor={accentColor}
+                    busy={actionBusy === plugin.name}
+                    value={plugin.scope}
+                    onChange={(scope) => void handleScope(plugin, scope as ScopeName)}
+                    options={[
+                      {
+                        id: 'global',
+                        label: zh ? '全局' : 'global',
+                        title: zh ? '所有项目都加载（写入 omp 插件锁）' : 'Loaded in every project (omp plugin lock)',
+                      },
+                      {
+                        id: 'project',
+                        label: zh ? '仅本项目' : 'project',
+                        title: zh
+                          ? '只在本工作空间加载（通过 omp -e 显式加载）'
+                          : 'Loaded only in this workspace (explicit omp -e)',
+                      },
+                      {
+                        id: 'off',
+                        label: zh ? '停用' : 'off',
+                        title: zh ? '不加载（从 omp 插件锁停用）' : 'Not loaded (disabled in the omp plugin lock)',
+                      },
+                    ]}
+                  />
+                </div>
+
+                <div className="pt-2 border-t border-[#1e1e24] flex items-center justify-between text-[11px]">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${plugin.enabled ? 'bg-[#34d399]' : 'bg-[#71717a]'}`} />
+                    <span className="font-mono text-[10px] text-[#71717a]">
+                      {featureCount > 0
+                        ? zh
+                          ? `${featureCount} 项特性`
+                          : `${featureCount} features`
+                        : zh
+                        ? '锁定文件记录'
+                        : 'lockfile entry'}
+                    </span>
+                  </div>
+
                   <button
                     type="button"
-                    onClick={() => onTogglePlugin(plugin.id)}
-                    className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus:ring-1 focus:ring-[#a78bfa] ${
-                      isEnabled
-                        ? 'bg-[#a78bfa] border-[#a78bfa]'
-                        : 'bg-[#18181b] border-[#3f3f46]'
-                    }`}
+                    onClick={() => void handleUninstall(plugin)}
+                    disabled={actionBusy !== null}
+                    className="flex items-center gap-1 text-[#ef4444] hover:text-[#f87171] hover:underline cursor-pointer text-[11px] font-medium disabled:opacity-50"
                   >
-                    <span
-                      aria-hidden="true"
-                      className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out mt-[1px] ${
-                        isEnabled ? 'translate-x-3 bg-[#09090b]' : 'translate-x-0.5 bg-[#71717a]'
-                      }`}
-                    />
+                    {actionBusy === plugin.name ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3 h-3" />
+                    )}
+                    {zh ? '卸载' : 'Uninstall'}
                   </button>
                 </div>
-
-                {/* Description */}
-                <p className="text-[11px] text-[#a1a1aa] leading-relaxed my-2.5">
-                  {plugin.description}
-                </p>
-
-                {/* Tags row */}
-                <div className="flex items-center gap-1.5 flex-wrap mb-3">
-                  {plugin.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="px-1.5 py-0.5 text-[10px] font-mono bg-[#18181b] text-[#71717a] border border-[#27272a] rounded"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                  {plugin.warningBadge && (
-                    <span className="px-1.5 py-0.5 text-[10px] font-mono bg-[#ef4444]/10 text-[#ef4444] border border-[#ef4444]/30 rounded">
-                      {language === 'zh-CN' && plugin.warningBadge === 'Requires OAuth'
-                        ? '需 OAuth 授权'
-                        : plugin.warningBadge}
-                    </span>
-                  )}
-                </div>
               </div>
-
-              {/* Card Footer */}
-              <div className="pt-2 border-t border-[#1e1e24] flex items-center justify-between text-[11px]">
-                <div className="flex items-center gap-1.5">
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      isEnabled ? 'bg-[#34d399]' : 'bg-[#71717a]'
-                    }`}
-                  />
-                  <span
-                    className={`font-mono text-[10px] ${
-                      isEnabled ? 'text-[#a1a1aa]' : 'text-[#71717a]'
-                    }`}
-                  >
-                    {language === 'zh-CN'
-                      ? isEnabled ? '当前作用域已启用' : '当前作用域已停用'
-                      : plugin.statusLabel}
-                  </span>
-                </div>
-
-                {plugin.configLinkText && isEnabled && (
-                  <button
-                    onClick={() => onConfigurePlugin(plugin)}
-                    className="text-[#a78bfa] hover:text-[#bca6fc] hover:underline cursor-pointer text-[11px] font-medium"
-                  >
-                    {language === 'zh-CN' ? '配置插件' : plugin.configLinkText}
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 };

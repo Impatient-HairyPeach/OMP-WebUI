@@ -1,331 +1,299 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Cpu,
-  Plus,
-  Layers,
-  Wallet,
-  Receipt,
-  Server,
   Activity,
-  Check,
   AlertCircle,
-  Key,
-  Globe,
-  DollarSign,
-  TrendingUp,
-  SlidersHorizontal,
+  ChevronDown,
   ChevronRight,
-  ExternalLink,
-  Trash2,
+  Cpu,
+  Database,
+  Layers,
+  Loader2,
+  Receipt,
+  Search,
+  Server,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
-import { LLMProvider } from '../../types';
+import { ScopeToggle } from '../ScopeToggle';
+import { fetchModelScope, fetchUsage, setModelScope } from '../../omp/cli';
+import type { OmpModelScope, OmpUsagePayload } from '../../omp/cli';
+import { ModelsView, fetchModelCatalog } from './ModelsView';
+import type { CatalogModel } from './ModelsView';
 
-export const INITIAL_PROVIDERS: LLMProvider[] = [
-  {
-    id: 'prov-anthropic',
-    name: 'Anthropic Claude',
-    vendor: 'Anthropic',
-    endpoint: 'https://api.anthropic.com/v1',
-    apiKeyMasked: 'sk-ant-api03-••••••••••••••••9F2x',
-    status: 'Active',
-    latency: '310ms',
-    models: ['claude-3-7-sonnet-20250219', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
-    billsThisMonth: 114.20,
-    balanceRemaining: 385.80,
-    currency: 'USD',
-    billingType: 'Prepaid Credits',
-    monthlyQuota: 500,
-  },
-  {
-    id: 'prov-gemini',
-    name: 'Google Gemini Pro / Flash',
-    vendor: 'Google Cloud Vertex',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta',
-    apiKeyMasked: 'AIzaSy••••••••••••••••Z9kL',
-    status: 'Active',
-    latency: '240ms',
-    models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash-exp'],
-    billsThisMonth: 28.45,
-    balanceRemaining: 171.55,
-    currency: 'USD',
-    billingType: 'Postpaid Monthly',
-    monthlyQuota: 200,
-  },
-  {
-    id: 'prov-openai',
-    name: 'OpenAI GPT-4.5 / o3',
-    vendor: 'OpenAI',
-    endpoint: 'https://api.openai.com/v1',
-    apiKeyMasked: 'sk-proj-••••••••••••••••b81K',
-    status: 'Active',
-    latency: '280ms',
-    models: ['gpt-4.5-preview', 'o3-mini', 'gpt-4o'],
-    billsThisMonth: 82.10,
-    balanceRemaining: 217.90,
-    currency: 'USD',
-    billingType: 'Prepaid Credits',
-    monthlyQuota: 300,
-  },
-  {
-    id: 'prov-ollama',
-    name: 'Local Ollama Cluster',
-    vendor: 'Ollama / Internal GPU',
-    endpoint: 'http://localhost:11434/v1',
-    apiKeyMasked: 'Bearer local-dev-unsecured',
-    status: 'Connected',
-    latency: '14ms',
-    models: ['deepseek-r1:32b', 'qwen2.5-coder:32b', 'llama3.3:70b'],
-    billsThisMonth: 0.00,
-    balanceRemaining: 'Unlimited',
-    currency: 'USD',
-    billingType: 'Internal Self-Hosted',
-  },
-];
+const SOURCE_LABEL = '~/.omp/agent/usage.db';
 
-interface ModelRoutingItem {
+const formatCompact = (n?: number): string => {
+  if (n === undefined || n === null || Number.isNaN(n)) return '—';
+  if (n >= 1_000_000_000) return `${parseFloat((n / 1_000_000_000).toFixed(2))}B`;
+  if (n >= 1_000_000) return `${parseFloat((n / 1_000_000).toFixed(2))}M`;
+  if (n >= 1_000) return `${parseFloat((n / 1_000).toFixed(1))}K`;
+  return String(n);
+};
+
+const formatCost = (n?: number): string => {
+  if (n === undefined || n === null || Number.isNaN(n)) return '—';
+  return `$${n.toFixed(n > 0 && n < 0.01 ? 4 : 2)}`;
+};
+
+const basename = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() || p;
+
+interface ProviderRow {
   id: string;
-  name: string;
-  provider: string;
-  contextWindow: string;
-  speed: string;
-  costPer1k: string;
-  role: string;
-  isPrimary?: boolean;
+  models: Array<{ id: string; name?: string; api?: string }>;
+  apis: string[];
+  baseUrl?: string;
+  cost: number;
+  tokens: number;
+  cacheRead: number;
+  turns: number;
+  hasUsage: boolean;
 }
-
-const INITIAL_ROUTING_MODELS: ModelRoutingItem[] = [
-  {
-    id: 'm-claude-37',
-    name: 'Claude 3.7 Sonnet',
-    provider: 'Anthropic Claude',
-    contextWindow: '200K tokens',
-    speed: '72 tok/s',
-    costPer1k: '$0.003 / $0.015',
-    role: 'Primary Dispatcher',
-    isPrimary: true,
-  },
-  {
-    id: 'm-gemini-25',
-    name: 'Gemini 2.5 Pro',
-    provider: 'Google Gemini Pro / Flash',
-    contextWindow: '1M tokens',
-    speed: '95 tok/s',
-    costPer1k: '$0.00125 / $0.005',
-    role: 'Long Context & Deep Audit',
-  },
-  {
-    id: 'm-o3-mini',
-    name: 'o3-mini (High Effort)',
-    provider: 'OpenAI GPT-4.5 / o3',
-    contextWindow: '128K tokens',
-    speed: '86 tok/s',
-    costPer1k: '$0.0011 / $0.0044',
-    role: 'Fast Logic & Math Proofs',
-  },
-  {
-    id: 'm-deepseek-r1',
-    name: 'DeepSeek R1 (32B)',
-    provider: 'Local Ollama Cluster',
-    contextWindow: '64K tokens',
-    speed: '48 tok/s',
-    costPer1k: '$0.000 (Internal Cluster)',
-    role: 'Offline Air-gapped Fallback',
-  },
-];
 
 export const ProvidersView: React.FC = () => {
   const { theme, accentColor } = useTheme();
   const { t, language } = useI18n();
-  const [providers, setProviders] = useState<LLMProvider[]>(INITIAL_PROVIDERS);
-  const [routingModels, setRoutingModels] = useState<ModelRoutingItem[]>(INITIAL_ROUTING_MODELS);
+  const zh = language === 'zh-CN';
+
+  const [usage, setUsage] = useState<OmpUsagePayload | null>(null);
+  const [catalog, setCatalog] = useState<CatalogModel[] | null>(null);
+  const [scope, setScope] = useState<OmpModelScope | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'providers' | 'models'>('providers');
+  const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [scopeMessage, setScopeMessage] = useState<string | null>(null);
+  const [modelQuery, setModelQuery] = useState('');
 
-  // Add Provider Modal State
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [newProvName, setNewProvName] = useState('');
-  const [newProvVendor, setNewProvVendor] = useState('OpenAI-Compatible');
-  const [newProvEndpoint, setNewProvEndpoint] = useState('');
-  const [newProvApiKey, setNewProvApiKey] = useState('');
-  const [newProvModels, setNewProvModels] = useState('');
-  const [newProvBalance, setNewProvBalance] = useState('50.00');
+  useEffect(() => {
+    let cancelled = false;
+    Promise.allSettled([fetchUsage(), fetchModelCatalog(), fetchModelScope()]).then(([u, c, s]) => {
+      if (cancelled) return;
+      if (u.status === 'fulfilled') setUsage(u.value);
+      else setLoadError(u.reason instanceof Error ? u.reason.message : String(u.reason));
+      if (c.status === 'fulfilled') setCatalog(c.value);
+      else setLoadError((prev) => prev ?? (c.reason instanceof Error ? c.reason.message : String(c.reason)));
+      if (s.status === 'fulfilled') setScope(s.value);
+      else setLoadError((prev) => prev ?? (s.reason instanceof Error ? s.reason.message : String(s.reason)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // Totals calculations
-  const totalBills = providers.reduce((sum, p) => sum + p.billsThisMonth, 0);
-  const totalRemainingCash = providers.reduce(
-    (sum, p) => (typeof p.balanceRemaining === 'number' ? sum + p.balanceRemaining : sum),
-    0
-  );
-  const allModelsCount = providers.reduce((sum, p) => sum + p.models.length, 0);
-
-  const handleCreateProvider = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProvName.trim()) return;
-
-    const parsedModels = newProvModels
-      .split(',')
-      .map((m) => m.trim())
-      .filter(Boolean);
-
-    const newProvider: LLMProvider = {
-      id: `prov-${Date.now()}`,
-      name: newProvName.trim(),
-      vendor: newProvVendor,
-      endpoint: newProvEndpoint.trim() || 'https://api.openai.com/v1',
-      apiKeyMasked: newProvApiKey ? `sk-••••${newProvApiKey.slice(-4)}` : 'sk-mock-key-••••',
-      status: 'Active',
-      latency: `${Math.floor(Math.random() * 200 + 80)}ms`,
-      models: parsedModels.length > 0 ? parsedModels : ['custom-model-v1'],
-      billsThisMonth: 0.0,
-      balanceRemaining: parseFloat(newProvBalance) || 50.0,
-      currency: 'USD',
-      billingType: 'Prepaid Credits',
-      monthlyQuota: 200,
+  const providerRows = useMemo<ProviderRow[]>(() => {
+    const rows = new Map<string, ProviderRow>();
+    const ensure = (id: string): ProviderRow => {
+      const existing = rows.get(id);
+      if (existing) return existing;
+      const created: ProviderRow = {
+        id,
+        models: [],
+        apis: [],
+        cost: 0,
+        tokens: 0,
+        cacheRead: 0,
+        turns: 0,
+        hasUsage: false,
+      };
+      rows.set(id, created);
+      return created;
     };
 
-    setProviders([newProvider, ...providers]);
-
-    // Also add primary model to routing table
-    if (newProvider.models[0]) {
-      setRoutingModels((prev) => [
-        ...prev,
-        {
-          id: `m-${Date.now()}`,
-          name: newProvider.models[0],
-          provider: newProvider.name,
-          contextWindow: '128K tokens',
-          speed: '65 tok/s',
-          costPer1k: '$0.002 / $0.008',
-          role: 'Custom Provider Node',
-        },
-      ]);
+    for (const m of catalog ?? []) {
+      const row = ensure(m.provider);
+      if (!row.models.some((existing) => existing.id === m.id)) row.models.push({ id: m.id, name: m.name, api: m.api });
+      if (!row.apis.includes(m.api)) row.apis.push(m.api);
+      if (!row.baseUrl && m.baseUrl) row.baseUrl = m.baseUrl;
     }
 
-    setAddModalOpen(false);
-    setNewProvName('');
-    setNewProvEndpoint('');
-    setNewProvApiKey('');
-    setNewProvModels('');
+    // The full catalog (`omp models --json`) also carries providers the live
+    // session's picker may hide, and every model we can toggle.
+    for (const model of scope?.models ?? []) {
+      const row = ensure(model.provider);
+      if (!row.models.some((existing) => existing.id === model.id)) {
+        row.models.push({ id: model.id, name: model.name });
+      }
+    }
+
+    for (const u of usage?.byModel ?? []) {
+      const row = ensure(u.provider);
+      row.cost += u.cost;
+      row.tokens += u.tokens;
+      row.cacheRead += u.cacheRead;
+      row.turns += u.turns;
+      row.hasUsage = true;
+    }
+
+    return [...rows.values()].sort((a, b) => b.cost - a.cost);
+  }, [catalog, usage, scope]);
+
+  // --- model scope (omp's native enabledModels / disabledProviders) ---
+  const disabledProviders = useMemo(() => new Set(scope?.disabledProviders ?? []), [scope]);
+  const rolesBySelector = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const [role, selector] of Object.entries(scope?.modelRoles ?? {})) {
+      if (typeof selector !== 'string' || !selector) continue;
+      map[selector] = [...(map[selector] ?? []), role];
+    }
+    return map;
+  }, [scope]);
+
+  /** A model is usable when its provider is not disabled and it passes the allowlist. */
+  const modelEnabled = (provider: string, id: string): boolean =>
+    !disabledProviders.has(provider) &&
+    ((scope?.enabledModels ?? []).length === 0 || (scope?.enabledModels ?? []).includes(`${provider}/${id}`));
+
+  const applyScope = async (body: { kind: 'model' | 'provider'; selector?: string; provider?: string; enabled: boolean }, label: string) => {
+    const key = body.selector ?? body.provider ?? '';
+    setBusyKey(key);
+    setScopeMessage(null);
+    try {
+      const next = await setModelScope(body);
+      setScope(next);
+      setScopeMessage(
+        zh
+          ? `${label} 已${body.enabled ? '启用' : '停用'}，omp 会话已重启，模型目录随之刷新。`
+          : `${label} ${body.enabled ? 'enabled' : 'disabled'}; the omp session was restarted.`
+      );
+    } catch (error) {
+      setScopeMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyKey(null);
+    }
   };
 
-  const handleDeleteProvider = (id: string) => {
-    setProviders(providers.filter((p) => p.id !== id));
+  const toggleProviderExpanded = (provider: string) => {
+    setExpandedProviders((prev) => ({ ...prev, [provider]: !prev[provider] }));
   };
 
-  const handleSelectPrimaryModel = (modelId: string) => {
-    setRoutingModels(
-      routingModels.map((m) => ({
-        ...m,
-        isPrimary: m.id === modelId,
-      }))
-    );
-  };
+  const query = modelQuery.trim().toLowerCase();
+  const visibleProviderRows = query
+    ? providerRows.filter(
+        (row) => row.id.toLowerCase().includes(query) || row.models.some((m) => m.id.toLowerCase().includes(query))
+      )
+    : providerRows;
+
+  const totals = usage?.totals;
+  const usageUnavailable = usage !== null && usage.available === false;
+  const loading = usage === null && catalog === null && !loadError;
+
+  const byDay = useMemo(() => {
+    if (!usage?.byDay) return [];
+    return [...usage.byDay].sort((a, b) => a.day.localeCompare(b.day));
+  }, [usage]);
+  const maxDayCost = byDay.reduce((max, d) => Math.max(max, d.cost), 0);
+  const topProjects = (usage?.byProject ?? []).slice(0, 6);
 
   return (
     <div className="space-y-6 max-w-5xl">
-      {/* Top Header & Add Action */}
+      {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: theme.border }}>
         <div>
           <h2 className="text-base font-semibold tracking-tight text-[#fafafa] flex items-center gap-2">
             <Cpu className="w-5 h-5" style={{ color: accentColor }} />
             {t.providersTitle}
           </h2>
-          <p className="text-xs text-[#a1a1aa] mt-0.5">
-            {t.providersDesc}
-          </p>
+          <p className="text-xs text-[#a1a1aa] mt-0.5">{t.providersDesc}</p>
         </div>
-
-        {/* Action button: Add New Provider */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setAddModalOpen(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded text-xs font-semibold cursor-pointer shadow-md transition-opacity hover:opacity-90"
-            style={{ backgroundColor: accentColor, color: '#09090b' }}
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>{t.addProvider}</span>
-          </button>
+        <div className="text-[10px] font-mono text-[#71717a] flex items-center gap-1.5" title={usage?.path}>
+          <Database className="w-3.5 h-3.5" />
+          <span>{SOURCE_LABEL}</span>
         </div>
       </div>
 
+      {loadError && (
+        <div className="flex items-start gap-2 p-3 rounded border border-[#7f1d1d] bg-[#18181b] text-[11px] font-mono text-[#fca5a5]">
+          <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>{loadError}</span>
+        </div>
+      )}
+      {usageUnavailable && (
+        <div className="flex items-start gap-2 p-3 rounded border border-[#78350f] bg-[#18181b] text-[11px] font-mono text-[#fcd34d]">
+          <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>
+            {zh ? '用量数据库不可用：' : 'Usage database unavailable: '}
+            {usage?.error || (zh ? '未知原因' : 'unknown reason')}
+            {usage?.path ? ` (${usage.path})` : ''}
+          </span>
+        </div>
+      )}
+      {loading && (
+        <div className="flex items-center gap-2 p-4 text-xs font-mono text-[#71717a]">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          {zh ? '正在读取真实用量与模型目录…' : 'Loading real usage and model catalog…'}
+        </div>
+      )}
+
       {/* ======================================================== */}
-      {/* FINANCIAL & INFERENCE BILLING KPI CARDS                 */}
+      {/* REAL USAGE KPI CARDS                                     */}
       {/* ======================================================== */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {/* Card 1: Total Bills */}
+        {/* Card 1: cumulative spend */}
         <div
           className="p-3.5 rounded-lg border flex flex-col justify-between"
           style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
         >
           <div className="flex items-center justify-between text-[#71717a] text-[11px]">
-            <span>{t.billsMonth}</span>
+            <span>{zh ? '累计消耗 (Cost)' : 'Cumulative Spend'}</span>
             <Receipt className="w-4 h-4 text-[#f59e0b]" />
           </div>
           <div className="mt-2">
-            <div className="text-xl font-bold font-mono text-[#fafafa]">
-              ${totalBills.toFixed(2)}
-            </div>
-            <div className="text-[10px] text-[#71717a] mt-0.5">
-              {t.billsMonthDesc}
+            <div className="text-xl font-bold font-mono text-[#fafafa]">{formatCost(totals?.cost)}</div>
+            <div className="text-[10px] text-[#71717a] mt-0.5 font-mono">
+              {totals ? `${totals.turns} ${zh ? '轮次' : 'turns'}` : t.billsMonthDesc}
             </div>
           </div>
         </div>
 
-        {/* Card 2: Total Balance */}
+        {/* Card 2: total tokens */}
         <div
           className="p-3.5 rounded-lg border flex flex-col justify-between"
           style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
         >
           <div className="flex items-center justify-between text-[#71717a] text-[11px]">
-            <span>{t.balanceRemaining}</span>
-            <Wallet className="w-4 h-4 text-[#34d399]" />
+            <span>{zh ? '总 Token' : 'Total Tokens'}</span>
+            <Activity className="w-4 h-4 text-[#38bdf8]" />
           </div>
           <div className="mt-2">
-            <div className="text-xl font-bold font-mono text-[#34d399]">
-              ${totalRemainingCash.toFixed(2)}
-            </div>
-            <div className="text-[10px] text-[#71717a] mt-0.5">
-              {t.balanceRemainingDesc}
+            <div className="text-xl font-bold font-mono text-[#fafafa]">{formatCompact(totals?.tokens)}</div>
+            <div className="text-[10px] text-[#71717a] mt-0.5 font-mono">
+              in {formatCompact(totals?.input)} · out {formatCompact(totals?.output)}
             </div>
           </div>
         </div>
 
-        {/* Card 3: Providers Count */}
+        {/* Card 3: cache read + savings */}
+        <div
+          className="p-3.5 rounded-lg border flex flex-col justify-between"
+          style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
+        >
+          <div className="flex items-center justify-between text-[#71717a] text-[11px]">
+            <span>{zh ? '缓存读取 (Cache)' : 'Cache Read'}</span>
+            <Layers className="w-4 h-4" style={{ color: accentColor }} />
+          </div>
+          <div className="mt-2">
+            <div className="text-xl font-bold font-mono text-[#fafafa]">{formatCompact(totals?.cacheRead)}</div>
+            <div className="text-[10px] text-[#71717a] mt-0.5 font-mono">
+              {zh ? '节省' : 'savings'} {formatCost(totals?.cacheSavings)}
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: provider / model counts */}
         <div
           className="p-3.5 rounded-lg border flex flex-col justify-between"
           style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
         >
           <div className="flex items-center justify-between text-[#71717a] text-[11px]">
             <span>{t.activeProviders}</span>
-            <Server className="w-4 h-4 text-[#38bdf8]" />
+            <Server className="w-4 h-4 text-[#34d399]" />
           </div>
           <div className="mt-2">
             <div className="text-xl font-bold font-mono text-[#fafafa]">
-              {providers.length}
+              {providerRows.length || (loading ? '…' : 0)}
             </div>
-            <div className="text-[10px] text-[#71717a] mt-0.5">
-              {t.activeProvidersDesc}
-            </div>
-          </div>
-        </div>
-
-        {/* Card 4: Models Count */}
-        <div
-          className="p-3.5 rounded-lg border flex flex-col justify-between"
-          style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-        >
-          <div className="flex items-center justify-between text-[#71717a] text-[11px]">
-            <span>{t.totalModels}</span>
-            <Layers className="w-4 h-4 text-[#a78bfa]" style={{ color: accentColor }} />
-          </div>
-          <div className="mt-2">
-            <div className="text-xl font-bold font-mono text-[#fafafa]">
-              {allModelsCount}
-            </div>
-            <div className="text-[10px] text-[#71717a] mt-0.5">
-              {t.totalModelsDesc}
+            <div className="text-[10px] text-[#71717a] mt-0.5 font-mono">
+              {catalog ? `${catalog.length} ${zh ? '个模型' : 'models'}` : t.totalModelsDesc}
             </div>
           </div>
         </div>
@@ -337,9 +305,7 @@ export const ProvidersView: React.FC = () => {
           type="button"
           onClick={() => setActiveTab('providers')}
           className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'providers'
-              ? 'bg-[#18181b] text-[#fafafa] font-semibold border'
-              : 'text-[#a1a1aa] hover:text-[#fafafa]'
+            activeTab === 'providers' ? 'bg-[#18181b] text-[#fafafa] font-semibold border' : 'text-[#a1a1aa] hover:text-[#fafafa]'
           }`}
           style={{
             borderColor: activeTab === 'providers' ? accentColor : 'transparent',
@@ -347,16 +313,16 @@ export const ProvidersView: React.FC = () => {
           }}
         >
           <Server className="w-3.5 h-3.5" />
-          <span>{t.tabProvidersBills} ({providers.length})</span>
+          <span>
+            {t.tabProvidersBills} ({providerRows.length})
+          </span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('models')}
           className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'models'
-              ? 'bg-[#18181b] text-[#fafafa] font-semibold border'
-              : 'text-[#a1a1aa] hover:text-[#fafafa]'
+            activeTab === 'models' ? 'bg-[#18181b] text-[#fafafa] font-semibold border' : 'text-[#a1a1aa] hover:text-[#fafafa]'
           }`}
           style={{
             borderColor: activeTab === 'models' ? accentColor : 'transparent',
@@ -364,369 +330,321 @@ export const ProvidersView: React.FC = () => {
           }}
         >
           <Cpu className="w-3.5 h-3.5" />
-          <span>{t.tabModelRouting}</span>
+          <span>
+            {t.tabModelRouting}
+            {catalog ? ` (${catalog.length})` : ''}
+          </span>
         </button>
       </div>
 
       {/* ======================================================== */}
-      {/* TAB 1: PROVIDERS WITH BILLS & REMAINING BALANCES        */}
+      {/* TAB 1: REAL PROVIDERS + BILLING / USAGE                  */}
       {/* ======================================================== */}
       {activeTab === 'providers' && (
         <div className="space-y-3">
-          {providers.map((p) => {
-            const hasQuota = p.monthlyQuota && p.monthlyQuota > 0;
-            const quotaPercent = hasQuota
-              ? Math.min(100, Math.round((p.billsThisMonth / (p.monthlyQuota as number)) * 100))
-              : 0;
+          {/* Billing & usage panel */}
+          <div className="p-4 rounded-lg border space-y-3" style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}>
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold text-[#fafafa] flex items-center gap-2">
+                <Database className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                {zh ? '计费与用量 (Billing &amp; Usage)' : 'Billing &amp; Usage'}
+              </div>
+              <div className="text-[10px] font-mono text-[#71717a]" title={usage?.path}>
+                {SOURCE_LABEL}
+              </div>
+            </div>
 
-            return (
-              <div
-                key={p.id}
-                className="p-4 rounded-lg border transition-all space-y-3"
-                style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-              >
-                {/* Header row: Name, Endpoint, Status, Actions */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-[11px] font-mono">
+              {[
+                { k: zh ? '消耗' : 'Cost', v: formatCost(totals?.cost) },
+                { k: zh ? '轮次' : 'Turns', v: totals?.turns ?? '—' },
+                { k: zh ? '输入' : 'Input', v: formatCompact(totals?.input) },
+                { k: zh ? '输出' : 'Output', v: formatCompact(totals?.output) },
+                { k: zh ? '缓存读取' : 'CacheRead', v: formatCompact(totals?.cacheRead) },
+                { k: zh ? '缓存节省' : 'CacheSavings', v: formatCost(totals?.cacheSavings) },
+              ].map((cell) => (
+                <div key={cell.k} className="p-2 rounded bg-[#121215] border border-[#27272a]">
+                  <div className="text-[9px] uppercase text-[#71717a]">{cell.k}</div>
+                  <div className="text-[#fafafa] font-semibold mt-0.5">{cell.v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* byDay sparkline */}
+            {byDay.length > 0 && (
+              <div>
+                <div className="text-[10px] font-mono text-[#71717a] uppercase mb-1">
+                  {zh ? '按日消耗 (usage.db byDay)' : 'Daily spend (usage.db byDay)'}
+                </div>
+                <div className="flex items-end gap-0.5 h-12">
+                  {byDay.map((d) => (
                     <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs"
-                      style={{ backgroundColor: `${accentColor}18`, color: accentColor }}
-                    >
-                      {p.name.charAt(0)}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-xs text-[#fafafa]">{p.name}</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#18181b] border border-[#27272a] text-[#34d399]">
-                          {p.status}
-                        </span>
-                        <span className="text-[10px] font-mono text-[#71717a]">
-                          {p.vendor}
-                        </span>
-                      </div>
-                      <div className="text-[11px] font-mono text-[#71717a] mt-0.5 flex items-center gap-2">
-                        <span>{p.endpoint}</span>
-                        <span>·</span>
-                        <span className="text-[#a1a1aa]">{p.apiKeyMasked}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right side Ping & Delete */}
-                  <div className="flex items-center gap-3">
-                    <div className="text-right font-mono text-xs">
-                      <span className="text-[11px] text-[#34d399]">Ping: {p.latency}</span>
-                    </div>
-                    {providers.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteProvider(p.id)}
-                        title="Delete provider"
-                        className="p-1.5 text-[#71717a] hover:text-[#ef4444] rounded hover:bg-[#18181b] cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Financial Row: Bills & Balance Indicator */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 rounded bg-[#121215] border border-[#27272a] text-xs font-mono">
-                  {/* Bills this month */}
-                  <div>
-                    <div className="text-[10px] text-[#71717a] uppercase mb-0.5">本月账单 (Bills This Cycle)</div>
-                    <div className="text-sm font-semibold text-[#fafafa] flex items-center gap-1.5">
-                      <Receipt className="w-3.5 h-3.5 text-[#f59e0b]" />
-                      <span>${p.billsThisMonth.toFixed(2)} {p.currency}</span>
-                    </div>
-                    <div className="text-[10px] text-[#71717a] mt-1">
-                      Billing Type: {p.billingType}
-                    </div>
-                  </div>
-
-                  {/* Remaining balance */}
-                  <div>
-                    <div className="text-[10px] text-[#71717a] uppercase mb-0.5">可用余额 (Remaining Balance)</div>
-                    <div className="text-sm font-semibold text-[#34d399] flex items-center gap-1.5">
-                      <Wallet className="w-3.5 h-3.5 text-[#34d399]" />
-                      <span>
-                        {typeof p.balanceRemaining === 'number'
-                          ? `$${p.balanceRemaining.toFixed(2)} ${p.currency}`
-                          : p.balanceRemaining}
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-[#71717a] mt-1">
-                      {typeof p.balanceRemaining === 'number' ? 'Auto-recharge: ON' : 'Self-hosted compute'}
-                    </div>
-                  </div>
-
-                  {/* Monthly Budget / Quota Progress */}
-                  <div>
-                    <div className="flex items-center justify-between text-[10px] text-[#71717a] uppercase mb-1">
-                      <span>Monthly Budget Usage</span>
-                      <span>{hasQuota ? `${quotaPercent}%` : 'N/A'}</span>
-                    </div>
-                    {hasQuota ? (
-                      <div className="w-full h-1.5 rounded-full bg-[#1e1e24] overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${quotaPercent}%`,
-                            backgroundColor: quotaPercent > 80 ? '#f43f5e' : accentColor,
-                          }}
-                        />
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-[#71717a]">No spend ceiling configured</div>
-                    )}
-                    <div className="text-[10px] text-[#71717a] mt-1">
-                      {hasQuota ? `Quota cap: $${p.monthlyQuota} / mo` : 'Enterprise uncapped'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Models tags */}
-                <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                  <span className="text-[10px] font-mono text-[#71717a]">Models:</span>
-                  {p.models.map((m) => (
-                    <span
-                      key={m}
-                      className="text-[10px] font-mono px-2 py-0.5 rounded border"
+                      key={d.day}
+                      title={`${d.day} · ${formatCost(d.cost)} · ${formatCompact(d.tokens)} tok`}
+                      className="flex-1 min-w-[3px] rounded-sm transition-all"
                       style={{
-                        backgroundColor: '#18181b',
-                        borderColor: '#27272a',
-                        color: '#a1a1aa',
+                        height: `${maxDayCost > 0 ? Math.max(4, (d.cost / maxDayCost) * 100) : 4}%`,
+                        backgroundColor: accentColor,
+                        opacity: maxDayCost > 0 ? 0.35 + 0.65 * (d.cost / maxDayCost) : 0.4,
                       }}
-                    >
-                      {m}
-                    </span>
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center justify-between text-[9px] font-mono text-[#52525b] mt-1">
+                  <span>{byDay[0]?.day}</span>
+                  <span>{byDay[byDay.length - 1]?.day}</span>
+                </div>
+              </div>
+            )}
+
+            {/* byProject top rows */}
+            {topProjects.length > 0 && (
+              <div>
+                <div className="text-[10px] font-mono text-[#71717a] uppercase mb-1">
+                  {zh ? '按项目消耗 Top (byProject)' : 'Top projects (byProject)'}
+                </div>
+                <div className="divide-y divide-[#1e1e24] border border-[#27272a] rounded overflow-hidden">
+                  {topProjects.map((p) => (
+                    <div key={p.cwd} className="grid grid-cols-12 gap-2 px-2.5 py-1.5 text-[11px] font-mono items-center hover:bg-[#121215]">
+                      <div className="col-span-6 text-[#a1a1aa] truncate" title={p.cwd}>
+                        {basename(p.cwd)}
+                      </div>
+                      <div className="col-span-3 text-right text-[#fafafa]">{formatCost(p.cost)}</div>
+                      <div className="col-span-3 text-right text-[#71717a]">
+                        {p.turns} {zh ? '轮' : 'turns'} · {formatCompact(p.tokens)}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ======================================================== */}
-      {/* TAB 2: MODEL ROUTING TABLE                               */}
-      {/* ======================================================== */}
-      {activeTab === 'models' && (
-        <div
-          className="border rounded-lg overflow-hidden transition-colors"
-          style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-        >
-          <div className="grid grid-cols-12 gap-3 px-3 py-2 text-[10px] font-mono tracking-wider uppercase text-[#71717a] border-b bg-[#121215]" style={{ borderColor: theme.border }}>
-            <div className="col-span-4">{language === 'zh-CN' ? '模型名称与提供商' : 'Model & Provider'}</div>
-            <div className="col-span-3">{language === 'zh-CN' ? '上下文窗口 (Context)' : 'Context Window'}</div>
-            <div className="col-span-3">{language === 'zh-CN' ? '生成速率与千Token单价' : 'Throughput & Cost'}</div>
-            <div className="col-span-2 text-right">{language === 'zh-CN' ? '路由角色分工' : 'Routing Role'}</div>
+            )}
           </div>
 
-          <div className="divide-y text-xs" style={{ borderColor: theme.border }}>
-            {routingModels.map((m) => (
-              <div
-                key={m.id}
-                onClick={() => handleSelectPrimaryModel(m.id)}
-                className="grid grid-cols-12 gap-3 px-3 py-3 items-center hover:bg-[#18181b]/50 transition-colors cursor-pointer"
-              >
-                <div className="col-span-4 flex items-center gap-2">
-                  <div
-                    className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
-                      m.isPrimary ? 'border-transparent' : 'border-[#3f3f46]'
-                    }`}
-                    style={{ backgroundColor: m.isPrimary ? accentColor : 'transparent' }}
-                  >
-                    {m.isPrimary && <Check className="w-2.5 h-2.5 text-[#09090b] stroke-[3]" />}
-                  </div>
-                  <div>
-                    <div className="font-semibold text-[#fafafa] flex items-center gap-1.5">
-                      <span>{m.name}</span>
-                      {m.isPrimary && (
-                        <span className="text-[9px] px-1.5 py-0.2 rounded font-mono font-bold" style={{ backgroundColor: `${accentColor}20`, color: accentColor }}>
-                          {language === 'zh-CN' ? '主派发' : 'PRIMARY'}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] font-mono text-[#71717a]">{m.provider}</div>
-                  </div>
-                </div>
-
-                <div className="col-span-3 font-mono text-[11px] text-[#a1a1aa]">
-                  {m.contextWindow}
-                </div>
-
-                <div className="col-span-3 font-mono text-[11px]">
-                  <div className="text-[#34d399]">{m.speed}</div>
-                  <div className="text-[10px] text-[#71717a]">{m.costPer1k}</div>
-                </div>
-
-                <div className="col-span-2 text-right">
-                  <span
-                    className="text-[10px] font-mono px-2 py-0.5 rounded border"
-                    style={{
-                      backgroundColor: m.isPrimary ? `${accentColor}15` : '#18181b',
-                      borderColor: m.isPrimary ? `${accentColor}40` : '#27272a',
-                      color: m.isPrimary ? accentColor : '#a1a1aa',
-                    }}
-                  >
-                    {language === 'zh-CN'
-                      ? m.role === 'Primary Dispatcher'
-                        ? '主派发调度器'
-                        : m.role === 'Long Context & Deep Audit'
-                        ? '长上下文与深度审计'
-                        : m.role === 'Fast Logic & Math Proofs'
-                        ? '快速逻辑推理'
-                        : m.role === 'Offline Air-gapped Fallback'
-                        ? '离线隔离降级回退'
-                        : m.role
-                      : m.role}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ======================================================== */}
-      {/* MODAL: ADD NEW PROVIDER                                  */}
-      {/* ======================================================== */}
-      {addModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none">
-          <div
-            className="w-full max-w-lg border rounded-lg shadow-2xl overflow-hidden font-mono text-xs"
-            style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-          >
-            <div className="px-4 py-3 border-b bg-[#121215] flex items-center justify-between" style={{ borderColor: theme.border }}>
-              <div className="flex items-center gap-2">
-                <Plus className="w-4 h-4" style={{ color: accentColor }} />
-                <span className="font-semibold text-[#fafafa] font-sans text-sm">
-                  {language === 'zh-CN' ? '新增大模型推理提供商' : 'Add New LLM Provider'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAddModalOpen(false)}
-                className="text-[#71717a] hover:text-[#fafafa] cursor-pointer"
-              >
-                ✕
-              </button>
+          {/* Model scope: search + omp's native settings summary */}
+          <div className="p-3 rounded-lg border space-y-2" style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}>
+            <div className="flex items-center gap-2">
+              <Search className="w-3.5 h-3.5 text-[#71717a] shrink-0" />
+              <input
+                type="text"
+                value={modelQuery}
+                onChange={(e) => setModelQuery(e.target.value)}
+                placeholder={zh ? '搜索提供商或模型…' : 'Search providers or models…'}
+                className="flex-1 h-7 px-2 bg-[#121215] border border-[#27272a] rounded text-[11px] text-[#fafafa] placeholder-[#52525b] focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
+              />
+              <span className="text-[10px] font-mono text-[#71717a] shrink-0">
+                {scope
+                  ? `${disabledProviders.size} ${zh ? '个提供商停用' : 'providers off'} · ${
+                      scope.enabledModels.length === 0
+                        ? zh
+                          ? '所有模型启用'
+                          : 'all models enabled'
+                        : `${scope.enabledModels.length} ${zh ? '个模型启用' : 'models allowed'}`
+                    }`
+                  : zh
+                  ? '读取 omp 模型作用域…'
+                  : 'reading omp model scope…'}
+              </span>
             </div>
-
-            <form onSubmit={handleCreateProvider} className="p-4 space-y-3 font-sans">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-[#a1a1aa] mb-1 font-mono">
-                    {language === 'zh-CN' ? '提供商名称 (Name) *' : 'Provider Name *'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newProvName}
-                    onChange={(e) => setNewProvName(e.target.value)}
-                    placeholder="e.g. DeepSeek Official"
-                    className="w-full h-8 px-2.5 bg-[#121215] border border-[#27272a] rounded text-[#fafafa] text-xs font-mono focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] text-[#a1a1aa] mb-1 font-mono">
-                    {language === 'zh-CN' ? '协议架构类型 (Type)' : 'Provider Type'}
-                  </label>
-                  <select
-                    value={newProvVendor}
-                    onChange={(e) => setNewProvVendor(e.target.value)}
-                    className="w-full h-8 px-2.5 bg-[#121215] border border-[#27272a] rounded text-[#fafafa] text-xs font-mono focus:outline-none"
-                  >
-                    <option value="OpenAI-Compatible">OpenAI-Compatible</option>
-                    <option value="Anthropic Claude">Anthropic Claude</option>
-                    <option value="Google Gemini">Google Gemini</option>
-                    <option value="DeepSeek">DeepSeek</option>
-                    <option value="Groq">Groq Cloud</option>
-                    <option value="OpenRouter">OpenRouter</option>
-                    <option value="Ollama Local">Ollama Local</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] text-[#a1a1aa] mb-1 font-mono">
-                  {language === 'zh-CN' ? '服务基础接口 URL (Endpoint) *' : 'Base Endpoint URL *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newProvEndpoint}
-                  onChange={(e) => setNewProvEndpoint(e.target.value)}
-                  placeholder="e.g. https://api.deepseek.com/v1"
-                  className="w-full h-8 px-2.5 bg-[#121215] border border-[#27272a] rounded text-[#fafafa] text-xs font-mono focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] text-[#a1a1aa] mb-1 font-mono">
-                  {language === 'zh-CN' ? 'API 访问密钥 (Key)' : 'API Key / Secret Token'}
-                </label>
-                <input
-                  type="password"
-                  value={newProvApiKey}
-                  onChange={(e) => setNewProvApiKey(e.target.value)}
-                  placeholder="sk-••••••••••••••••••••••••"
-                  className="w-full h-8 px-2.5 bg-[#121215] border border-[#27272a] rounded text-[#fafafa] text-xs font-mono focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-[#a1a1aa] mb-1 font-mono">
-                    {language === 'zh-CN' ? '初始可用额度 ($)' : 'Initial Balance ($)'}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={newProvBalance}
-                    onChange={(e) => setNewProvBalance(e.target.value)}
-                    placeholder="50.00"
-                    className="w-full h-8 px-2.5 bg-[#121215] border border-[#27272a] rounded text-[#fafafa] text-xs font-mono focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] text-[#a1a1aa] mb-1 font-mono">
-                    {language === 'zh-CN' ? '支持模型列表 (逗号分隔)' : 'Models (comma separated)'}
-                  </label>
-                  <input
-                    type="text"
-                    value={newProvModels}
-                    onChange={(e) => setNewProvModels(e.target.value)}
-                    placeholder="deepseek-chat, deepseek-reasoner"
-                    className="w-full h-8 px-2.5 bg-[#121215] border border-[#27272a] rounded text-[#fafafa] text-xs font-mono focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t" style={{ borderColor: theme.border }}>
-                <button
-                  type="button"
-                  onClick={() => setAddModalOpen(false)}
-                  className="px-3.5 py-1.5 rounded border text-xs text-[#a1a1aa] hover:bg-[#18181b] cursor-pointer"
-                  style={{ borderColor: theme.border }}
-                >
-                  {t.cancelBtn}
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded text-xs font-semibold cursor-pointer shadow"
-                  style={{ backgroundColor: accentColor, color: '#09090b' }}
-                >
-                  {language === 'zh-CN' ? '确认接入并启用' : 'Connect Provider'}
+            <p className="text-[10px] text-[#71717a] leading-relaxed">
+              {zh
+                ? '展开提供商可查看其全部模型，并逐个开关是否可用。开关写入 omp 自身的 enabledModels / disabledProviders 设置（~/.omp/agent/config.yml），保存后会自动重启 omp 会话使其生效。'
+                : "Expand a provider to see all of its models and toggle each one. Toggles write omp's own enabledModels / disabledProviders settings (~/.omp/agent/config.yml); the omp session restarts so they take effect."}
+            </p>
+            {scopeMessage && (
+              <div className="flex items-start gap-2 px-2.5 py-1.5 rounded border text-[11px]" style={{ borderColor: `${accentColor}55`, backgroundColor: `${accentColor}12`, color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span className="whitespace-pre-wrap break-words">{scopeMessage}</span>
+                <button type="button" onClick={() => setScopeMessage(null)} className="ml-auto text-[10px] text-[#71717a] hover:text-[#fafafa] cursor-pointer">
+                  ✕
                 </button>
               </div>
-            </form>
+            )}
           </div>
+
+          {/* Provider rows */}
+          {visibleProviderRows.map((p) => (
+            <div
+              key={p.id}
+              className="p-4 rounded-lg border transition-all space-y-3"
+              style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs uppercase shrink-0"
+                    style={{ backgroundColor: `${accentColor}18`, color: accentColor }}
+                  >
+                    {p.id.charAt(0)}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-xs text-[#fafafa] font-mono">{p.id}</span>
+                      {p.apis.map((api) => (
+                        <span key={api} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#18181b] border border-[#27272a] text-[#a1a1aa]">
+                          {api}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="text-[11px] font-mono text-[#71717a] mt-0.5 truncate" title={p.baseUrl}>
+                      {p.baseUrl || '—'}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right font-mono text-[11px] text-[#71717a] shrink-0">
+                  <span className="text-[#fafafa]">{p.models.length}</span> {zh ? '个模型' : 'models'}
+                  {p.hasUsage && <span className="ml-3">{p.turns} {zh ? '轮' : 'turns'}</span>}
+                </div>
+              </div>
+
+              {/* Real usage numbers + honest balance slot */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 rounded bg-[#121215] border border-[#27272a] text-xs font-mono">
+                <div>
+                  <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? '累计消耗' : 'Total cost'}</div>
+                  <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCost(p.cost) : '—'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? 'Token 总量' : 'Tokens'}</div>
+                  <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCompact(p.tokens) : '—'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? '缓存读取' : 'Cache read'}</div>
+                  <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCompact(p.cacheRead) : '—'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? '可用余额' : 'Balance'}</div>
+                  <div className="text-sm font-semibold text-[#71717a]">—</div>
+                  <div className="text-[9px] text-[#52525b] mt-0.5">
+                    {zh ? '提供商未暴露余额接口' : 'no balance API exposed'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Expandable model list with per-model toggles */}
+              {(() => {
+                const providerEnabled = !disabledProviders.has(p.id);
+                const providerModels = query ? p.models.filter((m) => m.id.toLowerCase().includes(query)) : p.models;
+                const enabledCount = p.models.filter((m) => modelEnabled(p.id, m.id)).length;
+                const open = Boolean(expandedProviders[p.id]);
+                return (
+                  <div className="pt-2 border-t border-[#1e1e24]">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleProviderExpanded(p.id)}
+                        aria-expanded={open}
+                        className="flex items-center gap-2 text-[11px] text-[#a1a1aa] hover:text-[#fafafa] cursor-pointer min-w-0"
+                      >
+                        {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                        <span>{open ? (zh ? '折叠模型' : 'Collapse models') : zh ? '展开全部模型' : 'Show all models'}</span>
+                        <span className="text-[10px] font-mono text-[#71717a]">
+                          {enabledCount}/{p.models.length} {zh ? '启用' : 'enabled'}
+                        </span>
+                      </button>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] font-mono text-[#71717a] uppercase">{zh ? '提供商' : 'provider'}</span>
+                        <ScopeToggle
+                          accentColor={accentColor}
+                          busy={busyKey === p.id}
+                          value={providerEnabled ? 'on' : 'off'}
+                          onChange={(value) => void applyScope({ kind: 'provider', provider: p.id, enabled: value === 'on' }, p.id)}
+                          options={[
+                            { id: 'on', label: zh ? '启用' : 'on', title: zh ? '允许使用该提供商的模型' : 'Allow models from this provider' },
+                            {
+                              id: 'off',
+                              label: zh ? '停用' : 'off',
+                              title: zh
+                                ? '将提供商从 omp 模型注册表移除（disabledProviders）'
+                                : "Remove the provider from omp's model registry (disabledProviders)",
+                            },
+                          ]}
+                        />
+                      </div>
+                    </div>
+
+                    {open && (
+                      <div className="mt-2 rounded border border-[#27272a] divide-y divide-[#1e1e24] max-h-[340px] overflow-y-auto">
+                        {providerModels.length === 0 && (
+                          <div className="px-2.5 py-2 text-[10px] font-mono text-[#52525b]">
+                            {p.models.length === 0
+                              ? zh
+                                ? '目录中无模型（仅历史用量）'
+                                : 'none in catalog (usage only)'
+                              : zh
+                              ? '没有匹配的模型'
+                              : 'no matching models'}
+                          </div>
+                        )}
+                        {providerModels.map((m) => {
+                          const selector = `${p.id}/${m.id}`;
+                          const on = modelEnabled(p.id, m.id);
+                          const roles = rolesBySelector[selector] ?? [];
+                          return (
+                            <div key={selector} className="flex items-center justify-between gap-3 px-2.5 py-1.5 hover:bg-[#121215]">
+                              <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                                <span className="text-[11px] font-mono text-[#fafafa] truncate" title={selector}>
+                                  {m.id}
+                                </span>
+                                {m.name && m.name !== m.id && (
+                                  <span className="text-[10px] text-[#71717a] truncate max-w-[220px]">{m.name}</span>
+                                )}
+                                {roles.map((role) => (
+                                  <span
+                                    key={role}
+                                    className="text-[9px] font-mono px-1.5 py-0.5 rounded border"
+                                    style={{ borderColor: `${accentColor}55`, color: accentColor, backgroundColor: `${accentColor}12` }}
+                                    title={zh ? 'omp 模型角色引用了该模型' : 'Referenced by an omp model role'}
+                                  >
+                                    {role}
+                                  </span>
+                                ))}
+                                {!on && (
+                                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#18181b] border border-[#27272a] text-[#71717a]">
+                                    {zh ? '已停用' : 'off'}
+                                  </span>
+                                )}
+                              </div>
+
+                              <ScopeToggle
+                                accentColor={accentColor}
+                                busy={busyKey === selector}
+                                disabled={!providerEnabled}
+                                value={on ? 'on' : 'off'}
+                                onChange={(value) => void applyScope({ kind: 'model', selector, enabled: value === 'on' }, selector)}
+                                options={[
+                                  { id: 'on', label: zh ? '使用' : 'use' },
+                                  { id: 'off', label: zh ? '停用' : 'off' },
+                                ]}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          ))}
+
+          {!loading && visibleProviderRows.length === 0 && !loadError && (
+            <div className="p-3 text-xs font-mono text-[#71717a]">
+              {providerRows.length === 0
+                ? zh
+                  ? '未发现任何真实提供商。'
+                  : 'No real providers discovered.'
+                : zh
+                ? '没有匹配的提供商或模型。'
+                : 'No matching providers or models.'}
+            </div>
+          )}
         </div>
       )}
+
+      {/* ======================================================== */}
+      {/* TAB 2: REAL MODEL CATALOG                                */}
+      {/* ======================================================== */}
+      {activeTab === 'models' && <ModelsView embedded />}
     </div>
   );
 };

@@ -3,41 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import {
-  TopNavTab,
-  SettingsSidebarTab,
-  ProjectScope,
-  McpServer,
-  PluginItem,
-  SkillItem,
-  LogEntry,
-} from './types';
-import {
-  INITIAL_PROJECT_SCOPES,
-  INITIAL_MCP_SERVERS,
-  INITIAL_PLUGINS,
-  INITIAL_SKILLS,
-  INITIAL_LOGS,
-} from './mockData';
+import React, { useEffect, useState } from 'react';
+import { TopNavTab, SettingsSidebarTab, LogEntry } from './types';
+import { INITIAL_LOGS } from './mockData';
 
 // Components
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { ScopeControlBar } from './components/ScopeControlBar';
 import { McpServersSection } from './components/McpServersSection';
 import { PluginsSection } from './components/PluginsSection';
 import { SkillsSection } from './components/SkillsSection';
 import { EventStreamTerminal } from './components/EventStreamTerminal';
 
 // Modals & Drawers
-import { AddServerModal } from './components/AddServerModal';
-import { ConfigurePluginModal } from './components/ConfigurePluginModal';
 import { InstallSkillModal } from './components/InstallSkillModal';
-import { OmpConfigModal } from './components/OmpConfigModal';
-import { OverridesModal } from './components/OverridesModal';
-import { ServerDetailsDrawer } from './components/ServerDetailsDrawer';
-import { SkillDetailsDrawer } from './components/SkillDetailsDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { GitModal } from './components/GitModal';
 
@@ -47,11 +26,19 @@ import { SecurityView } from './components/views/SecurityView';
 import { ProvidersView } from './components/views/ProvidersView';
 import { ThemeView } from './components/views/ThemeView';
 import { WorkspaceView } from './components/views/WorkspaceView';
-import { BranchesView } from './components/views/BranchesView';
 import { AgentsView } from './components/views/AgentsView';
 import { OmpConfigView } from './components/views/OmpConfigView';
+import { UpdatesView } from './components/views/UpdatesView';
 import { SidePanel, SidePanelTab } from './components/SidePanel';
 import { useTheme } from './context/ThemeContext';
+import { useGitRepo } from './hooks/useGitRepo';
+import { fetchMcpServers, fetchSkills } from './omp/cli';
+
+interface OmpInventory {
+  mcpServers: number;
+  mcpConnected: number;
+  skills: number;
+}
 
 export default function App() {
   // Navigation states
@@ -66,39 +53,53 @@ export default function App() {
   // Theme preferences from global ThemeContext
   const { theme, accentColor, uiDensity, editorFont, enableGrid } = useTheme();
 
-  // Git & branch state
-  const [currentBranch, setCurrentBranch] = useState('main');
+  // Git repository state is real (git for-each-ref / git checkout / git commit),
+  // shared by the header selector, the git dialog and the side panel.
+  const git = useGitRepo();
   const [gitModalOpen, setGitModalOpen] = useState(false);
 
-  // Project scope
-  const [projects, setProjects] = useState<ProjectScope[]>(INITIAL_PROJECT_SCOPES);
-  const [currentProject, setCurrentProject] = useState<ProjectScope>(
-    INITIAL_PROJECT_SCOPES[0]
-  );
-  const [configScope, setConfigScope] = useState<'project' | 'global'>('project');
+  // Real inventory counts for the Settings sidebar (omp's own files/config).
+  const [inventory, setInventory] = useState<OmpInventory>({ mcpServers: 0, mcpConnected: 0, skills: 0 });
+  const [workspaceName, setWorkspaceName] = useState('');
 
-  // Core Orchestration Entities
-  const [servers, setServers] = useState<McpServer[]>(INITIAL_MCP_SERVERS);
-  const [plugins, setPlugins] = useState<PluginItem[]>(INITIAL_PLUGINS);
-  const [skills, setSkills] = useState<SkillItem[]>(INITIAL_SKILLS);
   const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
 
   // Loading & feedback states
-  const [isCheckingPluginUpdates, setIsCheckingPluginUpdates] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Modals & Drawers
-  const [addServerOpen, setAddServerOpen] = useState(false);
-  const [configuringPlugin, setConfiguringPlugin] = useState<PluginItem | null>(null);
   const [skillModal, setSkillModal] = useState<{ open: boolean; mode: 'install' | 'upload' }>({
     open: false,
     mode: 'install',
   });
-  const [ompConfigOpen, setOmpConfigOpen] = useState(false);
-  const [overridesOpen, setOverridesOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [selectedServer, setSelectedServer] = useState<McpServer | null>(null);
-  const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(null);
+
+  // Load real workspace + inventory counts once from the bridge.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const [health, mcp, skills] = await Promise.allSettled([
+        fetch('/api/health').then((r) => r.json() as Promise<{ workspace?: string }>),
+        fetchMcpServers(),
+        fetchSkills(),
+      ]);
+      if (cancelled) return;
+      if (health.status === 'fulfilled' && health.value.workspace) {
+        const cleaned = String(health.value.workspace).replace(/[\\/]+$/, '');
+        setWorkspaceName(cleaned.split(/[\\/]/).pop() || cleaned);
+      }
+      setInventory({
+        mcpServers: mcp.status === 'fulfilled' ? mcp.value.servers.length : 0,
+        mcpConnected:
+          mcp.status === 'fulfilled' ? mcp.value.servers.filter((s) => !s.disabled).length : 0,
+        skills: skills.status === 'fulfilled' ? skills.value.skills.length : 0,
+      });
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Helper to append log
   const addLog = (level: LogEntry['level'], message: string) => {
@@ -125,150 +126,10 @@ export default function App() {
     }, 2800);
   };
 
-  // Actions
-  const handleToggleServerOverride = (id: string) => {
-    setServers((prev) =>
-      prev.map((s) => {
-        if (s.id === id) {
-          const willEnable = s.overrideStatus !== 'ENABLED';
-          const newStatus = willEnable ? 'ENABLED' : 'DISABLED';
-          const newSubtext = willEnable ? currentProject.name : 'Scoped Off';
-          const healthText = willEnable
-            ? 'Healthy / Running'
-            : `Disabled in ${currentProject.name} (Globally Enabled in Default Profile)`;
-
-          addLog(
-            willEnable ? 'OK' : 'OVERRIDE',
-            `scope: project [${currentProject.name}] ${willEnable ? 'enabled' : 'disabled'} ${s.name}`
-          );
-
-          return {
-            ...s,
-            overrideStatus: newStatus,
-            overrideSubtext: newSubtext,
-            status: willEnable ? 'healthy' : 'disabled',
-            healthText,
-          };
-        }
-        return s;
-      })
-    );
+  const openSettingsTab = (tab: SettingsSidebarTab) => {
+    setActiveTopNav('Settings');
+    setActiveSidebarTab(tab);
   };
-
-  const handleTogglePlugin = (id: string) => {
-    setPlugins((prev) =>
-      prev.map((p) => {
-        if (p.id === id) {
-          const willEnable = !p.enabled;
-          addLog(
-            willEnable ? 'INFO' : 'OVERRIDE',
-            `plugin.lifecycle: ${p.name} set to ${willEnable ? 'ENABLED' : 'DISABLED'} for [${currentProject.name}]`
-          );
-          return {
-            ...p,
-            enabled: willEnable,
-            statusLabel: willEnable
-              ? 'ENABLED for this project'
-              : 'DISABLED for this project | Isolated policy',
-          };
-        }
-        return p;
-      })
-    );
-  };
-
-  const handleToggleSkill = (id: string) => {
-    setSkills((prev) =>
-      prev.map((sk) => {
-        if (sk.id === id) {
-          const willActive = !sk.active;
-          addLog(
-            willActive ? 'READY' : 'OVERRIDE',
-            `skill.gate: ${sk.command} ${willActive ? 'activated in sandbox' : 'deactivated'}`
-          );
-          return {
-            ...sk,
-            active: willActive,
-          };
-        }
-        return sk;
-      })
-    );
-  };
-
-  const handleAddServer = (newServer: McpServer) => {
-    setServers((prev) => [newServer, ...prev]);
-    addLog(
-      'OK',
-      `mcp.transport: connected to ${newServer.transport.toLowerCase()}:${newServer.name} (${newServer.command})`
-    );
-    showToast(`Added MCP server ${newServer.name}`);
-  };
-
-  const handleAddSkill = (newSkill: SkillItem) => {
-    setSkills((prev) => [newSkill, ...prev]);
-    addLog('OK', `skill.compiler: compiled procedure for ${newSkill.command}`);
-    showToast(`Compiled skill ${newSkill.command}`);
-  };
-
-  const handleSavePlugin = (updated: PluginItem) => {
-    setPlugins((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    addLog('INFO', `plugin.config: updated parameters for ${updated.name}`);
-    showToast(`Updated ${updated.name} settings`);
-  };
-
-  const handleCheckPluginUpdates = () => {
-    setIsCheckingPluginUpdates(true);
-    addLog('INFO', 'plugins.registry: querying https://registry.omp.dev/v1/plugins/updates...');
-    setTimeout(() => {
-      setIsCheckingPluginUpdates(false);
-      addLog('OK', 'plugins.registry: all 3 installed plugins are up to date with OMP-Core v2.4.9');
-      showToast('All plugins are up to date.');
-    }, 1000);
-  };
-
-  const handleDeployConfirm = (target: string) => {
-    addLog('INFO', `deploy.dispatch: initiated rollout graph to ${target} cluster`);
-    setTimeout(() => {
-      addLog('READY', `deploy.complete: orchestration nodes healthy on ${target}`);
-      showToast(`Successfully deployed to ${target}!`);
-    }, 800);
-  };
-
-  const handleInvokeTool = (serverName: string, toolName: string) => {
-    addLog('CALL', `rpc.invoke: ${serverName}->${toolName} result: 200 OK (1.4ms)`);
-  };
-
-  const handleRunSkill = (skill: SkillItem) => {
-    addLog('INFO', `skill.dispatch: invoking ${skill.command} in gVisor sandbox`);
-    setTimeout(() => {
-      addLog('OK', `skill.settled: ${skill.command} execution succeeded`);
-      showToast(`Executed ${skill.command}`);
-    }, 600);
-  };
-
-  const handleCreateProject = (name: string, description: string) => {
-    const slug = name.toLowerCase().replace(/\s+/g, '-');
-    const newProj: ProjectScope = {
-      id: slug,
-      name: slug,
-      overrideRulesCount: 0,
-      description,
-    };
-    setProjects((prev) => [...prev, newProj]);
-    setCurrentProject(newProj);
-    addLog('OK', `project: created and activated new scope [${newProj.name}]`);
-    showToast(`Created project ${newProj.name}`);
-  };
-
-  // Cached tools count
-  const cachedToolsCount = servers
-    .filter((s) => s.overrideStatus === 'ENABLED')
-    .reduce((sum, s) => sum + s.toolsCount, 0);
-
-  const connectedServerCount = servers.filter(
-    (s) => s.overrideStatus === 'ENABLED'
-  ).length;
 
   return (
     <div
@@ -300,19 +161,14 @@ export default function App() {
           }
         }}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
-        currentBranch={currentBranch}
-        onSelectBranch={(b) => {
-          setCurrentBranch(b);
-          addLog('INFO', `git: switched branch to [${b}]`);
-          showToast(`Switched branch to ${b}`);
-        }}
+        git={git}
         onOpenGit={() => {
           setSidePanelTab('git');
           setSidePanelOpen(true);
         }}
         isSidePanelOpen={sidePanelOpen}
         onToggleSidePanel={() => setSidePanelOpen(!sidePanelOpen)}
-        onOpenOmpConfig={() => setOmpConfigOpen(true)}
+        onOpenSettingsTab={openSettingsTab}
       />
 
       {/* Main Container Layout */}
@@ -325,9 +181,9 @@ export default function App() {
               setActiveSidebarTab(tab);
               addLog('INFO', `settings.nav: opened panel [${tab}]`);
             }}
-            mcpServerCount={servers.length}
-            skillsCount={skills.length}
-            connectedCount={connectedServerCount}
+            mcpServerCount={inventory.mcpServers}
+            skillsCount={inventory.skills}
+            connectedCount={inventory.mcpConnected}
           />
         )}
 
@@ -335,18 +191,7 @@ export default function App() {
         <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
           {activeTopNav === 'Workspace' ? (
             <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
-              <WorkspaceView
-                servers={servers}
-                skills={skills}
-                currentProject={currentProject}
-                projects={projects}
-                onSelectProject={(proj) => {
-                  setCurrentProject(proj);
-                  addLog('OVERRIDE', `context: switched project scope to [${proj.name}]`);
-                }}
-                onCreateProject={handleCreateProject}
-                onDispatchLog={addLog}
-              />
+              <WorkspaceView onDispatchLog={addLog} />
             </div>
           ) : (
             <div className="flex-1 p-6 max-w-7xl w-full mx-auto overflow-y-auto min-h-0">
@@ -354,55 +199,22 @@ export default function App() {
                 <>
                   {activeSidebarTab === 'mcp_extensions' && (
                     <div>
-                      {/* Breadcrumbs & Project Scope Selector */}
-                      <ScopeControlBar
-                        currentProject={currentProject}
-                        projects={projects}
-                        onSelectProject={(proj) => {
-                          setCurrentProject(proj);
-                          addLog('OVERRIDE', `context: switched project scope to [${proj.name}]`);
-                        }}
-                        configScope={configScope}
-                        onChangeConfigScope={(s) => {
-                          setConfigScope(s);
-                          addLog('INFO', `scope.mode: set to ${s === 'project' ? 'Project Overrides Only' : 'Global Default'}`);
-                        }}
-                        onOpenOverridesModal={() => setOverridesOpen(true)}
-                      />
+                      {/* Section 1: Active MCP Servers (real mcp.json) */}
+                      <McpServersSection />
 
-                      {/* Section 1: Active MCP Servers */}
-                      <McpServersSection
-                        servers={servers}
-                        onToggleServerOverride={handleToggleServerOverride}
-                        onAddServer={() => setAddServerOpen(true)}
-                        onSelectServer={(srv) => setSelectedServer(srv)}
-                      />
+                      {/* Section 2: Extensions & Plugins Management (real lockfile) */}
+                      <PluginsSection />
 
-                      {/* Section 2: Extensions & Plugins Management */}
-                      <PluginsSection
-                        plugins={plugins}
-                        onTogglePlugin={handleTogglePlugin}
-                        onConfigurePlugin={(plg) => setConfiguringPlugin(plg)}
-                        onCheckUpdates={handleCheckPluginUpdates}
-                        isCheckingUpdates={isCheckingPluginUpdates}
-                      />
-
-                      {/* Section 3: Skills Directory & Activation */}
+                      {/* Section 3: Skills Directory (real ~/.agents/skills) */}
                       <SkillsSection
-                        skills={skills}
-                        projectName={currentProject.name}
-                        onToggleSkill={handleToggleSkill}
                         onUploadSkill={() => setSkillModal({ open: true, mode: 'upload' })}
                         onInstallSkill={() => setSkillModal({ open: true, mode: 'install' })}
-                        onInspectSkill={(sk) => setSelectedSkill(sk)}
                       />
                     </div>
                   )}
 
                   {activeSidebarTab === 'skills_library' && (
                     <SkillsLibraryView
-                      skills={skills}
-                      onInspectSkill={(sk) => setSelectedSkill(sk)}
                       onInstallSkill={() => setSkillModal({ open: true, mode: 'install' })}
                     />
                   )}
@@ -427,9 +239,9 @@ export default function App() {
                       }}
                     />
                   )}
+
+                  {activeSidebarTab === 'updates' && <UpdatesView />}
                 </>
-              ) : activeTopNav === 'Branches' ? (
-                <BranchesView />
               ) : null}
             </div>
           )}
@@ -437,8 +249,7 @@ export default function App() {
           {/* Bottom Docked MCP Event Stream Terminal */}
           <EventStreamTerminal
             logs={logs}
-            projectName={currentProject.name}
-            toolsCachedCount={cachedToolsCount}
+            projectName={workspaceName}
             onClearLogs={() => setLogs([])}
             onAddLog={addLog}
           />
@@ -450,7 +261,7 @@ export default function App() {
           onClose={() => setSidePanelOpen(false)}
           activeTab={sidePanelTab}
           onTabChange={setSidePanelTab}
-          currentBranch={currentBranch}
+          git={git}
           onDispatchLog={addLog}
         />
       </div>
@@ -464,72 +275,22 @@ export default function App() {
       )}
 
       {/* Modals & Drawers */}
-      <GitModal
-        isOpen={gitModalOpen}
-        onClose={() => setGitModalOpen(false)}
-        currentBranch={currentBranch}
-        onSelectBranch={(b) => {
-          setCurrentBranch(b);
-          addLog('INFO', `git: switched branch to [${b}]`);
-          showToast(`Switched branch to ${b}`);
-        }}
-      />
-      <AddServerModal
-        isOpen={addServerOpen}
-        onClose={() => setAddServerOpen(false)}
-        onAdd={handleAddServer}
-      />
-
-      <ConfigurePluginModal
-        plugin={configuringPlugin}
-        onClose={() => setConfiguringPlugin(null)}
-        onSave={handleSavePlugin}
-      />
+      <GitModal isOpen={gitModalOpen} onClose={() => setGitModalOpen(false)} git={git} />
 
       <InstallSkillModal
         isOpen={skillModal.open}
         mode={skillModal.mode}
         onClose={() => setSkillModal({ open: false, mode: 'install' })}
-        onInstall={handleAddSkill}
-      />
-
-      <OmpConfigModal
-        isOpen={ompConfigOpen}
-        onClose={() => setOmpConfigOpen(false)}
-        projectName={currentProject.name}
-        onSaveConfig={() => {
-          addLog('OK', 'config: synced .omprc with OMP runtime');
-          showToast('Updated .omprc configuration');
+        onInstall={(newSkill) => {
+          addLog('OK', `skill.install: ${newSkill.command}`);
+          showToast(`Installed ${newSkill.command}`);
         }}
-      />
-
-      <OverridesModal
-        isOpen={overridesOpen}
-        onClose={() => setOverridesOpen(false)}
-        projectName={currentProject.name}
-      />
-
-      <ServerDetailsDrawer
-        server={selectedServer}
-        onClose={() => setSelectedServer(null)}
-        onInvokeTool={handleInvokeTool}
-      />
-
-      <SkillDetailsDrawer
-        skill={selectedSkill}
-        onClose={() => setSelectedSkill(null)}
-        onRunSkill={handleRunSkill}
       />
 
       <CommandPalette
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
-        servers={servers}
-        skills={skills}
-        plugins={plugins}
-        onSelectServer={(srv) => setSelectedServer(srv)}
-        onSelectSkill={(sk) => setSelectedSkill(sk)}
-        onSelectPlugin={(plg) => setConfiguringPlugin(plg)}
+        onNavigate={openSettingsTab}
       />
     </div>
   );

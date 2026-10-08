@@ -69,7 +69,7 @@ export interface LogEntry {
   message: string;
 }
 
-export type TopNavTab = 'Workspace' | 'Branches' | 'Settings';
+export type TopNavTab = 'Workspace' | 'Settings';
 
 export type SettingsSidebarTab =
   | 'mcp_extensions'
@@ -78,7 +78,8 @@ export type SettingsSidebarTab =
   | 'providers_models'
   | 'omp_config'
   | 'security_approvals'
-  | 'theme_preferences';
+  | 'theme_preferences'
+  | 'updates';
 
 export interface ProjectScope {
   id: string;
@@ -156,6 +157,12 @@ export interface ChatMessage {
   processSteps?: ProcessStep[];
   toolCalls?: ToolCallItem[];
   diffs?: FileDiffItem[];
+  /** omp session-log entry id: the anchor used for branch / fork / edit-from-here. */
+  entryId?: string;
+  /** True while this message is still being streamed by the agent. */
+  streaming?: boolean;
+  /** Model that produced the turn, as reported by omp. */
+  model?: string;
 }
 
 export interface ChatSession {

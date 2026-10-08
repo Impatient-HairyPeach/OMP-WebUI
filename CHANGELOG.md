@@ -1,0 +1,71 @@
+# Changelog
+
+All notable changes to OMP Studio. Versions match the app version shown in
+Settings (`v<version> · <build date>`).
+
+## 0.2.0
+
+Chat
+- Assistant turns now use the same three-level progressive disclosure as
+  `kahme247/ompweb`: one collapsed **Process details · N steps · M tool calls**
+  fold per turn, one collapsed row per thinking/tool activity with a single-line
+  preview, and expansion that reveals the `$ command`, the raw input on demand,
+  the thinking text and tool output capped at 260px. The duplicated "current
+  command" panel, the `Args: {…}` JSON dump and the unbounded tool output are
+  gone.
+- `/` completion is grouped by omp's own command `source` — 系统内置 Built-in,
+  技能 Skills, 扩展 Extensions, 提示词 Prompts — ranked by match quality, with a
+  460px two-column card panel (`@` file completion stays a flat list).
+
+Layout
+- Left session list, right side panel and the settings sidebar are
+  width-resizable by dragging their edge (double-click resets, arrow keys nudge).
+  Widths persist in `localStorage` (`omp-studio:session-panel-width`,
+  `omp-studio:side-panel-width`, `omp-studio:settings-panel-width`).
+- Session history groups by project folder and each folder collapses/expands on
+  click (chevron in the group header); the active project opens automatically,
+  the expanded set persists in `omp-studio:expanded-projects`, and an active
+  search keeps matching folders open.
+- The composer's top edge is draggable to change the input height
+  (`omp-studio:composer-height`, 64–560px, double-click resets).
+
+Scopes (global vs. project)
+- Skills get a 全局 / 仅本项目 toggle: the skill directory is really moved
+  between `~/.agents/skills` and `<project>/.agents/skills` — both roots omp
+  discovers — and the session is restarted so it takes effect.
+- Extensions get a 全局 / 仅本项目 / 停用 toggle: global and off go through omp's
+  own `omp plugin enable|disable`, "仅本项目" pins the extension in
+  `<project>/.omp/omp-studio.json` and the bridge loads it with omp's `-e` flag
+  only for that workspace.
+
+Updates
+- New Settings → 更新与版本 tab: shows the OMP Studio version, probes the
+  installed omp version, checks `omp update --check` and installs an update with
+  one click. The bridge stops the omp session before installing (the running
+  binary cannot be replaced) and restarts it afterwards, then re-probes the
+  version. `omp update --force` is available for a forced reinstall.
+- Settings → Providers: every provider expands to its full model list (from
+  `omp models --json`) with a 使用 / 停用 toggle per model and an on/off switch
+  per provider, plus a search box. Toggles write omp's own `enabledModels` /
+  `disabledProviders` settings through `omp config set|reset` and restart the
+  session so the catalog matches. Model roles (`modelRoles`) are shown as
+  badges, and the allowlist is always materialized over the whole catalog so
+  re-enabling works.
+- Git is real: the header branch selector, the git dialog and the side panel's
+  git tab list the repository's branches (`git for-each-ref`), the live HEAD,
+  the dirty flag, real commits (`git log`) and the real `origin` URL; selecting
+  a branch runs `git checkout` (git refuses a dirty tree and the refusal is
+  shown), and the side panel commits for real with `git add -A` + `git commit`.
+  The fabricated branch list, commit history and the "pushed to remote" claim
+  are gone.
+- New endpoints: `GET /api/omp/version`, `POST /api/omp/update`,
+  `POST /api/skills/scope`, `POST /api/extensions/scope`,
+  `GET /api/omp/models/scope`, `POST /api/omp/models/scope`,
+  `GET /api/git/branches`, `POST /api/git/checkout`, `GET /api/git/log`,
+  `POST /api/git/commit`.
+
+## 0.1.0
+
+- Initial OMP Studio: browser workspace over a real `omp --mode rpc-ui` session
+  (streaming transcript, sessions, models, metrics, extension dialogs, voice,
+  git diff, plugin/skill management).

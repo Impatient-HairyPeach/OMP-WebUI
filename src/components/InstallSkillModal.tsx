@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { SkillItem } from '../types';
-import { X, Sparkles, Upload, Check, FileCode, CheckCircle2 } from 'lucide-react';
+import { X, Sparkles, Upload, Check, FileCode, CheckCircle2, Github, Loader2 } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
+import { importSkillFromGitHub } from '../omp/cli';
 
 interface InstallSkillModalProps {
   isOpen: boolean;
@@ -18,11 +19,12 @@ export const InstallSkillModal: React.FC<InstallSkillModalProps> = ({
 }) => {
   const { t, language } = useI18n();
 
-  if (!isOpen) return null;
-
-  const [activeTab, setActiveTab] = useState<'catalog' | 'upload'>(
-    mode === 'upload' ? 'upload' : 'catalog'
+  const [activeTab, setActiveTab] = useState<'upload' | 'github'>(
+    'upload'
   );
+  const [githubRepo, setGithubRepo] = useState('');
+  const [githubBusy, setGithubBusy] = useState(false);
+  const [githubOutput, setGithubOutput] = useState<string | null>(null);
 
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [skillCommand, setSkillCommand] = useState('/skills:custom-task');
@@ -31,49 +33,21 @@ export const InstallSkillModal: React.FC<InstallSkillModalProps> = ({
     '# Model Context Macro Skill\ndef run(ctx, payload):\n    """Execute AST checks."""\n    return ctx.mcp.call("filesystem-server", "read_file", path="package.json")'
   );
 
-  const catalogSkills: Partial<SkillItem>[] = [
-    {
-      command: '/skills:semgrep-sast',
-      categoryTag: 'DEVSECOPS',
-      category: 'Auditing',
-      version: 'v4.1.0',
-      description: 'Run lightweight static analysis rules for OWASP Top 10 patterns.',
-      permission: { type: 'auto', label: 'Auto-Run (Sandboxed)' },
-    },
-    {
-      command: '/skills:benchmark-runner',
-      categoryTag: 'DEVOPS',
-      category: 'DevOps',
-      version: 'v1.4.0',
-      description: 'Executes k6 load test scenarios against staging ingress targets.',
-      permission: { type: 'human_approval', label: 'Human Approval Required' },
-    },
-    {
-      command: '/skills:component-scaffolder',
-      categoryTag: 'CODE GENERATION',
-      category: 'Code Generation',
-      version: 'v2.1.2',
-      description: 'Synthesizes accessible React 19 functional components from design tokens.',
-      permission: { type: 'auto', label: 'Auto-Run (Sandboxed)' },
-    },
-  ];
-
-  const handleInstallFromCatalog = (item: Partial<SkillItem>) => {
-    const newSkill: SkillItem = {
-      id: `skill-${Date.now()}`,
-      command: item.command || '/skills:new-tool',
-      categoryTag: item.categoryTag || 'GENERAL',
-      category: item.category || 'Code Generation',
-      version: item.version || 'v1.0.0',
-      description: item.description || '',
-      permission: item.permission || { type: 'auto', label: 'Auto-Run (Sandboxed)' },
-      scopeActivationText: language === 'zh-CN' ? '在当前项目已激活' : 'Active in current project',
-      active: true,
-      statusBadge: language === 'zh-CN' ? '自主执行' : 'Autonomous',
-      instructionsMd: `# Instructions for ${item.command}`,
-    };
-    onInstall(newSkill);
-    onClose();
+  const handleGithubSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!githubRepo.trim() || githubBusy) return;
+    setGithubBusy(true);
+    setGithubOutput(null);
+    try {
+      const result = await importSkillFromGitHub(githubRepo.trim());
+      setGithubOutput(
+        [result.stdout, result.stderr].filter(Boolean).join('\n').trim() || `exit ${result.code}`
+      );
+    } catch (error) {
+      setGithubOutput(String(error));
+    } finally {
+      setGithubBusy(false);
+    }
   };
 
   const handleUploadSubmit = (e: React.FormEvent) => {
@@ -94,6 +68,8 @@ export const InstallSkillModal: React.FC<InstallSkillModalProps> = ({
     onInstall(newSkill);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm select-none">
@@ -117,16 +93,6 @@ export const InstallSkillModal: React.FC<InstallSkillModalProps> = ({
         {/* Tab switch */}
         <div className="flex border-b border-[#27272a] bg-[#09090b] px-4 text-xs font-mono">
           <button
-            onClick={() => setActiveTab('catalog')}
-            className={`py-2 px-3 border-b-2 transition-colors cursor-pointer ${
-              activeTab === 'catalog'
-                ? 'border-[#a78bfa] text-[#a78bfa] font-medium'
-                : 'border-transparent text-[#71717a] hover:text-[#fafafa]'
-            }`}
-          >
-            {language === 'zh-CN' ? '精选技能库目录' : 'Curated Skills Registry'}
-          </button>
-          <button
             onClick={() => setActiveTab('upload')}
             className={`py-2 px-3 border-b-2 transition-colors cursor-pointer ${
               activeTab === 'upload'
@@ -136,49 +102,20 @@ export const InstallSkillModal: React.FC<InstallSkillModalProps> = ({
           >
             {language === 'zh-CN' ? '上传 .py / .md 技能' : 'Upload .py / .md Skill'}
           </button>
+          <button
+            onClick={() => setActiveTab('github')}
+            className={`py-2 px-3 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'github'
+                ? 'border-[#a78bfa] text-[#a78bfa] font-medium'
+                : 'border-transparent text-[#71717a] hover:text-[#fafafa]'
+            }`}
+          >
+            <Github className="w-3.5 h-3.5" />
+            {language === 'zh-CN' ? '从 GitHub 导入' : 'Import from GitHub'}
+          </button>
         </div>
-
-        {/* Body */}
         <div className="p-4 text-xs">
-          {activeTab === 'catalog' ? (
-            <div className="space-y-3">
-              <p className="text-[#a1a1aa] text-xs">
-                {language === 'zh-CN' ? '从开放协议注册表中安装已验证的技能:' : 'Install verified skills from the OMP Open Protocol registry:'}
-              </p>
-              <div className="space-y-2">
-                {catalogSkills.map((sk) => (
-                  <div
-                    key={sk.command}
-                    className="p-3 border border-[#27272a] rounded bg-[#121215] flex items-center justify-between gap-3 hover:border-[#3f3f46] transition-colors"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-semibold text-[#a78bfa]">
-                          {sk.command}
-                        </span>
-                        <span className="text-[10px] font-mono px-1 bg-[#18181b] border border-[#27272a] text-[#a1a1aa] rounded">
-                          {sk.categoryTag}
-                        </span>
-                        <span className="text-[10px] font-mono text-[#71717a]">
-                          {sk.version}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-[#a1a1aa] mt-1">
-                        {sk.description}
-                      </p>
-                    </div>
-
-                    <button
-                      onClick={() => handleInstallFromCatalog(sk)}
-                      className="px-3 py-1.5 rounded bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] font-medium text-xs transition-colors shrink-0 cursor-pointer"
-                    >
-                      {language === 'zh-CN' ? '安装' : 'Install'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
+          {activeTab === 'upload' ? (
             <form onSubmit={handleUploadSubmit} className="space-y-3">
               <div className="border border-dashed border-[#3f3f46] hover:border-[#a78bfa] rounded p-4 text-center cursor-pointer bg-[#121215]/50 transition-colors">
                 <Upload className="w-5 h-5 mx-auto text-[#a78bfa] mb-1.5" />
@@ -248,6 +185,51 @@ export const InstallSkillModal: React.FC<InstallSkillModalProps> = ({
                   className="px-3.5 py-1.5 rounded bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] font-medium transition-colors cursor-pointer"
                 >
                   {language === 'zh-CN' ? '编译并激活' : 'Compile & Activate'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleGithubSubmit} className="space-y-3">
+              <p className="text-[#a1a1aa] text-xs">
+                {language === 'zh-CN'
+                  ? '克隆一个 GitHub 技能仓库到 omp 的技能目录（~/.agents/skills/<repo>），omp 会在下一次会话中自动发现它：'
+                  : 'Clone a GitHub skill repository into omp’s skills directory (~/.agents/skills/<repo>); omp discovers it on the next session:'}
+              </p>
+
+              <div>
+                <label className="block text-[11px] font-mono text-[#a1a1aa] mb-1">
+                  {language === 'zh-CN' ? 'GitHub 仓库地址' : 'GitHub repository URL'}
+                </label>
+                <input
+                  type="text"
+                  value={githubRepo}
+                  onChange={(e) => setGithubRepo(e.target.value)}
+                  placeholder="https://github.com/owner/skill-repo"
+                  className="w-full h-8 px-2.5 bg-[#121215] border border-[#27272a] rounded text-[#fafafa] font-mono text-[11px] focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
+                />
+              </div>
+
+              {githubOutput && (
+                <pre className="max-h-40 overflow-auto p-2 rounded bg-[#09090b] border border-[#27272a] text-[10px] font-mono text-[#a1a1aa] whitespace-pre-wrap">
+                  {githubOutput}
+                </pre>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#27272a]">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-3 py-1.5 rounded border border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:bg-[#18181b] transition-colors cursor-pointer"
+                >
+                  {t.cancelBtn}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!githubRepo.trim() || githubBusy}
+                  className="px-3.5 py-1.5 rounded bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] font-medium transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {githubBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Github className="w-3.5 h-3.5" />}
+                  {language === 'zh-CN' ? (githubBusy ? '克隆中…' : '克隆并导入') : githubBusy ? 'Cloning…' : 'Clone & import'}
                 </button>
               </div>
             </form>

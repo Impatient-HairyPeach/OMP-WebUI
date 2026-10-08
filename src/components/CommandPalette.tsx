@@ -1,31 +1,46 @@
-import React, { useState, useEffect } from 'react';
-import { Search, X, Server, Sparkles, Sliders, ArrowRight } from 'lucide-react';
-import { McpServer, SkillItem, PluginItem } from '../types';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Search, Server, Sparkles, Puzzle, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { SettingsSidebarTab } from '../types';
+import { fetchMcpServers, fetchSkills, fetchPlugins, OmpMcpServer, OmpSkillEntry, OmpPluginEntry } from '../omp/cli';
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
-  servers: McpServer[];
-  skills: SkillItem[];
-  plugins: PluginItem[];
-  onSelectServer: (server: McpServer) => void;
-  onSelectSkill: (skill: SkillItem) => void;
-  onSelectPlugin: (plugin: PluginItem) => void;
+  onNavigate: (tab: SettingsSidebarTab) => void;
 }
 
-export const CommandPalette: React.FC<CommandPaletteProps> = ({
-  isOpen,
-  onClose,
-  servers,
-  skills,
-  plugins,
-  onSelectServer,
-  onSelectSkill,
-  onSelectPlugin,
-}) => {
+export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, onNavigate }) => {
   const [query, setQuery] = useState('');
+  const [servers, setServers] = useState<OmpMcpServer[]>([]);
+  const [skills, setSkills] = useState<OmpSkillEntry[]>([]);
+  const [plugins, setPlugins] = useState<OmpPluginEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Handle Escape key to close
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [mcp, skillPayload, pluginPayload] = await Promise.all([fetchMcpServers(), fetchSkills(), fetchPlugins()]);
+      setServers(mcp.servers);
+      setSkills(skillPayload.skills);
+      setPlugins(pluginPayload.plugins);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Fetch real inventory every time the palette opens.
+  useEffect(() => {
+    if (isOpen) {
+      setQuery('');
+      void load();
+    }
+  }, [isOpen, load]);
+
+  // Handle Escape / ⌘K keys to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
@@ -42,20 +57,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   if (!isOpen) return null;
 
-  const filteredServers = servers.filter((s) =>
-    s.name.toLowerCase().includes(query.toLowerCase()) ||
-    s.toolsSummary.toLowerCase().includes(query.toLowerCase())
+  const q = query.trim().toLowerCase();
+  const filteredServers = servers.filter(
+    (s) => !q || s.name.toLowerCase().includes(q) || (s.url ?? s.command ?? '').toLowerCase().includes(q)
   );
+  const filteredSkills = skills.filter(
+    (s) => !q || s.name.toLowerCase().includes(q) || (s.description ?? '').toLowerCase().includes(q)
+  );
+  const filteredPlugins = plugins.filter((p) => !q || p.name.toLowerCase().includes(q));
 
-  const filteredSkills = skills.filter((s) =>
-    s.command.toLowerCase().includes(query.toLowerCase()) ||
-    s.description.toLowerCase().includes(query.toLowerCase())
-  );
-
-  const filteredPlugins = plugins.filter((p) =>
-    p.name.toLowerCase().includes(query.toLowerCase()) ||
-    p.description.toLowerCase().includes(query.toLowerCase())
-  );
+  const go = (tab: SettingsSidebarTab) => {
+    onNavigate(tab);
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-black/75 backdrop-blur-sm select-none">
@@ -68,7 +82,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Type a command, tool, skill (/skills:...), or MCP server..."
+            placeholder="Search real MCP servers, skills, and plugins..."
             className="w-full bg-transparent text-xs text-[#fafafa] placeholder-[#71717a] focus:outline-none font-mono"
           />
           <button
@@ -81,6 +95,24 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
         {/* Results List */}
         <div className="max-h-80 overflow-y-auto p-2 space-y-3 text-xs">
+          {loading && (
+            <div className="flex items-center gap-2 p-3 text-xs text-[#a1a1aa] font-mono">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Loading omp inventory…
+            </div>
+          )}
+
+          {error && !loading && (
+            <div className="flex items-center gap-2 p-3 text-xs text-[#ef4444] font-mono">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{error}</span>
+            </div>
+          )}
+
+          {!loading && !error && filteredServers.length + filteredSkills.length + filteredPlugins.length === 0 && (
+            <div className="p-3 text-xs text-[#71717a] font-mono">No matching omp entries.</div>
+          )}
+
           {/* MCP Servers */}
           {filteredServers.length > 0 && (
             <div>
@@ -90,25 +122,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               <div className="space-y-0.5">
                 {filteredServers.map((s) => (
                   <button
-                    key={s.id}
-                    onClick={() => {
-                      onSelectServer(s);
-                      onClose();
-                    }}
+                    key={s.name}
+                    onClick={() => go('mcp_extensions')}
                     className="w-full flex items-center justify-between p-2 rounded hover:bg-[#18181b] text-left transition-colors cursor-pointer group"
                   >
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <Server className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />
-                      <div>
-                        <div className="font-mono text-xs font-semibold text-[#fafafa] group-hover:text-[#a78bfa]">
+                      <div className="min-w-0">
+                        <div className="font-mono text-xs font-semibold text-[#fafafa] group-hover:text-[#a78bfa] truncate">
                           {s.name}
                         </div>
-                        <div className="text-[10px] font-mono text-[#71717a]">
-                          {s.command}
+                        <div className="text-[10px] font-mono text-[#71717a] truncate">
+                          {s.url || [s.command, ...s.args].filter(Boolean).join(' ')}
                         </div>
                       </div>
                     </div>
-                    <ArrowRight className="w-3 h-3 text-[#52525b] group-hover:text-[#fafafa]" />
+                    <ArrowRight className="w-3 h-3 text-[#52525b] group-hover:text-[#fafafa] shrink-0" />
                   </button>
                 ))}
               </div>
@@ -124,25 +153,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               <div className="space-y-0.5">
                 {filteredSkills.map((sk) => (
                   <button
-                    key={sk.id}
-                    onClick={() => {
-                      onSelectSkill(sk);
-                      onClose();
-                    }}
+                    key={sk.path}
+                    onClick={() => go('skills_library')}
                     className="w-full flex items-center justify-between p-2 rounded hover:bg-[#18181b] text-left transition-colors cursor-pointer group"
                   >
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <Sparkles className="w-3.5 h-3.5 text-[#34d399] shrink-0" />
-                      <div>
-                        <div className="font-mono text-xs font-semibold text-[#fafafa] group-hover:text-[#a78bfa]">
-                          {sk.command}
+                      <div className="min-w-0">
+                        <div className="font-mono text-xs font-semibold text-[#fafafa] group-hover:text-[#a78bfa] truncate">
+                          {sk.name}
                         </div>
                         <div className="text-[10px] text-[#71717a] truncate max-w-sm">
-                          {sk.description}
+                          {sk.description || (sk.source === 'project' ? 'project skill' : 'user skill')}
                         </div>
                       </div>
                     </div>
-                    <ArrowRight className="w-3 h-3 text-[#52525b] group-hover:text-[#fafafa]" />
+                    <ArrowRight className="w-3 h-3 text-[#52525b] group-hover:text-[#fafafa] shrink-0" />
                   </button>
                 ))}
               </div>
@@ -158,23 +184,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               <div className="space-y-0.5">
                 {filteredPlugins.map((p) => (
                   <button
-                    key={p.id}
-                    onClick={() => {
-                      onSelectPlugin(p);
-                      onClose();
-                    }}
+                    key={p.name}
+                    onClick={() => go('mcp_extensions')}
                     className="w-full flex items-center justify-between p-2 rounded hover:bg-[#18181b] text-left transition-colors cursor-pointer group"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <Sliders className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />
-                      <div>
-                        <div className="font-semibold text-xs text-[#fafafa] group-hover:text-[#a78bfa]">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Puzzle className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />
+                      <div className="min-w-0">
+                        <div className="font-mono font-semibold text-xs text-[#fafafa] group-hover:text-[#a78bfa] truncate">
                           {p.name}
                         </div>
-                        <div className="text-[10px] text-[#71717a]">{p.version}</div>
+                        <div className="text-[10px] text-[#71717a] font-mono">v{p.version}</div>
                       </div>
                     </div>
-                    <ArrowRight className="w-3 h-3 text-[#52525b] group-hover:text-[#fafafa]" />
+                    <ArrowRight className="w-3 h-3 text-[#52525b] group-hover:text-[#fafafa] shrink-0" />
                   </button>
                 ))}
               </div>
