@@ -47,6 +47,7 @@ import { PanelResizeHandle } from '../PanelResizeHandle';
 import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, fetchSubagents } from '../../omp/cli';
 import type { SubagentRow } from '../../omp/cli';
 import { todosFromTranscript } from '../../lib/todoList';
+import { publishWorkState } from '../../lib/workState';
 import { Mic, Volume2 } from 'lucide-react';
 import { useOmpSession } from '../../hooks/useOmpSession';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
@@ -123,7 +124,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     disabled: isPanelCollapsed,
   });
   const composerBox = useResizablePanel({ ...COMPOSER_BOX, axis: 'y', edge: 'start' });
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   // Workspace picker (real folders on this machine)
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [pickerPath, setPickerPath] = useState('');
@@ -261,6 +261,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       window.clearInterval(timer);
     };
   }, [omp.isStreaming, omp.sessionId]);
+
+  // Publish the turn's work state so the right panel's task tab can show it.
+  const transcriptTodos = todosFromTranscript(omp.messages);
+  useEffect(() => {
+    publishWorkState({ todos: transcriptTodos, subagents });
+  }, [transcriptTodos, subagents]);
 
   // ---- Derived session state (all real) ----
   const sessionActive = Boolean(omp.resumePath || omp.sessionId);

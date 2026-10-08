@@ -22,6 +22,7 @@ import {
   FolderOpen,
   GitBranch,
   GitCommit,
+  ListChecks,
   Loader2,
   Puzzle,
   RefreshCw,
@@ -29,6 +30,7 @@ import {
   X,
 } from 'lucide-react';
 import { ScopeSwitch } from './ScopeSwitch';
+import { useWorkState } from '../lib/workState';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 import { PanelResizeHandle } from './PanelResizeHandle';
@@ -54,7 +56,7 @@ import { SIDE_PANEL } from '../lib/panelLayout';
 import { renderMarkdown } from '../lib/miniMarkdown';
 import type { FileDiffItem, LogEntry } from '../types';
 
-export type SidePanelTab = 'files' | 'diffs' | 'extensions' | 'git';
+export type SidePanelTab = 'files' | 'diffs' | 'extensions' | 'tasks' | 'git';
 
 interface SidePanelProps {
   isOpen: boolean;
@@ -226,6 +228,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     }
   };
 
+  // --- tasks tab: the current turn's todo list and subagents (published by the workspace) ---
+  const work = useWorkState();
+
   // --- extensions tab: this project's skills + extensions ---
   const [projectSkills, setProjectSkills] = useState<OmpSkillEntry[]>([]);
   const [projectPlugins, setProjectPlugins] = useState<OmpPluginEntry[]>([]);
@@ -277,6 +282,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     { id: 'files', label: zh ? '文件' : 'Files', icon: <FileCode className="w-3.5 h-3.5" /> },
     { id: 'diffs', label: zh ? '改动' : 'Diffs', icon: <FilePlus className="w-3.5 h-3.5" />, badge: diffs.length },
     { id: 'extensions', label: zh ? '扩展' : 'Extras', icon: <Puzzle className="w-3.5 h-3.5" /> },
+    { id: 'tasks', label: zh ? '任务' : 'Tasks', icon: <ListChecks className="w-3.5 h-3.5" /> },
     { id: 'git', label: zh ? 'Git' : 'Git', icon: <GitBranch className="w-3.5 h-3.5" /> },
   ];
 
@@ -606,6 +612,83 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ============================= TASKS ============================ */}
+        {activeTab === 'tasks' && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-3 text-[11px]">
+            {!work.todos?.length && work.subagents.length === 0 && (
+              <p className="text-[10px] text-[#71717a]">
+                {zh ? '本轮对话还没有任务列表或子代理。' : 'No task list or subagents in this conversation yet.'}
+              </p>
+            )}
+
+            {work.todos && work.todos.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between text-[10px] font-mono uppercase text-[#71717a] mb-1.5">
+                  <span>{zh ? '任务列表' : 'Task list'}</span>
+                  <span>
+                    {work.todos.flatMap((group) => group.tasks).filter((task) => task.status === 'done').length}/
+                    {work.todos.flatMap((group) => group.tasks).length}
+                  </span>
+                </div>
+                {work.todos.map((group, groupIndex) => (
+                  <div key={`${group.phase ?? 'phase'}-${groupIndex}`} className="mb-2 space-y-0.5">
+                    {group.phase && <div className="text-[10px] text-[#52525b] font-mono">{group.phase}</div>}
+                    {group.tasks.map((task, taskIndex) => (
+                      <div key={`${task.text}-${taskIndex}`} className="flex items-start gap-1.5">
+                        <span className="shrink-0 mt-0.5">
+                          {task.status === 'done' ? (
+                            <Check className="w-3 h-3 text-[#34d399]" />
+                          ) : task.status === 'in_progress' ? (
+                            <Loader2 className="w-3 h-3 animate-spin" style={{ color: accentColor }} />
+                          ) : (
+                            <span className="block w-3 h-3 rounded-full border border-[#52525b]" />
+                          )}
+                        </span>
+                        <span className={`${task.status === 'done' ? 'text-[#71717a] line-through' : 'text-[#d4d4d8]'}`}>
+                          {task.text}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {work.subagents.length > 0 && (
+              <div className="pt-2 border-t" style={{ borderColor: theme.border }}>
+                <div className="text-[10px] font-mono uppercase text-[#71717a] mb-1.5">
+                  {zh ? `子代理 ${work.subagents.length}` : `Subagents ${work.subagents.length}`}
+                </div>
+                <div className="space-y-1.5">
+                  {work.subagents.map((agent, index) => (
+                    <div key={`${agent.id ?? index}`} className="rounded border p-2 space-y-0.5" style={{ borderColor: theme.border }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono truncate" style={{ color: accentColor }}>
+                          {String(agent.name ?? agent.agent ?? agent.id ?? `#${index + 1}`)}
+                        </span>
+                        <span className="text-[10px] text-[#71717a] shrink-0">{String(agent.status ?? 'running')}</span>
+                      </div>
+                      {typeof agent.task === 'string' && agent.task && (
+                        <div className="text-[10px] text-[#a1a1aa]">{agent.task}</div>
+                      )}
+                      <div className="text-[10px] text-[#52525b] font-mono">
+                        {[
+                          typeof agent.model === 'string' ? agent.model : null,
+                          typeof agent.tokens === 'number' ? `${agent.tokens.toLocaleString()} tok` : null,
+                          typeof agent.cost === 'number' ? `$${agent.cost.toFixed(4)}` : null,
+                          typeof agent.durationMs === 'number' ? `${Math.round(agent.durationMs / 1000)}s` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
