@@ -55,6 +55,8 @@ Production build: `bun run build && bun run start`.
 - `POST /api/git/commit` `{message}` — real `git add -A` + `git commit -m`
 - `GET /api/fs/list` — one directory of the workspace for the file explorer (paths confined to the workspace)
 - `GET /api/fs/file` `{path, limit?}` — one text file for the viewer (line count, size, truncation flag)
+- `GET /api/fs/raw` `?path=` — raw bytes of an image/binary file (preview)
+- `POST /api/reveal` `{path}` — reveal one of omp's own config files in the OS file manager
 - `POST /api/say` `{text}` — omp's local TTS engine, returns `audio/wav`
 - `GET /api/git/diff` — real working-tree diff of the agent's workspace
 
@@ -71,18 +73,19 @@ Production build: `bun run build && bun run start`.
 
 ## Theme
 
-The palette is a port of pi-web's: 15 tokens on `data-theme`, six choices
-(`light · dark · mist · rose · pine · auto`, dark by default), applied before
-first paint, plus system-only font stacks for Latin and CJK. Settings →
-界面主题与偏好 switches it; nothing else needs to change because components read
-tokens rather than colours.
+Two palettes ported from pi-web plus `auto` and `custom`: **跟随系统 / 深色 /
+浅色 / 自定义** (`data-theme` on `<html>`, applied before first paint). Custom
+keeps the chosen base palette and uses the accent you pick. Fonts are system
+stacks only — no webfont is downloaded, Latin and CJK both come from the OS.
+Settings → 界面主题与偏好 switches it; components read tokens, not colours.
 
 ## Right panel
 
-Tabs: **文件** (real workspace tree, file viewer with line numbers, `@` path
-insertion into the composer), **改动** (real working-tree diff), **终端** (live
-omp event stream), **Git** (branch, changed files, commits, real commit form).
-Width is draggable and remembered.
+Tabs: **文件** (real workspace tree, `@` path insertion into the composer, and a
+viewer with 源码 / 预览 — markdown renders, images stream, code shows line
+numbers), **改动** (real working-tree diff), **Git** (branch, changed files,
+commits, real commit form). Width is draggable and remembered. The terminal and
+the omp event stream live at the bottom of the chat column, as before.
 
 ## Layout
 

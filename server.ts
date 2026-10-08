@@ -1244,7 +1244,13 @@ app.get("/api/omp/mcp", (_req, res) => {
     headerKeys: Object.keys((server.headers as Json) ?? {}),
     disabled: Boolean(server.disabled),
   }));
-  res.json({ path: MCP_CONFIG, servers, exists: existsSync(MCP_CONFIG) });
+  res.json({
+    path: MCP_CONFIG,
+    servers,
+    exists: existsSync(MCP_CONFIG),
+    /** Raw file, so the UI can show (and copy) exactly what omp loads. */
+    raw: existsSync(MCP_CONFIG) ? readFileSync(MCP_CONFIG, "utf8") : "",
+  });
 });
 
 /** Real usage + cost aggregates from omp's own usage.db (no fabricated numbers). */
@@ -1373,6 +1379,81 @@ app.get("/api/omp/config", (_req, res) => {
     },
   });
 });
+
+/** Raw bytes of one workspace file (images and other binaries for the previewer). */
+app.get("/api/fs/raw", (req, res) => {
+  const requested = String(req.query.path || "");
+  const root = path.resolve(workspace);
+  const resolved = path.resolve(requested);
+  if (!requested || (resolved !== root && !resolved.startsWith(root + path.sep))) {
+    res.status(403).json({ error: "path outside the workspace" });
+    return;
+  }
+  try {
+    const stat = statSync(resolved);
+    if (!stat.isFile() || stat.size > 16 * 1024 * 1024) {
+      res.status(400).json({ error: "not a previewable file" });
+      return;
+    }
+    res.setHeader("content-type", mimeOf(resolved));
+    res.setHeader("cache-control", "no-store");
+    res.send(readFileSync(resolved));
+  } catch (error) {
+    res.status(404).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/** Reveal one omp/bridge file in the OS file manager (never an arbitrary path). */
+const REVEALABLE = new Set<string>();
+app.post("/api/reveal", (req, res) => {
+  if (REVEALABLE.size === 0) {
+    for (const candidate of [MCP_CONFIG, CONFIG_FILE, PLUGIN_LOCK, USAGE_DB, SESSION_ROOT, ARCHIVE_ROOT, path.join(homedir(), ".omp", "agent", "models.yml")]) {
+      REVEALABLE.add(path.resolve(candidate));
+    }
+  }
+  const resolved = path.resolve(String(req.body?.path || ""));
+  if (!REVEALABLE.has(resolved)) {
+    res.status(403).json({ error: "path is not one of the omp configuration files" });
+    return;
+  }
+  if (!existsSync(resolved)) {
+    res.status(404).json({ error: `not found: ${resolved}` });
+    return;
+  }
+  const reveal = process.platform === "win32"
+    ? { file: "explorer.exe", args: ["/select,", resolved] }
+    : process.platform === "darwin"
+    ? { file: "open", args: ["-R", resolved] }
+    : { file: "xdg-open", args: [path.dirname(resolved)] };
+  try {
+    const proc = spawn(reveal.file, reveal.args, { detached: true, stdio: "ignore", windowsHide: true });
+    proc.unref();
+    emit("log", { level: "info", message: `files: revealed ${path.basename(resolved)}` });
+    res.json({ ok: true, path: resolved });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+function mimeOf(file: string): string {
+  const ext = path.extname(file).toLowerCase();
+  const table: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".bmp": "image/bmp",
+    ".ico": "image/x-icon",
+    ".pdf": "application/pdf",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+  };
+  return table[ext] ?? "application/octet-stream";
+}
 
 /** Directory listing for the file explorer; paths are confined to the workspace. */
 app.get("/api/fs/list", (req, res) => {
@@ -1674,6 +1755,17 @@ app.get("/api/omp/files", async (req, res) => {
     .slice(0, limit)
     .map((file) => ({ path: file, name: path.basename(file) }));
   res.json({ workspace, count: files.size, files: matched });
+});
+
+// Unknown API paths must answer JSON, never the SPA: a stale dev server that
+// predates a route would otherwise hand the client index.html and every fetch
+// would fail with "Unexpected token '<'".
+app.use("/api", (req, res) => {
+  res.status(404).json({
+    error: `unknown bridge endpoint: ${req.method} ${req.originalUrl}`,
+    code: "unknown_endpoint",
+    hint: "the running bridge does not serve this route — restart `bun run dev`",
+  });
 });
 
 // ---------------------------------------------------------------- static app

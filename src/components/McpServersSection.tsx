@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Server, RefreshCw, Loader2, AlertCircle, Lock, Ban, CircleCheck, FileJson } from 'lucide-react';
-import { fetchMcpServers, OmpMcpServer } from '../omp/cli';
+import { fetchMcpServers, revealFile, OmpMcpServer } from '../omp/cli';
 import { McpServer } from '../types';
 import { useI18n } from '../context/I18nContext';
 
@@ -20,6 +20,7 @@ interface McpPayload {
   path: string;
   exists: boolean;
   servers: OmpMcpServer[];
+  raw: string;
 }
 
 export const McpServersSection: React.FC<McpServersSectionProps> = () => {
@@ -29,6 +30,9 @@ export const McpServersSection: React.FC<McpServersSectionProps> = () => {
   const [data, setData] = useState<McpPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [configCopied, setConfigCopied] = useState(false);
+  const [revealMessage, setRevealMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,19 +69,32 @@ export const McpServersSection: React.FC<McpServersSectionProps> = () => {
           <p className="text-xs text-[#a1a1aa] max-w-3xl leading-relaxed">{t.mcpServersDesc}</p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-[#fafafa] text-xs font-medium rounded transition-colors cursor-pointer shrink-0 ml-4 disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {loading ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="w-3.5 h-3.5" />
-          )}
-          <span>{zh ? '重新加载' : 'Reload'}</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0 ml-4">
+          <button
+            type="button"
+            onClick={() => setConfigOpen(true)}
+            title={data?.path ?? undefined}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-[#fafafa] text-xs font-medium rounded transition-colors cursor-pointer disabled:opacity-60"
+            disabled={!data}
+          >
+            <FileJson className="w-3.5 h-3.5 text-[#a78bfa]" />
+            <span>{zh ? '打开配置文件' : 'Open config file'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-[#fafafa] text-xs font-medium rounded transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {loading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5" />
+            )}
+            <span>{zh ? '重新加载' : 'Reload'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Real config source */}
@@ -203,6 +220,77 @@ export const McpServersSection: React.FC<McpServersSectionProps> = () => {
           </div>
         )}
       </div>
+
+      {/* The real mcp.json behind this section (path + contents + reveal) */}
+      {configOpen && data && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-2xl max-h-[80vh] flex flex-col bg-[#0c0c0e] border border-[#27272a] rounded-lg shadow-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-[#27272a] bg-[#121215] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-[#fafafa] flex items-center gap-2">
+                  <FileJson className="w-3.5 h-3.5 text-[#a78bfa]" />
+                  <span>{zh ? 'MCP 配置文件' : 'MCP configuration file'}</span>
+                  {!data.exists && (
+                    <span className="text-[10px] font-mono text-[#f59e0b] border border-[#f59e0b]/40 rounded px-1.5 py-0.5">
+                      {zh ? '文件不存在' : 'missing'}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] font-mono text-[#71717a] truncate mt-0.5" title={data.path}>
+                  {data.path}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfigOpen(false)}
+                aria-label={zh ? '关闭' : 'Close'}
+                className="p-1 rounded text-[#71717a] hover:text-[#fafafa] hover:bg-[#18181b] cursor-pointer shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-auto p-3">
+              <pre className="text-[11px] font-mono leading-[1.5] whitespace-pre-wrap break-all text-[#d4d4d8]">
+                {data.raw || (zh ? '（文件为空或不存在）' : '(file is empty or missing)')}
+              </pre>
+            </div>
+
+            <div className="px-4 py-3 border-t border-[#27272a] bg-[#121215] flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(data.raw);
+                  setConfigCopied(true);
+                  window.setTimeout(() => setConfigCopied(false), 1500);
+                }}
+                className="px-3 py-1.5 rounded border border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] text-xs cursor-pointer"
+              >
+                {configCopied ? (zh ? '已复制' : 'Copied') : zh ? '复制内容' : 'Copy contents'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void revealFile(data.path)
+                    .then(() => setRevealMessage(zh ? '已在文件管理器中定位该文件' : 'Revealed in the file manager'))
+                    .catch((err) => setRevealMessage(err instanceof Error ? err.message : String(err)));
+                }}
+                className="px-3 py-1.5 rounded border border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] text-xs cursor-pointer"
+              >
+                {zh ? '在文件管理器中显示' : 'Reveal in file manager'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="px-3 py-1.5 rounded border border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] text-xs cursor-pointer"
+              >
+                {zh ? '重新读取' : 'Reload file'}
+              </button>
+              {revealMessage && <span className="text-[10px] text-[#71717a] ml-auto truncate">{revealMessage}</span>}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };

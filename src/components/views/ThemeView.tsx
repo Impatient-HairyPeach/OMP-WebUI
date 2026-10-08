@@ -648,6 +648,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({
     setAccentColor,
     paletteId,
     setPaletteId,
+    resolvedPalette,
     uiDensity,
     setUiDensity,
     editorFont,
@@ -855,10 +856,11 @@ export const ThemeView: React.FC<ThemeViewProps> = ({
           <span className="text-[10px] font-mono text-[#71717a] shrink-0">{paletteId}</span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-          {(['auto', ...PALETTES.map((palette) => palette.id)] as PalettePreference[]).map((id) => {
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {(['auto', 'dark', 'light', 'custom'] as PalettePreference[]).map((id) => {
             const isActive = paletteId === id;
-            const definition = id === 'auto' ? null : paletteById(id);
+            const definition = id === 'dark' || id === 'light' ? paletteById(id) : null;
+            const base = id === 'custom' ? paletteById(resolvedPalette) : definition;
             return (
               <button
                 key={id}
@@ -868,23 +870,28 @@ export const ThemeView: React.FC<ThemeViewProps> = ({
                   isActive ? 'font-semibold' : ''
                 }`}
                 style={{
-                  backgroundColor: definition ? definition.bg : activeTheme.cardBg,
+                  backgroundColor: base ? base.bg : activeTheme.cardBg,
                   borderColor: isActive ? activeTheme.accent : activeTheme.border,
-                  color: definition ? definition.text : undefined,
+                  color: base ? base.text : undefined,
                 }}
               >
                 <span className="flex items-center gap-1.5 min-w-0">
-                  {definition && (
-                    <span
-                      className="w-3 h-3 rounded-full border shrink-0"
-                      style={{ backgroundColor: definition.accent, borderColor: definition.border }}
-                    />
-                  )}
+                  <span
+                    className="w-3 h-3 rounded-full border shrink-0"
+                    style={{
+                      backgroundColor: id === 'custom' ? activeAccentColor : base?.accent ?? activeTheme.accent,
+                      borderColor: base?.border ?? activeTheme.border,
+                    }}
+                  />
                   <span className="truncate">
                     {id === 'auto'
                       ? language === 'zh-CN'
                         ? '跟随系统'
                         : 'Auto'
+                      : id === 'custom'
+                      ? language === 'zh-CN'
+                        ? '自定义'
+                        : 'Custom'
                       : language === 'zh-CN'
                       ? definition!.label.zh
                       : definition!.label.en}
@@ -895,6 +902,14 @@ export const ThemeView: React.FC<ThemeViewProps> = ({
             );
           })}
         </div>
+
+        {paletteId === 'custom' && (
+          <p className="text-[11px] text-[#71717a]">
+            {language === 'zh-CN'
+              ? `自定义沿用「${resolvedPalette === 'light' ? '浅色' : '深色'}」的底色，强调色取下方所选颜色。`
+              : `Custom keeps the ${resolvedPalette === 'light' ? 'light' : 'dark'} base and uses the accent chosen below.`}
+          </p>
+        )}
       </div>
 
       {/* ======================================================== */}

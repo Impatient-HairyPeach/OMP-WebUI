@@ -44,9 +44,10 @@ import {
   type WorkspaceFile,
 } from '../omp/cli';
 import { SIDE_PANEL } from '../lib/panelLayout';
+import { renderMarkdown } from '../lib/miniMarkdown';
 import type { FileDiffItem, LogEntry } from '../types';
 
-export type SidePanelTab = 'files' | 'diffs' | 'terminal' | 'git';
+export type SidePanelTab = 'files' | 'diffs' | 'git';
 
 interface SidePanelProps {
   isOpen: boolean;
@@ -55,10 +56,6 @@ interface SidePanelProps {
   onTabChange: (tab: SidePanelTab) => void;
   /** Real repository state shared with the header and the git dialog. */
   git: GitRepoApi;
-  /** Live omp log lines (bridge SSE) for the terminal tab. */
-  logs: LogEntry[];
-  projectName: string;
-  onClearLogs: () => void;
   onDispatchLog?: (level: 'INFO' | 'OK' | 'CALL' | 'OVERRIDE', message: string) => void;
 }
 
@@ -79,9 +76,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   activeTab,
   onTabChange,
   git,
-  logs,
-  projectName,
-  onClearLogs,
   onDispatchLog,
 }) => {
   const { theme, accentColor } = useTheme();
@@ -100,6 +94,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchHits, setSearchHits] = useState<Array<{ path: string; name: string }>>([]);
   const [treeRoot, setTreeRoot] = useState<string | null>(null);
+  const [viewerMode, setViewerMode] = useState<'source' | 'preview'>('source');
 
   // --- diffs tab ---
   const [diffFiles, setDiffFiles] = useState<GitDiffFile[]>([]);
@@ -160,9 +155,29 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
   const openFilePath = useCallback(
     async (entryPath: string) => {
+      const name = entryPath.replace(/\\/g, '/').split('/').pop() ?? entryPath;
+      // Images are streamed by the raw endpoint, so no text read is attempted.
+      if (/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(name)) {
+        setOpenFile({
+          path: entryPath,
+          name,
+          size: 0,
+          modified: '',
+          language: name.split('.').pop() ?? 'image',
+          content: '',
+          truncated: false,
+          lines: 0,
+          relative: entryPath,
+        });
+        setViewerMode('preview');
+        setFileError(null);
+        return;
+      }
       setFileBusy(true);
       try {
-        setOpenFile(await fetchFileContent(entryPath));
+        const file = await fetchFileContent(entryPath);
+        setOpenFile(file);
+        setViewerMode(/\.(md|markdown)$/i.test(file.name) ? 'preview' : 'source');
         setFileError(null);
       } catch (error) {
         setFileError(error instanceof Error ? error.message : String(error));
@@ -206,11 +221,13 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
   if (!isOpen) return null;
 
+  const isImageFile = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(openFile?.name ?? '');
+  const isMarkdownFile = /\.(md|markdown)$/i.test(openFile?.name ?? '');
+
   const rowClass = 'group flex h-6 items-center gap-1.5 rounded px-1.5 text-[12px] transition-colors cursor-pointer';
   const tabs: Array<{ id: SidePanelTab; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: 'files', label: zh ? '文件' : 'Files', icon: <FileCode className="w-3.5 h-3.5" /> },
     { id: 'diffs', label: zh ? '改动' : 'Diffs', icon: <FilePlus className="w-3.5 h-3.5" />, badge: diffs.length },
-    { id: 'terminal', label: zh ? '终端' : 'Terminal', icon: <ScrollText className="w-3.5 h-3.5" /> },
     { id: 'git', label: zh ? 'Git' : 'Git', icon: <GitBranch className="w-3.5 h-3.5" /> },
   ];
 
@@ -231,8 +248,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       >
         {/* Header: title + close */}
         <div className="h-9 px-3 border-b flex items-center justify-between shrink-0" style={{ borderColor: theme.border }}>
-          <span className="text-[11px] font-medium truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} title={projectName}>
-            {projectName || (zh ? '工作区' : 'workspace')}
+          <span className="text-[11px] font-medium" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+            {zh ? '工作区面板' : 'Workspace panel'}
           </span>
           <button
             type="button"
@@ -314,8 +331,26 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     {openFile.relative}
                   </span>
                   <div className="flex items-center gap-2 shrink-0">
+                    {(isMarkdownFile || isImageFile) && (
+                      <div className="flex items-center p-0.5 rounded border" style={{ borderColor: theme.border }}>
+                        {(['source', 'preview'] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setViewerMode(mode)}
+                            title={mode === 'source' ? (zh ? '源码' : 'Source') : zh ? '预览' : 'Preview'}
+                            className={`px-1.5 py-0.5 rounded text-[10px] transition-colors cursor-pointer ${
+                              viewerMode === mode ? 'font-semibold' : 'text-[#71717a] hover:text-[#fafafa]'
+                            }`}
+                            style={viewerMode === mode ? { backgroundColor: `${accentColor}22`, color: accentColor } : undefined}
+                          >
+                            {mode === 'source' ? (zh ? '源码' : 'Source') : zh ? '预览' : 'Preview'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <span className="text-[9px] font-mono text-[#52525b]">
-                      {formatSize(openFile.size)} · {openFile.lines} {zh ? '行' : 'lines'}
+                      {isImageFile ? openFile.language.toUpperCase() : `${formatSize(openFile.size)} · ${openFile.lines} ${zh ? '行' : 'lines'}`}
                     </span>
                     <button
                       type="button"
@@ -328,16 +363,28 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   </div>
                 </div>
                 <div className="flex-1 min-h-0 overflow-auto">
-                  <pre className="text-[11px] leading-[1.55] font-mono whitespace-pre p-2 text-[#d4d4d8]">
-                    {openFile.content.split('\n').map((line, index) => (
-                      <div key={index} className="flex">
-                        <span className="w-10 shrink-0 text-right pr-2 text-[#52525b] select-none border-r border-[#1e1e24] mr-2">
-                          {index + 1}
-                        </span>
-                        <span className="whitespace-pre-wrap break-all">{line || ' '}</span>
-                      </div>
-                    ))}
-                  </pre>
+                  {isImageFile && viewerMode === 'preview' ? (
+                    <div className="p-3 flex items-center justify-center bg-[#09090b] min-h-full">
+                      <img
+                        src={`/api/fs/raw?path=${encodeURIComponent(openFile.path)}`}
+                        alt={openFile.name}
+                        className="max-w-full max-h-full object-contain"
+                      />
+                    </div>
+                  ) : viewerMode === 'preview' ? (
+                    <div className="px-3 py-2 text-[13px] text-[#e8e8e8]">{renderMarkdown(openFile.content)}</div>
+                  ) : (
+                    <pre className="text-[11px] leading-[1.55] font-mono whitespace-pre p-2 text-[#d4d4d8]">
+                      {openFile.content.split('\n').map((line, index) => (
+                        <div key={index} className="flex">
+                          <span className="w-10 shrink-0 text-right pr-2 text-[#52525b] select-none border-r border-[#1e1e24] mr-2">
+                            {index + 1}
+                          </span>
+                          <span className="whitespace-pre-wrap break-all">{line || ' '}</span>
+                        </div>
+                      ))}
+                    </pre>
+                  )}
                   {openFile.truncated && (
                     <div className="px-2 pb-2 text-[10px] text-[#71717a]">
                       {zh ? '（文件过大，仅显示前 200k 字符）' : '(file too large — first 200k characters shown)'}
@@ -401,49 +448,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           <div className="flex-1 min-h-0 overflow-y-auto p-2">
             {diffError && <div className="mb-2 text-[10px] text-[#f87171] break-words">{diffError}</div>}
             <DiffViewer diffs={diffs} />
-          </div>
-        )}
-
-        {/* ============================ TERMINAL =========================== */}
-        {activeTab === 'terminal' && (
-          <div className="flex-1 min-h-0 flex flex-col">
-            <div className="px-2 h-7 border-b flex items-center justify-between shrink-0" style={{ borderColor: theme.border }}>
-              <span className="text-[10px] font-mono text-[#71717a] uppercase">
-                {zh ? 'omp 事件流' : 'omp event stream'} · {logs.length}
-              </span>
-              <button
-                type="button"
-                onClick={onClearLogs}
-                title={zh ? '清空日志' : 'Clear logs'}
-                className="p-1 text-[#71717a] hover:text-[#fafafa] cursor-pointer"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1.5 font-mono text-[10px] leading-[1.5]">
-              {logs.length === 0 && <div className="text-[#52525b]">{zh ? '暂无日志。' : 'No log lines yet.'}</div>}
-              {logs.map((line) => (
-                <div key={line.id} className="flex gap-2">
-                  <span className="text-[#52525b] shrink-0">{line.timestamp}</span>
-                  <span
-                    className="shrink-0 w-[52px]"
-                    style={{
-                      color:
-                        line.level === 'OK'
-                          ? '#34d399'
-                          : line.level === 'OVERRIDE'
-                          ? '#f59e0b'
-                          : line.level === 'CALL'
-                          ? accentColor
-                          : '#71717a',
-                    }}
-                  >
-                    {line.level}
-                  </span>
-                  <span className="text-[#a1a1aa] break-all">{line.message}</span>
-                </div>
-              ))}
-            </div>
           </div>
         )}
 

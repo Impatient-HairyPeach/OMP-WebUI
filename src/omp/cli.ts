@@ -266,7 +266,11 @@ export const checkoutGitBranch = (branch: string) =>
 export const commitGitChanges = (message: string) =>
   postJson<GitSnapshot & { ok: boolean; output: string }>("/api/git/commit", { message });
 
-export const fetchMcpServers = () => getJson<{ path: string; exists: boolean; servers: OmpMcpServer[] }>("/api/omp/mcp");
+export const fetchMcpServers = () => getJson<{ path: string; exists: boolean; servers: OmpMcpServer[]; raw: string }>("/api/omp/mcp");
+
+/** Reveal one of omp's own configuration files in the OS file manager. */
+export const revealFile = (filePath: string) =>
+  postJson<{ ok: boolean; path: string }>("/api/reveal", { path: filePath });
 export const fetchSkills = () => getJson<{ skills: OmpSkillEntry[]; roots: string[] }>("/api/omp/skills");
 export const fetchAgents = () => getJson<{ agents: OmpAgentEntry[]; dir: string; error?: string }>("/api/omp/agents");
 export const fetchPlugins = () => getJson<{ path: string; exists: boolean; plugins: OmpPluginEntry[] }>("/api/omp/plugins");

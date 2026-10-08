@@ -6,6 +6,7 @@ import {
   loadPalettePreference,
   paletteToThemeOption,
   resolvePalette,
+  saveCustomBase,
   type PaletteId,
   type PalettePreference,
 } from '../lib/palettes';
@@ -63,6 +64,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     document.documentElement.setAttribute('data-density', uiDensity);
     try {
       localStorage.setItem('omp_palette', paletteId);
+      if (paletteId === 'custom') saveCustomBase(resolved);
       localStorage.setItem('omp_ui_density', uiDensity);
       localStorage.setItem('omp_editor_font', editorFont);
       if (accentColor) localStorage.setItem('omp_accent_color', accentColor);

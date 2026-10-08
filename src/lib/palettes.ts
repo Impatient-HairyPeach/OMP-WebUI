@@ -1,15 +1,15 @@
 /**
- * palettes — the five palettes pi-web ships (plus `auto`), applied as
- * `data-theme` on <html>. The CSS tokens live in `src/index.css`; this module
- * only names them and mirrors their values into the ThemeOption shape the
- * existing components read inline.
+ * palettes — two built-in palettes (pi-web's light/dark) plus `auto` and a
+ * `custom` mode that keeps one of them and overrides the accent. Applied as
+ * `data-theme` on <html>; the token values themselves live in `src/index.css`.
  */
 import type { ThemeOption } from '../types';
 
-export type PaletteId = 'light' | 'dark' | 'mist' | 'rose' | 'pine';
-export type PalettePreference = PaletteId | 'auto';
+export type PaletteId = 'light' | 'dark';
+export type PalettePreference = PaletteId | 'auto' | 'custom';
 
 export const PALETTE_STORAGE_KEY = 'omp_palette';
+export const CUSTOM_BASE_STORAGE_KEY = 'omp_palette_base';
 
 interface PaletteDef {
   id: PaletteId;
@@ -22,7 +22,6 @@ interface PaletteDef {
   textMuted: string;
   textDim: string;
   accent: string;
-  secondary: string;
 }
 
 export const PALETTES: PaletteDef[] = [
@@ -37,7 +36,6 @@ export const PALETTES: PaletteDef[] = [
     textMuted: '#b7b7b7',
     textDim: '#a4a4a4',
     accent: '#a4c2f4',
-    secondary: '#a4c2f4',
   },
   {
     id: 'light',
@@ -50,46 +48,6 @@ export const PALETTES: PaletteDef[] = [
     textMuted: '#515c6b',
     textDim: '#5e6673',
     accent: '#245bce',
-    secondary: '#245bce',
-  },
-  {
-    id: 'mist',
-    label: { en: 'Mist', zh: '薄雾' },
-    mode: 'light',
-    bg: '#f4f8f7',
-    bgPanel: '#e9f0ee',
-    border: '#afc4ba',
-    text: '#202e2b',
-    textMuted: '#3f534d',
-    textDim: '#566a63',
-    accent: '#1e6559',
-    secondary: '#1e6559',
-  },
-  {
-    id: 'rose',
-    label: { en: 'Rose', zh: '玫瑰' },
-    mode: 'light',
-    bg: '#fcf7f8',
-    bgPanel: '#f3edef',
-    border: '#cdb5bf',
-    text: '#34282e',
-    textMuted: '#5c4b53',
-    textDim: '#6f5f66',
-    accent: '#914360',
-    secondary: '#914360',
-  },
-  {
-    id: 'pine',
-    label: { en: 'Pine', zh: '松林' },
-    mode: 'dark',
-    bg: '#19201f',
-    bgPanel: '#212b28',
-    border: '#4a5f52',
-    text: '#e6ede8',
-    textMuted: '#b6c6bd',
-    textDim: '#9fb1a8',
-    accent: '#acccb7',
-    secondary: '#acccb7',
   },
 ];
 
@@ -97,9 +55,27 @@ export function paletteById(id: PaletteId): PaletteDef {
   return PALETTES.find((palette) => palette.id === id) ?? PALETTES[0];
 }
 
-/** `auto` follows the OS; anything else is explicit. */
+export function loadCustomBase(): PaletteId {
+  if (typeof window === 'undefined') return 'dark';
+  try {
+    return window.localStorage.getItem(CUSTOM_BASE_STORAGE_KEY) === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+export function saveCustomBase(base: PaletteId): void {
+  try {
+    window.localStorage.setItem(CUSTOM_BASE_STORAGE_KEY, base);
+  } catch {
+    // storage unavailable
+  }
+}
+
+/** `auto` follows the OS; `custom` keeps the saved base; anything else is explicit. */
 export function resolvePalette(preference: PalettePreference): PaletteId {
-  if (preference !== 'auto') return preference;
+  if (preference === 'light' || preference === 'dark') return preference;
+  if (preference === 'custom') return loadCustomBase();
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'dark';
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
@@ -108,10 +84,9 @@ export function loadPalettePreference(): PalettePreference {
   if (typeof window === 'undefined') return 'dark';
   try {
     const stored = window.localStorage.getItem(PALETTE_STORAGE_KEY);
-    if (stored === 'auto') return 'auto';
-    if (stored && PALETTES.some((palette) => palette.id === stored)) return stored as PaletteId;
+    if (stored === 'auto' || stored === 'custom' || stored === 'light' || stored === 'dark') return stored;
   } catch {
-    // storage unavailable — pi-web's dark palette is the default
+    // storage unavailable — the dark palette is the default
   }
   return 'dark';
 }
@@ -122,10 +97,10 @@ export function paletteToThemeOption(id: PaletteId, accentOverride?: string | nu
   return {
     id: palette.id,
     name: palette.label.zh,
-    category: palette.mode === 'dark' ? 'Dark Palettes' : 'Light Palettes',
+    category: palette.mode === 'dark' ? 'Dark' : 'Light',
     description: '',
     accent: accentOverride || palette.accent,
-    secondary: accentOverride || palette.secondary,
+    secondary: accentOverride || palette.accent,
     background: palette.bg,
     cardBg: palette.bgPanel,
     border: palette.border,

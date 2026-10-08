@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChatMessage } from '../../types';
+import type { FileDiffItem } from '../../types';
 import type { OmpLogLine, OmpModelOption, OmpSessionSummary } from '../../omp/protocol';
 import {
   Plus,
@@ -41,7 +42,7 @@ import { useI18n } from '../../context/I18nContext';
 import { DiffViewer } from '../DiffViewer';
 import { MessageActivity } from '../MessageActivity';
 import { PanelResizeHandle } from '../PanelResizeHandle';
-import { speakWithOmp, fetchWorkspaceFiles, fetchDirs } from '../../omp/cli';
+import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff } from '../../omp/cli';
 import { Mic, Volume2 } from 'lucide-react';
 import { useOmpSession } from '../../hooks/useOmpSession';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
@@ -130,6 +131,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [compactMenuOpen, setCompactMenuOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [sessionViewMode, setSessionViewMode] = useState<'chat' | 'diffs'>('chat');
+  const [sessionDiffs, setSessionDiffs] = useState<FileDiffItem[]>([]);
+  const [sessionDiffError, setSessionDiffError] = useState<string | null>(null);
   const [steerOrQueueMode, setSteerOrQueueMode] = useState<'steer' | 'followUp'>('steer');
   const [steerModeDropdownOpen, setSteerModeDropdownOpen] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -164,6 +167,32 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     const key = comparableDirKey(activeDir);
     setExpandedProjects((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
   }, [omp.resumePath, omp.sessions, omp.workspace]);
+
+  // The diffs view shows the real working-tree diff of the agent's workspace.
+  useEffect(() => {
+    if (sessionViewMode !== 'diffs') return;
+    let cancelled = false;
+    fetchGitDiff()
+      .then((payload) => {
+        if (cancelled) return;
+        setSessionDiffs(
+          payload.files.map((file) => ({
+            path: file.path,
+            status: file.status === 'added' ? 'added' : file.status === 'deleted' ? 'deleted' : 'modified',
+            additions: file.additions,
+            deletions: file.deletions,
+            diff: file.diff,
+          }))
+        );
+        setSessionDiffError(null);
+      })
+      .catch((error) => {
+        if (!cancelled) setSessionDiffError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionViewMode, omp.workspace]);
 
   const toggleProjectExpanded = (key: string) => {
     setExpandedProjects((prev) => {
@@ -780,7 +809,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                       return (
                         <div
                           key={session.path}
-                          onClick={() => void omp.openSession(session.path)}
+                          onClick={() => {
+                            // Opening a session always shows the transcript, never the diff view.
+                            setSessionViewMode('chat');
+                            void omp.openSession(session.path);
+                          }}
                           className={`group flex items-center justify-between p-2 rounded transition-colors cursor-pointer text-xs ${
                             isSelected
                               ? 'bg-[#18181b] text-[#fafafa] border border-[#27272a]'
@@ -972,17 +1005,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
             <span className="text-[#fafafa] font-semibold font-sans flex items-center gap-1.5 truncate">
               {sessionActive && <MessageSquare className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />}
               <span className="truncate">{sessionTitle}</span>
-            </span>
-            <span
-              className="text-[10px] px-1.5 py-0.2 rounded border font-mono shrink-0"
-              style={{
-                backgroundColor: `${accentColor}18`,
-                borderColor: `${accentColor}35`,
-                color: accentColor,
-              }}
-              title={omp.workspace || undefined}
-            >
-              {omp.workspace ? basename(omp.workspace) : 'workspace'}
             </span>
           </div>
 
@@ -1349,12 +1371,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
                 {sessionViewMode === 'diffs' ? (
                   <div className="space-y-3">
-                    <div className="px-3.5 py-2 rounded-lg border border-[#27272a] bg-[#121215] text-[11px] font-mono text-[#71717a]">
-                      {language === 'zh-CN'
-                        ? '本会话没有记录到文件改动。'
-                        : 'No diffs recorded for this session.'}
-                    </div>
-                    <DiffViewer diffs={[]} />
+                    {sessionDiffError && (
+                      <div className="px-3 py-2 rounded border border-[#ef4444]/40 bg-[#ef4444]/10 text-[11px] font-mono text-[#f87171]">
+                        {sessionDiffError}
+                      </div>
+                    )}
+                    <DiffViewer diffs={sessionDiffs} />
                   </div>
                 ) : (
                   <>

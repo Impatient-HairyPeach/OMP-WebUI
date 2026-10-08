@@ -15,11 +15,17 @@
       (function () {
         try {
           var stored = localStorage.getItem('omp_palette');
-          var theme = stored && stored !== 'auto'
-            ? stored
-            : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+          var theme;
+          if (stored === 'light' || stored === 'dark') theme = stored;
+          else if (stored === 'custom') theme = localStorage.getItem('omp_palette_base') === 'light' ? 'light' : 'dark';
+          else theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          var accent = localStorage.getItem('omp_accent_color');
           document.documentElement.setAttribute('data-theme', theme);
-          if (theme === 'light' || theme === 'mist' || theme === 'rose') {
+          if (accent) {
+            document.documentElement.style.setProperty('--accent', accent);
+            document.documentElement.style.setProperty('--accent-hover', accent);
+          }
+          if (theme === 'light') {
             document.documentElement.classList.remove('dark');
             document.documentElement.classList.add('light');
           }

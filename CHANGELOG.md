@@ -3,6 +3,38 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.1
+
+Fixes
+- Unknown `/api/*` paths now answer JSON (`unknown_endpoint` + a hint to restart
+  the bridge) instead of falling through to the SPA. A dev server started before
+  a route existed used to hand the client `index.html`, which surfaced as
+  `Unexpected token '<'` in the right panel and as 404s on
+  `/api/skills/scope` / `/api/extensions/scope`. Restart `bun run dev` after
+  pulling so the bridge serves the new routes.
+- Opening a session always switches back to the chat view (the diffs view could
+  stick and made a freshly opened session look empty).
+- The diffs view and the right panel's diff tab now show the real working-tree
+  diff instead of an empty placeholder.
+- The provider/model scope read (`/api/omp/models/scope`) and the plugin
+  inventory no longer 500 when omp answers with a warning line.
+
+Changes
+- Palettes reduced to **跟随系统 / 深色 / 浅色 / 自定义** (auto · dark · light ·
+  custom); mist, rose and pine are gone. Custom keeps the light/dark base and
+  the accent picked below it.
+- The workspace panel is now files · diffs · git, and files can be **previewed**:
+  markdown renders (headings, code, lists, quotes, links), images stream from
+  the raw endpoint, anything else opens as source with line numbers.
+- The terminal and the omp event stream are back at the bottom of the chat
+  column (left of the right panel).
+- The project-name badge in the chat header and the `.omprc` shortcut in the
+  header are gone (the config view stays in Settings).
+- Settings → MCP services has an **打开配置文件** button: the real `mcp.json`
+  path, its contents, copy, and reveal-in-file-manager.
+- New endpoints: `GET /api/fs/raw` (image/binary preview), `POST /api/reveal`
+  (reveal one of omp's own config files), `raw` added to `GET /api/omp/mcp`.
+
 ## 0.3.0
 
 Design system ported from `agegr/pi-web`

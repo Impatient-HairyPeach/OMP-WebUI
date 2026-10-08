@@ -12,6 +12,7 @@ import { Sidebar } from './components/Sidebar';
 import { McpServersSection } from './components/McpServersSection';
 import { PluginsSection } from './components/PluginsSection';
 import { SkillsSection } from './components/SkillsSection';
+import { EventStreamTerminal } from './components/EventStreamTerminal';
 
 // Modals & Drawers
 import { InstallSkillModal } from './components/InstallSkillModal';
@@ -233,18 +234,22 @@ export default function App() {
             </div>
           )}
 
+          {/* Bottom-docked terminal + omp event stream (left of the right panel) */}
+          <EventStreamTerminal
+            logs={logs}
+            projectName={workspaceName}
+            onClearLogs={() => setLogs([])}
+            onAddLog={addLog}
+          />
         </main>
 
-        {/* Right panel: files · diffs · terminal · git */}
+        {/* Right panel: files · diffs · git */}
         <SidePanel
           isOpen={sidePanelOpen}
           onClose={() => setSidePanelOpen(false)}
           activeTab={sidePanelTab}
           onTabChange={setSidePanelTab}
           git={git}
-          logs={logs}
-          projectName={workspaceName}
-          onClearLogs={() => setLogs([])}
           onDispatchLog={addLog}
         />
       </div>
