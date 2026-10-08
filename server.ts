@@ -1374,6 +1374,76 @@ app.get("/api/omp/config", (_req, res) => {
   });
 });
 
+/** Directory listing for the file explorer; paths are confined to the workspace. */
+app.get("/api/fs/list", (req, res) => {
+  const requested = String(req.query.path || workspace);
+  const root = path.resolve(workspace);
+  const resolved = path.resolve(requested);
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    res.status(403).json({ error: "path outside the workspace" });
+    return;
+  }
+  try {
+    if (!existsSync(resolved) || !statSync(resolved).isDirectory()) {
+      res.status(404).json({ error: `not a directory: ${resolved}` });
+      return;
+    }
+    const entries = readdirSync(resolved, { withFileTypes: true })
+      .filter((entry) => !entry.name.startsWith('.') || entry.name === '.omp' || entry.name === '.agents')
+      .map((entry) => {
+        const full = path.join(resolved, entry.name);
+        let size = 0;
+        let modified = '';
+        try {
+          const stat = statSync(full);
+          size = stat.size;
+          modified = stat.mtime.toISOString();
+        } catch {
+          /* unreadable entry: still list it */
+        }
+        return { name: entry.name, isDir: entry.isDirectory(), size, modified, path: full };
+      })
+      .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
+    res.json({ path: resolved, name: path.basename(resolved), entries, root });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/** One text file for the viewer, capped so a huge log cannot stall the browser. */
+app.get("/api/fs/file", (req, res) => {
+  const requested = String(req.query.path || "");
+  const root = path.resolve(workspace);
+  const resolved = path.resolve(requested);
+  if (!requested || (resolved !== root && !resolved.startsWith(root + path.sep))) {
+    res.status(403).json({ error: "path outside the workspace" });
+    return;
+  }
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 200_000) || 200_000, 1000), 1_000_000);
+  try {
+    const stat = statSync(resolved);
+    if (!stat.isFile()) {
+      res.status(400).json({ error: "not a file" });
+      return;
+    }
+    const raw = readFileSync(resolved, "utf8");
+    const truncated = raw.length > limit;
+    res.json({
+      path: resolved,
+      name: path.basename(resolved),
+      size: stat.size,
+      modified: stat.mtime.toISOString(),
+      language: path.extname(resolved).replace('.', '') || 'text',
+      content: truncated ? raw.slice(0, limit) : raw,
+      truncated,
+      lines: raw.split('\n').length,
+      relative: path.relative(root, resolved).replace(/\\/g, '/'),
+    });
+  } catch (error) {
+    res.status(400).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
 /** Installed omp version, probed from the real binary. */
 app.get("/api/omp/version", async (_req, res) => {
   res.json({ version: await probeOmpVersion().catch(() => null), bin: OMP_BIN });

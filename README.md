@@ -53,30 +53,48 @@ Production build: `bun run build && bun run start`.
 - `POST /api/git/checkout` `{branch}` — real `git checkout` (only branches that exist in `refs/heads`)
 - `GET /api/git/log?limit=` — real `git log` of the current branch
 - `POST /api/git/commit` `{message}` — real `git add -A` + `git commit -m`
+- `GET /api/fs/list` — one directory of the workspace for the file explorer (paths confined to the workspace)
+- `GET /api/fs/file` `{path, limit?}` — one text file for the viewer (line count, size, truncation flag)
 - `POST /api/say` `{text}` — omp's local TTS engine, returns `audio/wav`
 - `GET /api/git/diff` — real working-tree diff of the agent's workspace
 
 ## Chat features
 
 - Streaming transcript from omp: text, thinking, tool calls with real results, abort, steer, follow-up queue.
-- Assistant activity uses three-level progressive disclosure (same shape as `kahme247/ompweb`): a collapsed **Process details** fold per turn → collapsed per-activity rows with one-line previews → expansion showing the `$ command`, the raw input on demand, the thinking text and tool output capped at 260px.
+- Assistant activity uses three-level progressive disclosure (same shape as `kahme247/ompweb` and `agegr/pi-web`): a collapsed **Process details** fold per turn → collapsed per-activity rows with one-line previews → expansion showing the `$ command`, the raw input on demand, the thinking text and tool output capped at 260px.
 - `/` completion is grouped by omp's own command source (系统内置 / 技能 / 扩展 / 提示词) in a 460px two-column panel; `@` completion lists workspace files.
+- Token, context, generation-rate and cache figures are icon chips at the top-right of the conversation (hover for the numbers); the context chip opens `/compact` and the auto-compaction toggle.
 - Message actions: copy, edit-from-here (session-log branch), retry, fork the session at a turn, quote, read aloud.
 - Right rail: one tick per turn — click to jump, highlights the visible turn, jump-to-latest button.
-- Metrics bar + composer gauge: context tokens/window/percent, cost, tokens/s, cache hit rate, `/compact` and the auto-compaction toggle.
 - Voice: browser dictation into the composer (mic) and read-aloud through `omp say`, with the browser voice as fallback.
-- Sessions: grouped by project directory (each folder collapses, active folder opens automatically), searchable, archive/restore, delete, plus model + thinking-level switching from omp's own catalogs.
+- Sessions: grouped by project directory (each folder collapses, the active folder opens automatically), searchable, archive/restore, delete, plus model + thinking-level switching from omp's own catalogs.
+
+## Theme
+
+The palette is a port of pi-web's: 15 tokens on `data-theme`, six choices
+(`light · dark · mist · rose · pine · auto`, dark by default), applied before
+first paint, plus system-only font stacks for Latin and CJK. Settings →
+界面主题与偏好 switches it; nothing else needs to change because components read
+tokens rather than colours.
+
+## Right panel
+
+Tabs: **文件** (real workspace tree, file viewer with line numbers, `@` path
+insertion into the composer), **改动** (real working-tree diff), **终端** (live
+omp event stream), **Git** (branch, changed files, commits, real commit form).
+Width is draggable and remembered.
 
 ## Layout
 
-- The session list, the side panel and the settings sidebar are width-resizable by dragging their edge; double-click resets, arrow keys nudge.
-- The composer's top edge is draggable to change its height.
-- All four preferences persist in `localStorage` (`omp-studio:session-panel-width`, `omp-studio:side-panel-width`, `omp-studio:settings-panel-width`, `omp-studio:composer-height`), as does the set of expanded project folders (`omp-studio:expanded-projects`).
+- The session list, the right panel and the settings sidebar are width-resizable by dragging their edge; double-click resets, arrow keys nudge.
+- The composer's top edge is draggable to change its height; the chat column and composer share `--chat-content-max-width` (960px).
+- All preferences persist in `localStorage` (`omp-studio:session-panel-width`, `omp-studio:side-panel-width`, `omp-studio:settings-panel-width`, `omp-studio:composer-height`, `omp-studio:expanded-projects`, `omp_palette`).
 
 ## Scopes, updates
 
-- Skills: 全局 / 仅本项目 moves the skill directory between `~/.agents/skills` and `<project>/.agents/skills` (both discovered by omp) and restarts the session.
-- Extensions: 全局 / 仅本项目 / 停用 — global and off use `omp plugin enable|disable`; 仅本项目 pins the extension in `<project>/.omp/omp-studio.json` and the bridge passes omp's `-e <entry>` for that workspace only.
+- Skills: a globe switch stores the skill in `~/.agents/skills`, a folder switch moves it to `<project>/.agents/skills` (both discovered by omp) and the session restarts.
+- Extensions: the same two switches — globe = enabled everywhere (`omp plugin enable`), folder = pinned to this project only (`omp plugin disable` + omp's `-e <entry>` for that workspace), both off = disabled.
+- Providers and models: switches per provider and per model, written to omp's own `enabledModels` / `disabledProviders`.
 - Settings → 更新与版本 checks the installed omp (`omp update --check`) and installs an update with one click, stopping and restarting the session around it. The app's own version/build date is shown there and in the settings sidebar footer.
 
 ## Verification
@@ -88,6 +106,6 @@ bun run test:e2e            # real prompt, streaming, abort, resume, guards, cle
 
 ## What is real vs. fixture data
 
-Real: chat transcript, streaming text/thinking/tool calls, abort, steer/queue, model + thinking-level switching, slash commands and their source categories, `/compact` and auto-compaction, context/cost/token-rate/cache metrics, session list/open/delete/archive/restore, edit-from-here (session-log branch), fork, extension dialogs and status chips, working-tree diffs, plugin/skill install through the omp CLI, GitHub skill import, local-voice read-aloud and dictation, MCP/plugin/skill/agent/provider/config inventories read from omp's own files, skill + extension scope toggles, model scope toggles, the omp update check/install, and every git surface (branches, checkout, commits, diff, commit).
+Real: chat transcript, streaming text/thinking/tool calls, abort, steer/queue, model + thinking-level switching, slash commands and their source categories, `/compact` and auto-compaction, context/cost/token-rate/cache metrics, session list/open/delete/archive/restore, edit-from-here (session-log branch), fork, extension dialogs and status chips, working-tree diffs, plugin/skill install through the omp CLI, GitHub skill import, local-voice read-aloud and dictation, MCP/plugin/skill/agent/provider/config inventories read from omp's own files, skill + extension + model scope switches, the omp update check/install, the workspace file tree and file viewer (with `@` insertion), the palette/theme system, and every git surface (branches, checkout, commits, diff, commit).
 
-Still fixture data: the event-stream terminal's canned command history and its interpreter replies (`src/components/EventStreamTerminal.tsx` plus the seed in `src/App.tsx`), the side panel's scratchpad chat and task checklist tabs (`src/components/SidePanel.tsx`), the local-only `DeployModal`, `InstallSkillModal`'s non-CLI fields, and the theme presets.
+Still fixture data: the local-only `DeployModal`, `InstallSkillModal`'s non-CLI fields (name/description the user types), and the `ThemeView` preset gallery (the live control is the palette row above it).

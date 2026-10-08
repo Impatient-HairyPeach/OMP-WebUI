@@ -19,6 +19,7 @@ import {
 import { ThemeOption } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
+import { PALETTES, paletteById, type PalettePreference } from '../../lib/palettes';
 
 interface ThemeViewProps {
   onSelectTheme?: (theme: ThemeOption) => void;
@@ -645,12 +646,12 @@ export const ThemeView: React.FC<ThemeViewProps> = ({
     saveCustomTheme,
     accentColor: activeAccentColor,
     setAccentColor,
+    paletteId,
+    setPaletteId,
     uiDensity,
     setUiDensity,
     editorFont,
     setEditorFont,
-    enableGrid: enableGridBackground,
-    setEnableGrid: setEnableGridBackground,
     enableGlow: enableGlowEffects,
     setEnableGlow: setEnableGlowEffects,
   } = useTheme();
@@ -830,6 +831,69 @@ export const ThemeView: React.FC<ThemeViewProps> = ({
           <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#18181b] text-[#a1a1aa] border border-[#27272a]">
             {activeTheme.mode === 'light' ? 'Light' : 'Dark'} · {uiDensity}
           </span>
+        </div>
+      </div>
+
+      {/* ======================================================== */}
+      {/* SECTION: PALETTE (pi-web: light · dark · mist · rose · pine) */}
+      {/* ======================================================== */}
+      <div
+        className="p-4 rounded-lg border space-y-3 transition-colors"
+        style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.border }}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+              {language === 'zh-CN' ? '配色方案 (Palette)' : 'Palette'}
+            </div>
+            <div className="text-[11px] text-[#71717a] mt-0.5">
+              {language === 'zh-CN'
+                ? '一个选择决定整套界面的底色、边框、文字层级与强调色；标记本身不写死颜色。'
+                : 'One choice drives every surface, border, text tier and accent — markup never hardcodes a colour.'}
+            </div>
+          </div>
+          <span className="text-[10px] font-mono text-[#71717a] shrink-0">{paletteId}</span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {(['auto', ...PALETTES.map((palette) => palette.id)] as PalettePreference[]).map((id) => {
+            const isActive = paletteId === id;
+            const definition = id === 'auto' ? null : paletteById(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setPaletteId(id)}
+                className={`flex items-center justify-between gap-2 p-2.5 rounded border text-[11px] transition-colors cursor-pointer ${
+                  isActive ? 'font-semibold' : ''
+                }`}
+                style={{
+                  backgroundColor: definition ? definition.bg : activeTheme.cardBg,
+                  borderColor: isActive ? activeTheme.accent : activeTheme.border,
+                  color: definition ? definition.text : undefined,
+                }}
+              >
+                <span className="flex items-center gap-1.5 min-w-0">
+                  {definition && (
+                    <span
+                      className="w-3 h-3 rounded-full border shrink-0"
+                      style={{ backgroundColor: definition.accent, borderColor: definition.border }}
+                    />
+                  )}
+                  <span className="truncate">
+                    {id === 'auto'
+                      ? language === 'zh-CN'
+                        ? '跟随系统'
+                        : 'Auto'
+                      : language === 'zh-CN'
+                      ? definition!.label.zh
+                      : definition!.label.en}
+                  </span>
+                </span>
+                {isActive && <span className="text-[9px] opacity-70 shrink-0">{language === 'zh-CN' ? '当前' : 'on'}</span>}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1479,7 +1543,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({
           <div className="pt-2 border-t border-[#1e1e24]">
             <div className="text-[11px] text-[#a1a1aa] mb-1.5 font-medium">{t.editorFontLabel}</div>
             <div className="grid grid-cols-2 gap-2">
-              {['Geist Mono', 'JetBrains Mono', 'Fira Code', 'IBM Plex Mono'].map((font) => (
+              {['System Mono', 'Consolas', 'Cascadia Mono', 'Menlo', 'Courier New'].map((font) => (
                 <button
                   key={font}
                   type="button"
@@ -1660,31 +1724,6 @@ export const ThemeView: React.FC<ThemeViewProps> = ({
               <span
                 className={`block h-3 w-3 rounded-full bg-white transition-transform mt-[1px] ${
                   showLatency ? 'translate-x-3 bg-[#09090b]' : 'translate-x-0.5 bg-[#71717a]'
-                }`}
-              />
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between pt-3">
-            <div>
-              <div className="text-xs font-medium text-[#fafafa]">{t.toggleGrid}</div>
-              <div className="text-[11px] text-[#71717a]">
-                {t.toggleGridDesc}
-              </div>
-            </div>
-            <button
-              onClick={() => setEnableGridBackground(!enableGridBackground)}
-              className={`h-4 w-7 rounded-full border transition-colors relative cursor-pointer ${
-                enableGridBackground ? 'bg-[#a78bfa] border-[#a78bfa]' : 'bg-[#18181b] border-[#3f3f46]'
-              }`}
-              style={{
-                backgroundColor: enableGridBackground ? customAccent : undefined,
-                borderColor: enableGridBackground ? customAccent : undefined,
-              }}
-            >
-              <span
-                className={`block h-3 w-3 rounded-full bg-white transition-transform mt-[1px] ${
-                  enableGridBackground ? 'translate-x-3 bg-[#09090b]' : 'translate-x-0.5 bg-[#71717a]'
                 }`}
               />
             </button>

@@ -1,45 +1,149 @@
 @import "tailwindcss";
 
+/* System font stacks only: no webfont is downloaded, so Latin and CJK text
+   render with whatever the OS already has (pi-web's mono is Noto Sans Mono;
+   the system equivalent is ui-monospace). */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Cascadia Mono', 'Liberation Mono',
+    'Courier New', 'Microsoft YaHei', monospace;
+}
+
+/* ========================================================== */
+/* DESIGN TOKENS — ported from pi-web (github.com/agegr/pi-web) */
+/*                                                             */
+/* 15 palette tokens switched by [data-theme] on <html>; the    */
+/* tokens carry every surface, border and text tier. Markup      */
+/* never hardcodes a colour, so a theme switch is attribute-only. */
+/* ========================================================== */
 @layer base {
+  :root,
+  [data-theme="dark"] {
+    --bg: #1a1a1a;
+    --bg-panel: #242424;
+    --bg-hover: #2e2e2e;
+    --bg-selected: #383838;
+    --border: #454545;
+    --text: #e8e8e8;
+    --text-muted: #b7b7b7;
+    --text-dim: #a4a4a4;
+    --accent: #a4c2f4;
+    --accent-hover: #c3d8fa;
+    --accent-contrast: #182234;
+    --user-bg: #292929;
+    --assistant-bg: #1a1a1a;
+    --tool-bg: #222222;
+    --bg-subtle: rgba(255, 255, 255, 0.04);
+    --terminal-bg: #111318;
+    color-scheme: dark;
+  }
+
+  [data-theme="light"] {
+    --bg: #ffffff;
+    --bg-panel: #f5f5f5;
+    --bg-hover: #eeeeee;
+    --bg-selected: #e8e8e8;
+    --border: #e0e0e0;
+    --text: #1a1a1a;
+    --text-muted: #515c6b;
+    --text-dim: #5e6673;
+    --accent: #245bce;
+    --accent-hover: #1d4ed8;
+    --accent-contrast: #ffffff;
+    --user-bg: #eff6ff;
+    --assistant-bg: #ffffff;
+    --tool-bg: #f9fafb;
+    --bg-subtle: rgba(0, 0, 0, 0.03);
+    --terminal-bg: #111318;
+    color-scheme: light;
+  }
+
+  [data-theme="mist"] {
+    --bg: #f4f8f7;
+    --bg-panel: #e9f0ee;
+    --bg-hover: #e0eae7;
+    --bg-selected: #d3e2dd;
+    --border: #afc4ba;
+    --text: #202e2b;
+    --text-muted: #3f534d;
+    --text-dim: #566a63;
+    --accent: #1e6559;
+    --accent-hover: #17524a;
+    --accent-contrast: #ffffff;
+    --user-bg: #dfeae7;
+    --assistant-bg: #f4f8f7;
+    --tool-bg: #eef4f2;
+    --bg-subtle: rgba(0, 0, 0, 0.03);
+    --terminal-bg: #111318;
+    color-scheme: light;
+  }
+
+  [data-theme="rose"] {
+    --bg: #fcf7f8;
+    --bg-panel: #f3edef;
+    --bg-hover: #ece3e6;
+    --bg-selected: #e2d3d8;
+    --border: #cdb5bf;
+    --text: #34282e;
+    --text-muted: #5c4b53;
+    --text-dim: #6f5f66;
+    --accent: #914360;
+    --accent-hover: #7a344f;
+    --accent-contrast: #ffffff;
+    --user-bg: #f0e4e8;
+    --assistant-bg: #fcf7f8;
+    --tool-bg: #f7f0f2;
+    --bg-subtle: rgba(0, 0, 0, 0.03);
+    --terminal-bg: #111318;
+    color-scheme: light;
+  }
+
+  [data-theme="pine"] {
+    --bg: #19201f;
+    --bg-panel: #212b28;
+    --bg-hover: #2a3633;
+    --bg-selected: #35443f;
+    --border: #4a5f52;
+    --text: #e6ede8;
+    --text-muted: #b6c6bd;
+    --text-dim: #9fb1a8;
+    --accent: #acccb7;
+    --accent-hover: #c4ddcd;
+    --accent-contrast: #16211d;
+    --user-bg: #263230;
+    --assistant-bg: #19201f;
+    --tool-bg: #1e2825;
+    --bg-subtle: rgba(255, 255, 255, 0.04);
+    --terminal-bg: #111318;
+    color-scheme: dark;
+  }
+
+  /* Legacy aliases: inline styles written against the old token names keep
+     working while components migrate to the palette tokens. */
   :root {
-    --theme-bg: #09090b;
-    --theme-surface: #0c0c0e;
-    --theme-card: #121215;
-    --theme-card-hover: #18181b;
-    --theme-border: #27272a;
-    --theme-border-subtle: #1e1e24;
-    --theme-border-hover: #3f3f46;
-    --theme-text-primary: #fafafa;
-    --theme-text-muted: #a1a1aa;
-    --theme-text-subtle: #71717a;
-    --theme-accent: #a78bfa;
-    --theme-accent-soft: rgba(167, 139, 250, 0.15);
-    --theme-secondary: #34d399;
-    --theme-terminal-bg: #070709;
-    --theme-code-bg: #050507;
-    --font-mono: 'Geist Mono', monospace;
+    --theme-bg: var(--bg);
+    --theme-surface: var(--bg-panel);
+    --theme-card: var(--bg-panel);
+    --theme-card-hover: var(--bg-hover);
+    --theme-border: var(--border);
+    --theme-border-subtle: color-mix(in srgb, var(--border) 70%, transparent);
+    --theme-border-hover: var(--bg-selected);
+    --theme-text-primary: var(--text);
+    --theme-text-muted: var(--text-muted);
+    --theme-text-subtle: var(--text-dim);
+    --theme-accent: var(--accent);
+    --theme-accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+    --theme-terminal-bg: var(--terminal-bg);
+    --theme-code-bg: var(--bg-subtle);
+    /* Widen/narrow the chat column and the composer in one place. */
+    --chat-content-max-width: 960px;
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Cascadia Mono', 'Liberation Mono', 'Courier New', 'Microsoft YaHei', monospace;
     --density-padding: 0.75rem;
     --density-gap: 0.5rem;
   }
 
-  /* Canonical Light System Tokens */
-  html.light,
-  [data-theme-mode="light"] {
-    --theme-bg: #f8fafc;
-    --theme-surface: #f1f5f9;
-    --theme-card: #ffffff;
-    --theme-card-hover: #f8fafc;
-    --theme-border: #e2e8f0;
-    --theme-border-subtle: #cbd5e1;
-    --theme-border-hover: #94a3b8;
-    --theme-text-primary: #0f172a;
-    --theme-text-muted: #475569;
-    --theme-text-subtle: #64748b;
-    --theme-terminal-bg: #f8fafc;
-    --theme-code-bg: #f1f5f9;
-  }
-
-  /* Density Scales */
+  /* Density only nudges the base size; the palette is theme-driven. */
   [data-density="compact"] {
     --density-padding: 0.5rem;
     --density-gap: 0.375rem;
@@ -58,133 +162,159 @@
     font-size: 15px;
   }
 
-  body {
-    background-color: var(--theme-bg);
-    color: var(--theme-text-primary);
-    letter-spacing: -0.01em;
-    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  html {
+    font-size: 14px;
   }
 
-  /* Custom scrollbar matching active theme */
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    letter-spacing: 0;
+    font-size: 14px;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* pi-web scrollbars: transparent track, mixed-down thumb, 10px. */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-track {
-    background: var(--theme-bg);
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--theme-border);
-    border-radius: 3px;
+    background-color: color-mix(in srgb, var(--text-dim) 45%, transparent);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 5px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--theme-border-hover);
+    background-color: color-mix(in srgb, var(--text-dim) 72%, transparent);
   }
 }
 
 /* ========================================================== */
-/* GLOBAL COMPREHENSIVE LIGHT THEME ENGINE OVERRIDES          */
-/* Converts all hardcoded dark utility classes to theme vars */
+/* PALETTE BRIDGE                                             */
+/*                                                            */
+/* Components still carry literal zinc/violet utility classes; */
+/* they are remapped onto the palette tokens here so one        */
+/* [data-theme] attribute restyles the whole app. New code      */
+/* should use the tokens directly.                              */
 /* ========================================================== */
-html.light,
-[data-theme-mode="light"] {
-  color: var(--theme-text-primary);
-  background-color: var(--theme-bg);
+.bg-\[\#09090b\] {
+  background-color: var(--bg) !important;
+}
+.bg-\[\#0c0c0e\] {
+  background-color: var(--bg-panel) !important;
+}
+.bg-\[\#121215\],
+.bg-\[\#16161a\] {
+  background-color: var(--tool-bg) !important;
+}
+.bg-\[\#18181b\] {
+  background-color: var(--bg-hover) !important;
+}
+.bg-\[\#1c1c20\],
+.bg-\[\#27272a\] {
+  background-color: var(--bg-selected) !important;
+}
+.bg-\[\#070709\],
+.bg-\[\#050507\] {
+  background-color: var(--terminal-bg) !important;
+}
+.bg-\[\#09090b\]\/80,
+.bg-\[\#0c0c0e\]\/80 {
+  background-color: color-mix(in srgb, var(--bg-panel) 80%, transparent) !important;
+}
+.bg-\[\#09090b\]\/70 {
+  background-color: color-mix(in srgb, var(--bg) 70%, transparent) !important;
+}
+.bg-\[\#18181b\]\/50,
+.bg-\[\#27272a\]\/60,
+.bg-\[\#27272a\]\/40 {
+  background-color: color-mix(in srgb, var(--bg-selected) 60%, transparent) !important;
 }
 
-/* Background overrides in Light Mode */
-html.light .bg-\[\#09090b\],
-[data-theme-mode="light"] .bg-\[\#09090b\] {
-  background-color: var(--theme-bg) !important;
+.text-\[\#fafafa\],
+.text-\[\#e4e4e7\] {
+  color: var(--text) !important;
+}
+.text-\[\#a1a1aa\],
+.text-\[\#d4d4d8\] {
+  color: var(--text-muted) !important;
+}
+.text-\[\#71717a\] {
+  color: var(--text-dim) !important;
+}
+.text-\[\#52525b\] {
+  color: color-mix(in srgb, var(--text-dim) 70%, transparent) !important;
 }
 
-html.light .bg-\[\#0c0c0e\],
-[data-theme-mode="light"] .bg-\[\#0c0c0e\] {
-  background-color: var(--theme-surface) !important;
+.border-\[\#27272a\],
+.border-\[\#3f3f46\] {
+  border-color: var(--border) !important;
+}
+.border-\[\#1e1e24\],
+.border-\[\#222226\] {
+  border-color: color-mix(in srgb, var(--border) 70%, transparent) !important;
+}
+.divide-\[\#1e1e24\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: color-mix(in srgb, var(--border) 70%, transparent) !important;
 }
 
-html.light .bg-\[\#121215\],
-[data-theme-mode="light"] .bg-\[\#121215\] {
-  background-color: var(--theme-card) !important;
+.hover\:bg-\[\#18181b\]:hover,
+.hover\:bg-\[\#121215\]:hover,
+.hover\:bg-\[\#16161a\]:hover,
+.hover\:bg-\[\#1c1c20\]:hover {
+  background-color: var(--bg-hover) !important;
+}
+.hover\:text-\[\#fafafa\]:hover,
+.hover\:text-\[\#a1a1aa\]:hover {
+  color: var(--text) !important;
+}
+.hover\:border-\[\#3f3f46\]:hover {
+  border-color: var(--bg-selected) !important;
 }
 
-html.light .bg-\[\#18181b\],
-[data-theme-mode="light"] .bg-\[\#18181b\] {
-  background-color: var(--theme-card-hover) !important;
+/* One accent: the violet/sky "brand" colours collapse onto --accent. */
+.text-\[\#a78bfa\],
+.text-\[\#38bdf8\] {
+  color: var(--accent) !important;
+}
+.bg-\[\#a78bfa\],
+.bg-\[\#38bdf8\] {
+  background-color: var(--accent) !important;
+  color: var(--accent-contrast) !important;
+}
+.border-\[\#a78bfa\],
+.border-\[\#a78bfa\]\/40,
+.border-\[\#a78bfa\]\/50,
+.border-\[\#a78bfa\]\/60,
+.hover\:border-\[\#a78bfa\]:hover,
+.focus-within\:border-\[\#a78bfa\]:focus-within {
+  border-color: var(--accent) !important;
+}
+.bg-\[\#a78bfa\]\/15,
+.bg-\[\#a78bfa\]\/18,
+.bg-\[\#a78bfa\]\/10 {
+  background-color: color-mix(in srgb, var(--accent) 15%, transparent) !important;
+}
+.ring-\[\#a78bfa\]\/70 {
+  --tw-ring-color: color-mix(in srgb, var(--accent) 70%, transparent) !important;
+}
+.focus\:ring-\[\#a78bfa\]:focus {
+  --tw-ring-color: var(--accent) !important;
+}
+.placeholder-\[\#52525b\]::placeholder,
+.placeholder-\[\#71717a\]::placeholder {
+  color: var(--text-dim) !important;
 }
 
-html.light .bg-\[\#070709\],
-[data-theme-mode="light"] .bg-\[\#070709\],
-html.light .bg-\[\#050507\],
-[data-theme-mode="light"] .bg-\[\#050507\] {
-  background-color: var(--theme-terminal-bg) !important;
-}
-
-html.light .bg-\[\#09090b\]\/80,
-[data-theme-mode="light"] .bg-\[\#09090b\]\/80 {
-  background-color: var(--theme-surface) !important;
-}
-
-/* Text overrides in Light Mode */
-html.light .text-\[\#fafafa\],
-[data-theme-mode="light"] .text-\[\#fafafa\] {
-  color: var(--theme-text-primary) !important;
-}
-
-html.light .text-\[\#a1a1aa\],
-[data-theme-mode="light"] .text-\[\#a1a1aa\] {
-  color: var(--theme-text-muted) !important;
-}
-
-html.light .text-\[\#71717a\],
-[data-theme-mode="light"] .text-\[\#71717a\] {
-  color: var(--theme-text-subtle) !important;
-}
-
-/* Border overrides in Light Mode */
-html.light .border-\[\#27272a\],
-[data-theme-mode="light"] .border-\[\#27272a\] {
-  border-color: var(--theme-border) !important;
-}
-
-html.light .border-\[\#1e1e24\],
-[data-theme-mode="light"] .border-\[\#1e1e24\] {
-  border-color: var(--theme-border-subtle) !important;
-}
-
-html.light .border-\[\#3f3f46\],
-[data-theme-mode="light"] .border-\[\#3f3f46\] {
-  border-color: var(--theme-border-hover) !important;
-}
-
-/* Hover overrides in Light Mode */
-html.light .hover\:bg-\[\#18181b\]:hover,
-[data-theme-mode="light"] .hover\:bg-\[\#18181b\]:hover,
-html.light .hover\:bg-\[\#121215\]:hover,
-[data-theme-mode="light"] .hover\:bg-\[\#121215\]:hover {
-  background-color: var(--theme-surface) !important;
-}
-
-html.light .hover\:text-\[\#fafafa\]:hover,
-[data-theme-mode="light"] .hover\:text-\[\#fafafa\]:hover {
-  color: var(--theme-text-primary) !important;
-}
-
-/* Input, select, and textarea contrast in Light Mode */
-html.light input,
-[data-theme-mode="light"] input,
-html.light select,
-[data-theme-mode="light"] select,
-html.light textarea,
-[data-theme-mode="light"] textarea {
-  background-color: var(--theme-card) !important;
-  color: var(--theme-text-primary) !important;
-  border-color: var(--theme-border) !important;
-}
-
-html.light input::placeholder,
-[data-theme-mode="light"] input::placeholder,
-html.light textarea::placeholder,
-[data-theme-mode="light"] textarea::placeholder {
-  color: var(--theme-text-subtle) !important;
+/* Floating layers keep a shadow; nothing in the normal flow does. */
+.shadow-2xl,
+.shadow-xl,
+.shadow-lg,
+.shadow-sm {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18) !important;
 }

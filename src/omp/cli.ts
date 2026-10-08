@@ -225,6 +225,36 @@ export interface GitDiffFile {
 }
 
 export const fetchGitSnapshot = () => getJson<GitSnapshot>("/api/git/branches");
+
+export interface WorkspaceEntry {
+  name: string;
+  isDir: boolean;
+  size: number;
+  modified: string;
+  path: string;
+}
+
+export interface WorkspaceFile {
+  path: string;
+  name: string;
+  size: number;
+  modified: string;
+  language: string;
+  content: string;
+  truncated: boolean;
+  lines: number;
+  relative: string;
+}
+
+/** One directory of the workspace (file explorer). */
+export const fetchDirEntries = (dirPath?: string) =>
+  getJson<{ path: string; name: string; entries: WorkspaceEntry[]; root: string }>(
+    `/api/fs/list${dirPath ? `?path=${encodeURIComponent(dirPath)}` : ""}`
+  );
+
+/** One text file, capped at `limit` characters. */
+export const fetchFileContent = (filePath: string, limit = 200_000) =>
+  getJson<WorkspaceFile>(`/api/fs/file?path=${encodeURIComponent(filePath)}&limit=${limit}`);
 export const fetchGitLog = (limit = 10) => getJson<{ workspace: string; commits: GitCommitEntry[] }>(`/api/git/log?limit=${limit}`);
 export const fetchGitDiff = () => getJson<{ workspace: string; files: GitDiffFile[] }>("/api/git/diff");
 

@@ -5,7 +5,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { TopNavTab, SettingsSidebarTab, LogEntry } from './types';
-import { INITIAL_LOGS } from './mockData';
 
 // Components
 import { Header } from './components/Header';
@@ -13,7 +12,6 @@ import { Sidebar } from './components/Sidebar';
 import { McpServersSection } from './components/McpServersSection';
 import { PluginsSection } from './components/PluginsSection';
 import { SkillsSection } from './components/SkillsSection';
-import { EventStreamTerminal } from './components/EventStreamTerminal';
 
 // Modals & Drawers
 import { InstallSkillModal } from './components/InstallSkillModal';
@@ -48,10 +46,10 @@ export default function App() {
 
   // Auxiliary Side Panel state
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
-  const [sidePanelTab, setSidePanelTab] = useState<SidePanelTab>('side_chat');
+  const [sidePanelTab, setSidePanelTab] = useState<SidePanelTab>('files');
 
   // Theme preferences from global ThemeContext
-  const { theme, accentColor, uiDensity, editorFont, enableGrid } = useTheme();
+  const { theme, uiDensity, enableGlow } = useTheme();
 
   // Git repository state is real (git for-each-ref / git checkout / git commit),
   // shared by the header selector, the git dialog and the side panel.
@@ -62,7 +60,7 @@ export default function App() {
   const [inventory, setInventory] = useState<OmpInventory>({ mcpServers: 0, mcpConnected: 0, skills: 0 });
   const [workspaceName, setWorkspaceName] = useState('');
 
-  const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // Loading & feedback states
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -140,17 +138,6 @@ export default function App() {
         backgroundColor: theme.background,
       }}
     >
-      {/* Subtle background blueprint grid overlay if enabled */}
-      {enableGrid && (
-        <div
-          className="fixed inset-0 pointer-events-none opacity-[0.035] z-0"
-          style={{
-            backgroundImage: `radial-gradient(${accentColor} 1px, transparent 1px)`,
-            backgroundSize: '24px 24px',
-          }}
-        />
-      )}
-
       {/* Top Navigation Bar */}
       <Header
         activeTab={activeTopNav}
@@ -246,22 +233,18 @@ export default function App() {
             </div>
           )}
 
-          {/* Bottom Docked MCP Event Stream Terminal */}
-          <EventStreamTerminal
-            logs={logs}
-            projectName={workspaceName}
-            onClearLogs={() => setLogs([])}
-            onAddLog={addLog}
-          />
         </main>
 
-        {/* Multi-functional Auxiliary Side Panel (Side Chat, Active Tasks, Git) */}
+        {/* Right panel: files · diffs · terminal · git */}
         <SidePanel
           isOpen={sidePanelOpen}
           onClose={() => setSidePanelOpen(false)}
           activeTab={sidePanelTab}
           onTabChange={setSidePanelTab}
           git={git}
+          logs={logs}
+          projectName={workspaceName}
+          onClearLogs={() => setLogs([])}
           onDispatchLog={addLog}
         />
       </div>

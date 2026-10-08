@@ -33,6 +33,8 @@ import {
   Brain,
   Gauge,
   Layers,
+  Activity,
+  Coins,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
@@ -171,6 +173,28 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       return next;
     });
   };
+
+  /**
+   * "Running" means an agent is producing output right now: the bridge's own
+   * session only counts while it is streaming, and any other session counts
+   * only when something appended to it in the last 90 seconds. Merely opening
+   * a session must not light anything up.
+   */
+  const isSessionRunning = (session: OmpSessionSummary): boolean =>
+    session.current ? omp.isStreaming : Boolean(session.live);
+
+  // The right panel's file tree inserts @ references through this event.
+  useEffect(() => {
+    const onInsert = (event: Event) => {
+      const detail = (event as CustomEvent<{ text?: string }>).detail;
+      const text = detail?.text?.trim();
+      if (!text) return;
+      setInputPrompt((prev) => (prev ? `${prev}${prev.endsWith(' ') ? '' : ' '}${text} ` : `${text} `));
+      textareaRef.current?.focus();
+    };
+    window.addEventListener('omp:insert-mention', onInsert);
+    return () => window.removeEventListener('omp:insert-mention', onInsert);
+  }, []);
 
   // Forward every freshly appended omp log line to the bottom terminal.
   useEffect(() => {
@@ -722,7 +746,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                   const groupKey = comparableDirKey(cwd || '(unknown)');
                   // A search shows its hits: matching groups stay open while filtering.
                   const groupOpen = expandedProjects.has(groupKey) || searchHistory.trim().length > 0;
-                  const alertCount = sessions.filter((session) => session.current || session.live).length;
+                  const alertCount = sessions.filter(isSessionRunning).length;
                   return (
                   <div key={cwd || '(unknown)'} className="space-y-0.5">
                     <button
@@ -765,18 +789,18 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                           style={{ borderLeft: isSelected ? `2px solid ${accentColor}` : undefined }}
                         >
                           <div className="flex items-center gap-1.5 min-w-0 pr-1">
-                            {session.live || session.current ? (
+                            {isSessionRunning(session) ? (
                               <span
                                 className="w-2 h-2 rounded-full shrink-0 animate-pulse"
                                 style={{ backgroundColor: session.current ? accentColor : '#34d399' }}
                                 title={
                                   session.current
                                     ? language === 'zh-CN'
-                                      ? '当前正在运行的会话'
-                                      : 'session running now'
+                                      ? '该会话正在生成回复'
+                                      : 'this session is streaming right now'
                                     : language === 'zh-CN'
-                                    ? '最近 90 秒内仍在写入（可能有 omp 正在运行）'
-                                    : 'written to in the last 90s (an agent may be running)'
+                                    ? '最近 90 秒内被其他进程写入（可能有 omp 正在运行）'
+                                    : 'written to by another process in the last 90s'
                                 }
                               />
                             ) : (
@@ -962,12 +986,166 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
             </span>
           </div>
 
-          <div className="flex items-center gap-3 truncate">
+          <div className="flex items-center gap-1.5 shrink-0">
             {omp.modelLabel && (
-              <span className="text-[10px] text-[#71717a] truncate max-w-[240px]" title={omp.modelLabel}>
+              <span className="hidden lg:inline text-[10px] text-[#71717a] truncate max-w-[200px]" title={omp.modelLabel}>
                 {omp.modelLabel}
               </span>
             )}
+
+            {/* Token / context / rate / cost / cache chips: icon + hover text, top-right (pi-web) */}
+            <div className="relative flex items-center">
+              <button
+                type="button"
+                onClick={() => setCompactMenuOpen((prev) => !prev)}
+                disabled={omp.isStreaming}
+                title={
+                  contextUsage
+                    ? `${language === 'zh-CN' ? '上下文' : 'context'} ${contextUsage.tokens.toLocaleString()} / ${Math.round(
+                        contextUsage.contextWindow / 1000
+                      )}k (${contextUsage.percent.toFixed(1)}%) · ${
+                        language === 'zh-CN' ? '点击压缩 / 自动压缩' : 'click for compact / auto-compaction'
+                      }`
+                    : language === 'zh-CN'
+                    ? '上下文用量等待中…'
+                    : 'context usage pending…'
+                }
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[#18181b] transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Gauge className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                <span className="text-[10px] text-[#a1a1aa]">
+                  {contextUsage ? `${contextUsage.percent.toFixed(0)}%` : '—'}
+                </span>
+              </button>
+
+              {compactMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setCompactMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1.5 w-72 rounded-lg bg-[#18181b] border border-[#27272a] shadow-2xl py-1.5 z-50 text-xs font-mono">
+                    <div className="px-3 py-1 text-[10px] text-[#71717a] uppercase border-b border-[#27272a] mb-1">
+                      {language === 'zh-CN' ? '上下文与吞吐' : 'Context & throughput'}
+                    </div>
+                    <div className="px-3 py-1.5 space-y-1 text-[10px] text-[#a1a1aa]">
+                      <div className="flex items-center justify-between">
+                        <span>{language === 'zh-CN' ? '上下文' : 'context'}</span>
+                        <span className="text-[#fafafa]">
+                          {contextUsage
+                            ? `${contextUsage.tokens.toLocaleString()} / ${Math.round(contextUsage.contextWindow / 1000)}k (${contextUsage.percent.toFixed(1)}%)`
+                            : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>{language === 'zh-CN' ? '缓存命中' : 'cache hit'}</span>
+                        <span className="text-[#34d399]">{omp.cacheHitRate !== null ? `${(omp.cacheHitRate * 100).toFixed(1)}%` : '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>{language === 'zh-CN' ? '生成速度' : 'throughput'}</span>
+                        <span className="text-[#38bdf8]">{typeof omp.state?.tokensPerSecond === 'number' ? `${omp.state.tokensPerSecond.toFixed(1)} tok/s` : '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>{language === 'zh-CN' ? '累计成本' : 'cost'}</span>
+                        <span className="text-[#a78bfa]">${(omp.usage?.costEstimate ?? 0).toFixed(4)}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={omp.isStreaming}
+                      onClick={() => {
+                        void omp.compact();
+                        setCompactMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer flex items-center gap-1.5 text-[#fafafa] disabled:opacity-40"
+                    >
+                      <Sparkles className="w-3 h-3 text-[#a78bfa]" />
+                      <span>{language === 'zh-CN' ? '立即压缩上下文 (/compact)' : 'Compact context now (/compact)'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void omp.setAutoCompaction(!omp.autoCompaction);
+                        setCompactMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer flex items-center justify-between border-t border-[#27272a]"
+                    >
+                      <span className="flex items-center gap-1.5 text-[#fafafa]">
+                        <Layers className="w-3 h-3 text-[#38bdf8]" />
+                        <span>{language === 'zh-CN' ? '自动压缩' : 'Auto-compaction'}</span>
+                      </span>
+                      <span className={omp.autoCompaction ? 'text-[#34d399]' : 'text-[#71717a]'}>
+                        {omp.autoCompaction ? (language === 'zh-CN' ? '已开启' : 'on') : language === 'zh-CN' ? '已关闭' : 'off'}
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Consumed tokens for this session (real usage) */}
+            {omp.usage && (
+              <span
+                title={`${language === 'zh-CN' ? '本会话 Token' : 'session tokens'}: ${omp.usage.totalTokens.toLocaleString()} · ${
+                  language === 'zh-CN' ? '成本' : 'cost'
+                } $${omp.usage.costEstimate.toFixed(4)}`}
+                className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-[#a1a1aa]"
+              >
+                <Coins className="w-3.5 h-3.5" />
+                <span>{omp.usage.totalTokens >= 1000 ? `${(omp.usage.totalTokens / 1000).toFixed(1)}k` : omp.usage.totalTokens}</span>
+              </span>
+            )}
+
+            {/* Generation rate (real tokens/s, shown only while it is measured) */}
+            {typeof omp.state?.tokensPerSecond === 'number' && (
+              <span
+                title={`${language === 'zh-CN' ? '生成速率' : 'generation rate'}: ${omp.state.tokensPerSecond.toFixed(1)} tok/s`}
+                className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-[#a1a1aa]"
+              >
+                <Activity className={`w-3.5 h-3.5 ${omp.isStreaming ? 'animate-pulse' : ''}`} />
+                <span>{omp.state.tokensPerSecond.toFixed(1)}</span>
+              </span>
+            )}
+
+            {/* Prompt-cache hits */}
+            {omp.cacheHitRate !== null && (
+              <span
+                title={`${language === 'zh-CN' ? '提示词缓存命中' : 'prompt cache hits'}: ${(omp.cacheHitRate * 100).toFixed(1)}% (${
+                  omp.usage?.cachedTokens.toLocaleString() ?? 0
+                } tokens)`}
+                className="hidden md:flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-[#34d399]"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>{(omp.cacheHitRate * 100).toFixed(0)}%</span>
+              </span>
+            )}
+
+            {omp.statusChips.length > 0 && (
+              <span
+                className="hidden xl:inline text-[10px] text-[#71717a] truncate max-w-[160px]"
+                title={omp.statusChips.map((chip) => `${chip.key}: ${chip.text}`).join('\n')}
+              >
+                {omp.statusChips.map((chip) => chip.text).join(' · ')}
+              </span>
+            )}
+
+            {/* Chat / diffs toggle */}
+            <div className="flex items-center p-0.5 bg-[#18181b] border border-[#27272a] rounded">
+              <button
+                type="button"
+                onClick={() => setSessionViewMode('chat')}
+                title={language === 'zh-CN' ? '对话' : 'Chat'}
+                className={`p-1 rounded transition-colors cursor-pointer ${sessionViewMode === 'chat' ? 'bg-[#27272a] text-[#fafafa]' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
+              >
+                <MessageSquare className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setSessionViewMode('diffs')}
+                title={language === 'zh-CN' ? '文件改动' : 'Diffs'}
+                className={`p-1 rounded transition-colors cursor-pointer ${sessionViewMode === 'diffs' ? 'bg-[#27272a] text-[#fafafa]' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
+              >
+                <GitCompare className="w-3 h-3 text-[#34d399]" />
+              </button>
+            </div>
+
             <span className="text-[11px] flex items-center gap-1 shrink-0" style={{ color: statusColor }}>
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
               {omp.status}
@@ -1152,111 +1330,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
               /* ==================================================== */
               /* ACTIVE CONVERSATION THREAD                          */
               /* ==================================================== */
-              <div className="max-w-3xl mx-auto space-y-4">
-                {/* Session metrics bar: real context usage, cost, throughput, status chips */}
-                <div className="flex items-center justify-between px-3.5 py-2 rounded-lg border border-[#27272a] bg-[#121215] text-xs font-mono gap-2">
-                  <div className="flex items-center gap-2.5 text-[11px] text-[#a1a1aa] flex-wrap">
-                    {contextUsage ? (
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
-                        <span>
-                          Tokens:{' '}
-                          <strong className="text-[#fafafa]">{contextUsage.tokens.toLocaleString()}</strong> /{' '}
-                          {Math.round(contextUsage.contextWindow / 1000)}k ({contextUsage.percent.toFixed(1)}%)
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="text-[#52525b]">{language === 'zh-CN' ? '上下文用量等待中…' : 'context usage pending…'}</span>
-                    )}
-
-                    {omp.usage && (
-                      <>
-                        <span>·</span>
-                        <span>
-                          Cost: <span className="text-[#a78bfa]">${omp.usage.costEstimate.toFixed(4)}</span>
-                        </span>
-                      </>
-                    )}
-
-                    {typeof omp.state?.tokensPerSecond === 'number' && (
-                      <>
-                        <span>·</span>
-                        <span className="text-[#38bdf8]">{omp.state.tokensPerSecond.toFixed(1)} tok/s</span>
-                      </>
-                    )}
-
-                    {omp.cacheHitRate !== null && (
-                      <>
-                        <span>·</span>
-                        <span
-                          className="text-[#34d399]"
-                          title={
-                            language === 'zh-CN'
-                              ? `提示词缓存命中：${omp.usage?.cachedTokens.toLocaleString()} / ${(
-                                  (omp.usage?.cachedTokens ?? 0) + (omp.usage?.promptTokens ?? 0)
-                                ).toLocaleString()} tokens`
-                              : `Prompt cache hits: ${omp.usage?.cachedTokens.toLocaleString()} / ${(
-                                  (omp.usage?.cachedTokens ?? 0) + (omp.usage?.promptTokens ?? 0)
-                                ).toLocaleString()} tokens`
-                          }
-                        >
-                          cache {(omp.cacheHitRate * 100).toFixed(1)}%
-                        </span>
-                      </>
-                    )}
-
-                    {omp.statusChips.map((chip) => (
-                      <span
-                        key={chip.key}
-                        className="px-1.5 py-0.2 rounded bg-[#18181b] border border-[#27272a] text-[10px] text-[#a1a1aa]"
-                        title={chip.key}
-                      >
-                        {chip.text}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => void omp.compact()}
-                      disabled={omp.isStreaming}
-                      title={language === 'zh-CN' ? '修剪冗长工具输出，释放上下文 Token 窗口' : 'Prune verbose tool outputs to free up context tokens'}
-                      className="flex items-center gap-1 px-2 py-1 rounded bg-[#18181b] border border-[#27272a] hover:border-[#a78bfa] text-[#a1a1aa] hover:text-[#fafafa] transition-colors cursor-pointer text-[10px] disabled:opacity-40"
-                    >
-                      <Sparkles className="w-2.5 h-2.5 text-[#a78bfa]" />
-                      <span>{language === 'zh-CN' ? '修剪 (/compact)' : 'Compact (/compact)'}</span>
-                    </button>
-
-                    <div className="flex items-center p-0.5 bg-[#18181b] border border-[#27272a] rounded">
-                      <button
-                        type="button"
-                        onClick={() => setSessionViewMode('chat')}
-                        className={`px-2 py-0.5 rounded text-[10px] transition-colors cursor-pointer flex items-center gap-1 ${
-                          sessionViewMode === 'chat'
-                            ? 'bg-[#27272a] text-[#fafafa] font-medium'
-                            : 'text-[#71717a] hover:text-[#a1a1aa]'
-                        }`}
-                      >
-                        <MessageSquare className="w-2.5 h-2.5" />
-                        <span>{language === 'zh-CN' ? '对话' : 'Chat'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSessionViewMode('diffs')}
-                        className={`px-2 py-0.5 rounded text-[10px] transition-colors cursor-pointer flex items-center gap-1 ${
-                          sessionViewMode === 'diffs'
-                            ? 'bg-[#27272a] text-[#fafafa] font-medium'
-                            : 'text-[#71717a] hover:text-[#a1a1aa]'
-                        }`}
-                      >
-                        <GitCompare className="w-2.5 h-2.5 text-[#34d399]" />
-                        <span>{language === 'zh-CN' ? '改动' : 'Diffs'}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
+              <div className="w-full mx-auto space-y-4" style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}>
                 {editingEntryId && (
                   <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#18181b] border border-[#a78bfa]/50 text-xs font-mono text-[#a1a1aa]">
                     <div className="flex items-center gap-2 min-w-0">
@@ -1329,11 +1403,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                           </div>
 
                           <div
-                            className={`p-3.5 rounded-lg text-xs leading-relaxed max-w-2xl ${
-                              isUser
-                                ? 'bg-[#18181b] border border-[#27272a] text-[#fafafa]'
-                                : 'bg-[#0c0c0e] border border-[#27272a] text-[#fafafa] w-full'
-                            }${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
+                            className={`text-xs leading-relaxed ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
                           >
                             {/* Agent execution stream: one collapsed fold per turn */}
                             {!isUser && (msg.currentCommand || steps.length > 0 || tools.length > 0) && (
@@ -1513,7 +1583,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
         {/* Bottom Rich Prompt Bar */}
         <div className="p-4 border-t border-[#27272a] bg-[#0c0c0e]">
-          <div className="max-w-3xl mx-auto space-y-2">
+          <div className="w-full mx-auto space-y-2" style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}>
             {/* Editing an earlier turn banner */}
             {editingEntryId && (
               <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#18181b] border border-[#a78bfa]/50 text-xs font-mono text-[#a1a1aa]">
@@ -1549,30 +1619,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                     <strong className="text-[#38bdf8]">{omp.queued.followUp.length} follow-up</strong>
                   )}
                 </span>
-              </div>
-            )}
-
-            {/* Quick Slash Commands from omp */}
-            {omp.slashCommands.length > 0 && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs font-mono scrollbar-none">
-                <span className="text-[10px] text-[#71717a] uppercase shrink-0">Commands:</span>
-                {omp.slashCommands.slice(0, 8).map((command) => {
-                  const name = command.name.startsWith('/') ? command.name : `/${command.name}`;
-                  return (
-                    <button
-                      key={command.name}
-                      type="button"
-                      onClick={() => {
-                        setInputPrompt((prev) => (prev ? `${prev} ${name}` : `${name} `));
-                        textareaRef.current?.focus();
-                      }}
-                      title={command.description ?? command.input?.hint}
-                      className="px-2 py-0.5 rounded bg-[#121215] border border-[#27272a] hover:border-[#a78bfa] hover:text-[#fafafa] text-[#a1a1aa] transition-colors cursor-pointer text-[11px] shrink-0"
-                    >
-                      {name}
-                    </button>
-                  );
-                })}
               </div>
             )}
 
@@ -1874,92 +1920,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                     )}
                   </button>
                   <input type="file" multiple ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
-
-                  {/* Context window control: compact now / auto-compaction toggle */}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setCompactMenuOpen((prev) => !prev)}
-                      disabled={omp.isStreaming}
-                      title={
-                        contextUsage
-                          ? `${language === 'zh-CN' ? '上下文' : 'context'} ${contextUsage.percent.toFixed(1)}%${
-                              omp.cacheHitRate !== null ? ` · cache ${(omp.cacheHitRate * 100).toFixed(0)}%` : ''
-                            }${typeof omp.state?.tokensPerSecond === 'number' ? ` · ${omp.state.tokensPerSecond.toFixed(1)} tok/s` : ''}`
-                          : undefined
-                      }
-                      className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#18181b] border border-[#27272a] hover:border-[#a78bfa] text-[11px] font-mono text-[#a1a1aa] hover:text-[#fafafa] cursor-pointer transition-colors disabled:opacity-40"
-                    >
-                      <Gauge className="w-3.5 h-3.5 text-[#a78bfa]" />
-                      <span>
-                        {contextUsage
-                          ? `${contextUsage.percent.toFixed(0)}%${omp.cacheHitRate !== null ? ` · ⚡${(omp.cacheHitRate * 100).toFixed(0)}%` : ''}`
-                          : '—'}
-                      </span>
-                      <ChevronDown className="w-2.5 h-2.5 text-[#71717a]" />
-                    </button>
-
-                    {compactMenuOpen && (
-                      <>
-                        <div className="fixed inset-0 z-40" onClick={() => setCompactMenuOpen(false)} />
-                        <div className="absolute left-0 bottom-full mb-1.5 w-72 rounded-lg bg-[#18181b] border border-[#27272a] shadow-2xl py-1.5 z-50 text-xs font-mono">
-                          <div className="px-3 py-1 text-[10px] text-[#71717a] uppercase border-b border-[#27272a] mb-1">
-                            {language === 'zh-CN' ? '上下文与吞吐' : 'Context & throughput'}
-                          </div>
-                          <div className="px-3 py-1.5 space-y-1 text-[10px] text-[#a1a1aa]">
-                            <div className="flex items-center justify-between">
-                              <span>{language === 'zh-CN' ? '上下文' : 'context'}</span>
-                              <span className="text-[#fafafa]">
-                                {contextUsage
-                                  ? `${contextUsage.tokens.toLocaleString()} / ${Math.round(contextUsage.contextWindow / 1000)}k (${contextUsage.percent.toFixed(1)}%)`
-                                  : '—'}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span>{language === 'zh-CN' ? '缓存命中' : 'cache hit'}</span>
-                              <span className="text-[#34d399]">{omp.cacheHitRate !== null ? `${(omp.cacheHitRate * 100).toFixed(1)}%` : '—'}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span>{language === 'zh-CN' ? '生成速度' : 'throughput'}</span>
-                              <span className="text-[#38bdf8]">{typeof omp.state?.tokensPerSecond === 'number' ? `${omp.state.tokensPerSecond.toFixed(1)} tok/s` : '—'}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span>{language === 'zh-CN' ? '累计成本' : 'cost'}</span>
-                              <span className="text-[#a78bfa]">${(omp.usage?.costEstimate ?? 0).toFixed(4)}</span>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            disabled={omp.isStreaming}
-                            onClick={() => {
-                              void omp.compact();
-                              setCompactMenuOpen(false);
-                            }}
-                            className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer flex items-center gap-1.5 text-[#fafafa] disabled:opacity-40"
-                          >
-                            <Sparkles className="w-3 h-3 text-[#a78bfa]" />
-                            <span>{language === 'zh-CN' ? '立即压缩上下文 (/compact)' : 'Compact context now (/compact)'}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void omp.setAutoCompaction(!omp.autoCompaction);
-                              setCompactMenuOpen(false);
-                            }}
-                            className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer flex items-center justify-between border-t border-[#27272a]"
-                          >
-                            <span className="flex items-center gap-1.5 text-[#fafafa]">
-                              <Layers className="w-3 h-3 text-[#38bdf8]" />
-                              <span>{language === 'zh-CN' ? '自动压缩' : 'Auto-compaction'}</span>
-                            </span>
-                            <span className={omp.autoCompaction ? 'text-[#34d399]' : 'text-[#71717a]'}>
-                              {omp.autoCompaction ? (language === 'zh-CN' ? '已开启' : 'on') : language === 'zh-CN' ? '已关闭' : 'off'}
-                            </span>
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
 
                   {/* Voice input: browser dictation straight into the composer */}
                   {speechSupported && (

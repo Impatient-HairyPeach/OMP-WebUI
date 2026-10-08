@@ -1,21 +1,36 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en" data-theme="dark" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OMP Studio</title>
-    <meta name="description" content="Developer-grade orchestration management platform for Model Context Protocol (MCP) servers, plugins, and sub-agent skills." />
-    <meta property="og:title" content="OMP Studio" />
-    <meta property="og:description" content="Developer-grade orchestration management platform for Model Context Protocol (MCP) servers, plugins, and sub-agent skills." />
+    <title>OMP WebUI</title>
+    <meta name="description" content="Browser workspace for the oh-my-pi (omp) coding agent: real sessions, streaming transcript, tools, skills and extensions." />
+    <meta property="og:title" content="OMP WebUI" />
+    <meta property="og:description" content="Browser workspace for the oh-my-pi (omp) coding agent." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      // Paint the palette before first render (same idea as pi-web's THEME_INIT_SCRIPT):
+      // tokens change, markup does not, so there is no flash of the wrong theme.
+      (function () {
+        try {
+          var stored = localStorage.getItem('omp_palette');
+          var theme = stored && stored !== 'auto'
+            ? stored
+            : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+          document.documentElement.setAttribute('data-theme', theme);
+          if (theme === 'light' || theme === 'mist' || theme === 'rose') {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+          }
+        } catch (error) {
+          /* keep the dark default */
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-[#09090b] text-[#fafafa] antialiased selection:bg-[#a78bfa]/30 selection:text-[#fafafa]">
+  <body class="antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

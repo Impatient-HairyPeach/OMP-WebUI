@@ -1,36 +1,52 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * Right-hand panel, modelled on pi-web's right panel: a tabbed workspace
+ * toolbox rather than a fixture dashboard.
+ *
+ *   files    — real workspace tree (lazy per-directory), file viewer, and an
+ *              "@" button that inserts the path into the composer
+ *   diffs    — the real working-tree diff
+ *   terminal — the live omp event stream (the same lines the bridge emits)
+ *   git      — real branch / changed files / commits / commit form
+ */
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  MessageSquare,
-  Activity,
-  GitBranch,
-  X,
-  Play,
-  Pause,
-  RotateCcw,
-  CheckCircle2,
-  Clock,
-  AlertTriangle,
-  Bot,
-  Shield,
-  Code2,
-  Send,
-  GitCommit,
-  GitPullRequest,
+  AlertCircle,
+  ArchiveRestore,
+  ArrowLeft,
   Check,
+  ChevronDown,
   ChevronRight,
-  Sparkles,
-  Layers,
-  Terminal,
+  FileCode,
+  FilePlus,
+  Folder,
+  FolderOpen,
+  GitBranch,
+  GitCommit,
+  Loader2,
+  RefreshCw,
+  ScrollText,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 import { PanelResizeHandle } from './PanelResizeHandle';
+import { DiffViewer } from './DiffViewer';
 import { useResizablePanel } from '../hooks/useResizablePanel';
 import type { GitRepoApi } from '../hooks/useGitRepo';
-import { fetchGitDiff, type GitDiffFile } from '../omp/cli';
+import {
+  fetchDirEntries,
+  fetchFileContent,
+  fetchGitDiff,
+  fetchWorkspaceFiles,
+  type GitDiffFile,
+  type WorkspaceEntry,
+  type WorkspaceFile,
+} from '../omp/cli';
 import { SIDE_PANEL } from '../lib/panelLayout';
+import type { FileDiffItem, LogEntry } from '../types';
 
-export type SidePanelTab = 'side_chat' | 'current_task' | 'git';
+export type SidePanelTab = 'files' | 'diffs' | 'terminal' | 'git';
 
 interface SidePanelProps {
   isOpen: boolean;
@@ -39,7 +55,22 @@ interface SidePanelProps {
   onTabChange: (tab: SidePanelTab) => void;
   /** Real repository state shared with the header and the git dialog. */
   git: GitRepoApi;
+  /** Live omp log lines (bridge SSE) for the terminal tab. */
+  logs: LogEntry[];
+  projectName: string;
+  onClearLogs: () => void;
   onDispatchLog?: (level: 'INFO' | 'OK' | 'CALL' | 'OVERRIDE', message: string) => void;
+}
+
+const formatSize = (bytes: number): string => {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+};
+
+/** Ask the composer to insert a workspace path (decoupled on purpose). */
+function insertMention(text: string): void {
+  window.dispatchEvent(new CustomEvent('omp:insert-mention', { detail: { text } }));
 }
 
 export const SidePanel: React.FC<SidePanelProps> = ({
@@ -48,133 +79,146 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   activeTab,
   onTabChange,
   git,
+  logs,
+  projectName,
+  onClearLogs,
   onDispatchLog,
 }) => {
-  const { theme, accentColor, editorFont } = useTheme();
+  const { theme, accentColor } = useTheme();
   const { t, language } = useI18n();
+  const zh = language === 'zh-CN';
 
   // The panel's left edge is draggable; the width is remembered per browser.
   const sidePanel = useResizablePanel({ ...SIDE_PANEL, axis: 'x', edge: 'start' });
 
-  // Side Chat state
-  const [sideMessages, setSideMessages] = useState<
-    { id: string; role: 'user' | 'assistant'; text: string; time: string }[]
-  >([
-    {
-      id: 'sm-1',
-      role: 'user',
-      text: language === 'zh-CN' ? '请帮我检查 src/auth/jwt.ts 是否存在过期时间未校验的安全隐患。' : 'Check if src/auth/jwt.ts has an unverified token expiration loophole.',
-      time: '14:32',
-    },
-    {
-      id: 'sm-2',
-      role: 'assistant',
-      text: language === 'zh-CN' ? '经静态 AST 扫描，第 42 行 verifyToken() 缺少 exp 字段下界验证，已将其作为高优先级子任务提交到主编排器。' : 'Static AST scan identified missing exp lower-bound check on line 42 in verifyToken(). Submitted to orchestrator.',
-      time: '14:33',
-    },
-  ]);
-  const [inputPrompt, setInputPrompt] = useState('');
+  // --- files tab ---
+  const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
+  const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
+  const [openFile, setOpenFile] = useState<WorkspaceFile | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchHits, setSearchHits] = useState<Array<{ path: string; name: string }>>([]);
+  const [treeRoot, setTreeRoot] = useState<string | null>(null);
 
-  // Task execution state
-  const [taskStatus, setTaskStatus] = useState<'running' | 'paused' | 'completed'>('running');
-  const [taskProgress, setTaskProgress] = useState(68);
-  const [checklist, setChecklist] = useState([
-    { id: 1, title: language === 'zh-CN' ? '定位 Authorization 响应头泄漏点' : 'Locate Authorization header leak', done: true },
-    { id: 2, title: language === 'zh-CN' ? '编写独立复现 Unit Test 测试用例' : 'Author isolated reproduction unit test', done: true },
-    { id: 3, title: language === 'zh-CN' ? '实施 Bearer Token 安全刷新逻辑' : 'Implement safe Bearer token refresh logic', done: false },
-    { id: 4, title: language === 'zh-CN' ? '运行 Docker L3 沙箱回归测试集' : 'Execute Docker L3 sandbox regression suite', done: false },
-    { id: 5, title: language === 'zh-CN' ? '生成 Git Patch 与 Pull Request 变更建议' : 'Generate Git Patch & PR review diff', done: false },
-  ]);
-
-  // Git state: real changed files + commit history from the bridge.
-  const [commitMessage, setCommitMessage] = useState('');
+  // --- diffs tab ---
   const [diffFiles, setDiffFiles] = useState<GitDiffFile[]>([]);
   const [diffError, setDiffError] = useState<string | null>(null);
+
+  // --- git tab ---
+  const [commitMessage, setCommitMessage] = useState('');
   const [commitOutput, setCommitOutput] = useState<string | null>(null);
   const currentBranch = git.snapshot?.current ?? (git.loading ? '…' : '—');
 
+  const loadDir = useCallback(async (dirPath?: string) => {
+    try {
+      const listing = await fetchDirEntries(dirPath);
+      setEntriesByDir((prev) => ({ ...prev, [listing.path]: listing.entries }));
+      setTreeRoot((prev) => prev ?? listing.root);
+      setFileError(null);
+      return listing;
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }, []);
+
+  // Root listing the first time the files tab is shown.
   useEffect(() => {
-    if (!isOpen || activeTab !== 'git') return;
-    let cancelled = false;
+    if (!isOpen || activeTab !== 'files' || Object.keys(entriesByDir).length > 0) return;
+    void loadDir();
+  }, [isOpen, activeTab, entriesByDir, loadDir]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'diffs') return;
     fetchGitDiff()
-      .then((payload) => {
-        if (!cancelled) {
-          setDiffFiles(payload.files);
-          setDiffError(null);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) setDiffError(error instanceof Error ? error.message : String(error));
-      });
-    return () => {
-      cancelled = true;
-    };
+      .then((payload) => setDiffFiles(payload.files))
+      .catch((error) => setDiffError(error instanceof Error ? error.message : String(error)));
   }, [isOpen, activeTab, git.snapshot?.current]);
 
-  if (!isOpen) return null;
+  // Flat file search over the workspace (same index the composer uses).
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      setSearchHits([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void fetchWorkspaceFiles(query, 60)
+        .then((payload) => setSearchHits(payload.files))
+        .catch(() => setSearchHits([]));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
 
-  const handleSendSideMessage = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!inputPrompt.trim()) return;
+  /** git badge per path, straight from the working-tree diff. */
+  const gitStatusByPath = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const file of diffFiles) map[file.path.replace(/\\/g, '/')] = file.status;
+    return map;
+  }, [diffFiles]);
 
-    const userMsg = {
-      id: `sm-${Date.now()}`,
-      role: 'user' as const,
-      text: inputPrompt.trim(),
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
+  const openFilePath = useCallback(
+    async (entryPath: string) => {
+      setFileBusy(true);
+      try {
+        setOpenFile(await fetchFileContent(entryPath));
+        setFileError(null);
+      } catch (error) {
+        setFileError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setFileBusy(false);
+      }
+    },
+    []
+  );
 
-    setSideMessages((prev) => [...prev, userMsg]);
-    setInputPrompt('');
-    onDispatchLog?.('CALL', `side_panel.chat: query dispatched: "${userMsg.text.slice(0, 30)}..."`);
-
-    // Simulated reply
-    setTimeout(() => {
-      setSideMessages((prev) => [
-        ...prev,
-        {
-          id: `sm-${Date.now() + 1}`,
-          role: 'assistant',
-          text: language === 'zh-CN'
-            ? '收到指令，已在轻量线程中验证该项工具调用方案，执行结果正常。'
-            : 'Received. Validated tool invocation logic in scratchpad thread. Return state: OK.',
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-      onDispatchLog?.('OK', 'side_panel.chat: scratchpad response generated');
-    }, 600);
+  const toggleDir = (dirPath: string) => {
+    const nextOpen = !expandedDirs[dirPath];
+    setExpandedDirs((prev) => ({ ...prev, [dirPath]: nextOpen }));
+    if (nextOpen && !entriesByDir[dirPath]) void loadDir(dirPath);
   };
 
-  const handleToggleChecklist = (id: number) => {
-    setChecklist((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, done: !item.done } : item))
-    );
-  };
+  const diffs: FileDiffItem[] = diffFiles.map((file) => ({
+    path: file.path,
+    status: file.status === 'added' ? 'added' : file.status === 'deleted' ? 'deleted' : 'modified',
+    additions: file.additions,
+    deletions: file.deletions,
+    diff: file.diff,
+  }));
 
   /** Real `git add -A` + `git commit -m` through the bridge. */
-  const handleCommit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCommit = async (event: React.FormEvent) => {
+    event.preventDefault();
     const message = commitMessage.trim();
     if (!message || git.busy === 'commit') return;
     const ok = await git.commit(message);
     if (ok) {
       setCommitMessage('');
-      setCommitOutput(
-        language === 'zh-CN' ? `已提交：${message}` : `Committed: ${message}`
-      );
+      setCommitOutput(zh ? `已提交：${message}` : `Committed: ${message}`);
       onDispatchLog?.('OK', `git: committed "${message.slice(0, 48)}"`);
       const payload = await fetchGitDiff().catch(() => null);
       if (payload) setDiffFiles(payload.files);
     } else {
-      setCommitOutput(git.error ?? (language === 'zh-CN' ? '提交失败' : 'commit failed'));
+      setCommitOutput(git.error ?? (zh ? '提交失败' : 'commit failed'));
     }
   };
+
+  if (!isOpen) return null;
+
+  const rowClass = 'group flex h-6 items-center gap-1.5 rounded px-1.5 text-[12px] transition-colors cursor-pointer';
+  const tabs: Array<{ id: SidePanelTab; label: string; icon: React.ReactNode; badge?: number }> = [
+    { id: 'files', label: zh ? '文件' : 'Files', icon: <FileCode className="w-3.5 h-3.5" /> },
+    { id: 'diffs', label: zh ? '改动' : 'Diffs', icon: <FilePlus className="w-3.5 h-3.5" />, badge: diffs.length },
+    { id: 'terminal', label: zh ? '终端' : 'Terminal', icon: <ScrollText className="w-3.5 h-3.5" /> },
+    { id: 'git', label: zh ? 'Git' : 'Git', icon: <GitBranch className="w-3.5 h-3.5" /> },
+  ];
 
   return (
     <>
       <PanelResizeHandle
         side="left"
-        label={language === 'zh-CN' ? '调整侧边面板宽度' : 'Resize side panel'}
+        label={zh ? '调整侧边面板宽度' : 'Resize side panel'}
         active={sidePanel.dragging}
         handleProps={sidePanel.handleProps}
       />
@@ -182,530 +226,427 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         ref={(el) => {
           sidePanel.elementRef.current = el;
         }}
-        className={`border-l flex flex-col justify-between shrink-0 min-w-0 h-full z-30 select-none shadow-xl${
-          sidePanel.dragging ? '' : ' transition-all'
-        }`}
+        className={`border-l flex flex-col min-w-0 h-full z-30 select-none${sidePanel.dragging ? '' : ' transition-all'}`}
         style={{ backgroundColor: theme.cardBg, borderColor: theme.border, width: sidePanel.size }}
       >
-      {/* Top Header: Title & Close */}
-      <div
-        className="h-10 px-3.5 border-b flex items-center justify-between shrink-0"
-        style={{ borderColor: theme.border, backgroundColor: theme.cardBg }}
-      >
-        <div className="flex items-center gap-2">
-          <div
-            className="w-5 h-5 rounded flex items-center justify-center font-bold text-xs"
-            style={{ backgroundColor: `${accentColor}20`, color: accentColor }}
-          >
-            <Layers className="w-3.5 h-3.5" />
-          </div>
-          <span className="text-xs font-semibold" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
-            {t.sidePanelTitle}
+        {/* Header: title + close */}
+        <div className="h-9 px-3 border-b flex items-center justify-between shrink-0" style={{ borderColor: theme.border }}>
+          <span className="text-[11px] font-medium truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} title={projectName}>
+            {projectName || (zh ? '工作区' : 'workspace')}
           </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={zh ? '关闭面板' : 'Close panel'}
+            className="p-1 rounded text-[#71717a] hover:text-[#fafafa] hover:bg-[#18181b] transition-colors cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={onClose}
-          title="关闭面板 (Close Panel)"
-          className="p-1 rounded text-[#71717a] hover:text-[#fafafa] hover:bg-[#18181b] transition-colors cursor-pointer"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Tabs Selector Header */}
-      <div
-        className="flex items-center border-b px-2 pt-1 gap-1 text-xs shrink-0"
-        style={{ borderColor: theme.border, backgroundColor: theme.mode === 'light' ? '#f1f5f9' : '#0c0c0e' }}
-      >
-        <button
-          type="button"
-          onClick={() => onTabChange('side_chat')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors cursor-pointer border-b-2 ${
-            activeTab === 'side_chat'
-              ? 'border-transparent font-semibold shadow-sm'
-              : 'text-[#71717a] hover:text-[#a1a1aa] border-transparent'
-          }`}
-          style={{
-            backgroundColor: activeTab === 'side_chat' ? theme.cardBg : 'transparent',
-            color: activeTab === 'side_chat' ? accentColor : undefined,
-            borderBottomColor: activeTab === 'side_chat' ? accentColor : 'transparent',
-          }}
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          <span>{t.sideChatTab}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onTabChange('current_task')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors cursor-pointer border-b-2 ${
-            activeTab === 'current_task'
-              ? 'border-transparent font-semibold shadow-sm'
-              : 'text-[#71717a] hover:text-[#a1a1aa] border-transparent'
-          }`}
-          style={{
-            backgroundColor: activeTab === 'current_task' ? theme.cardBg : 'transparent',
-            color: activeTab === 'current_task' ? accentColor : undefined,
-            borderBottomColor: activeTab === 'current_task' ? accentColor : 'transparent',
-          }}
-        >
-          <Activity className="w-3.5 h-3.5" />
-          <span>{t.currentTasksTab}</span>
-          <span
-            className="w-1.5 h-1.5 rounded-full animate-pulse"
-            style={{ backgroundColor: taskStatus === 'running' ? '#34d399' : '#f59e0b' }}
-          />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onTabChange('git')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors cursor-pointer border-b-2 ${
-            activeTab === 'git'
-              ? 'border-transparent font-semibold shadow-sm'
-              : 'text-[#71717a] hover:text-[#a1a1aa] border-transparent'
-          }`}
-          style={{
-            backgroundColor: activeTab === 'git' ? theme.cardBg : 'transparent',
-            color: activeTab === 'git' ? accentColor : undefined,
-            borderBottomColor: activeTab === 'git' ? accentColor : 'transparent',
-          }}
-        >
-          <GitBranch className="w-3.5 h-3.5" />
-          <span>{t.gitTab}</span>
-          <span
-            className="text-[9px] font-mono px-1 rounded"
-            style={{ backgroundColor: `${accentColor}18`, color: accentColor }}
-          >
-            {diffFiles.length}
-          </span>
-        </button>
-      </div>
-
-      {/* Main Tab Content Viewport */}
-      <div className="flex-1 overflow-y-auto p-3.5 space-y-4 min-h-0">
-        {/* ======================================================== */}
-        {/* TAB 1: SIDE CHAT                                         */}
-        {/* ======================================================== */}
-        {activeTab === 'side_chat' && (
-          <div className="flex flex-col h-full justify-between space-y-3">
-            <div className="space-y-3 overflow-y-auto flex-1 pr-1">
-              <div
-                className="p-2.5 rounded border text-[11px] leading-relaxed"
-                style={{ backgroundColor: theme.mode === 'light' ? '#f8fafc' : '#121215', borderColor: theme.border }}
+        {/* Tab strip */}
+        <div className="flex items-center gap-0.5 px-1.5 h-8 border-b shrink-0" style={{ borderColor: theme.border }}>
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => onTabChange(tab.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex items-center gap-1 px-2 h-6 rounded text-[11px] transition-colors cursor-pointer ${
+                  isActive ? 'font-semibold' : 'text-[#71717a] hover:text-[#fafafa] hover:bg-[#18181b]'
+                }`}
+                style={isActive ? { backgroundColor: `${accentColor}1f`, color: accentColor } : undefined}
               >
-                <div className="flex items-center gap-1.5 font-semibold text-xs mb-1" style={{ color: accentColor }}>
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Scratchpad &amp; Side Assistant</span>
-                </div>
-                <p className="text-[#71717a]">
-                  {t.sideChatEmpty}
-                </p>
-              </div>
+                {tab.icon}
+                <span>{tab.label}</span>
+                {typeof tab.badge === 'number' && tab.badge > 0 && (
+                  <span className="text-[9px] font-mono opacity-70">{tab.badge}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
 
-              {sideMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-                >
-                  <div
-                    className={`max-w-[85%] p-2.5 rounded-lg text-xs leading-relaxed border ${
-                      msg.role === 'user'
-                        ? 'text-[#09090b]'
-                        : 'text-[#fafafa]'
-                    }`}
-                    style={{
-                      backgroundColor: msg.role === 'user' ? accentColor : (theme.mode === 'light' ? '#ffffff' : '#121215'),
-                      borderColor: msg.role === 'user' ? 'transparent' : theme.border,
-                      color: msg.role === 'user' ? '#09090b' : (theme.mode === 'light' ? '#0f172a' : '#fafafa'),
-                    }}
-                  >
-                    {msg.text}
-                  </div>
-                  <span className="text-[10px] text-[#71717a] font-mono mt-0.5 px-1">{msg.time}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Prompt Input Form */}
-            <form onSubmit={handleSendSideMessage} className="pt-2 border-t" style={{ borderColor: theme.border }}>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={inputPrompt}
-                  onChange={(e) => setInputPrompt(e.target.value)}
-                  placeholder={t.sideChatPlaceholder}
-                  className="w-full h-9 pl-3 pr-16 rounded border text-xs focus:outline-none"
-                  style={{
-                    backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
-                    borderColor: theme.border,
-                    color: theme.mode === 'light' ? '#0f172a' : '#fafafa',
-                  }}
-                />
-                <button
-                  type="submit"
-                  disabled={!inputPrompt.trim()}
-                  className="absolute right-1 top-1 h-7 px-2.5 rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-40 transition-opacity"
-                  style={{ backgroundColor: accentColor, color: '#09090b' }}
-                >
-                  <span>{t.sideChatSend}</span>
-                  <Send className="w-2.5 h-2.5 fill-current" />
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {/* ======================================================== */}
-        {/* TAB 2: CURRENT TASK (PIPELINE, PROGRESS & SUB-AGENTS)    */}
-        {/* ======================================================== */}
-        {activeTab === 'current_task' && (
-          <div className="space-y-4">
-            {/* Task Card Header */}
-            <div
-              className="p-3 rounded-lg border space-y-2.5"
-              style={{ backgroundColor: theme.mode === 'light' ? '#f8fafc' : '#121215', borderColor: theme.border }}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono uppercase text-[#71717a] tracking-wider">
-                  {t.activeOrchestration}
-                </span>
-                <span
-                  className="text-[10px] font-mono px-2 py-0.5 rounded font-semibold border flex items-center gap-1"
-                  style={{
-                    backgroundColor: taskStatus === 'running' ? '#34d39915' : '#f59e0b15',
-                    borderColor: taskStatus === 'running' ? '#34d39940' : '#f59e0b40',
-                    color: taskStatus === 'running' ? '#34d399' : '#f59e0b',
-                  }}
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${taskStatus === 'running' ? 'bg-[#34d399] animate-pulse' : 'bg-[#f59e0b]'}`} />
-                  {taskStatus === 'running' ? t.taskStatusRunning : t.taskStatusPaused}
-                </span>
-              </div>
-
-              <div className="font-semibold text-xs leading-snug" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
-                Fix Authorization Header &amp; Token Expiry Leak in JWT.ts
-              </div>
-
-              {/* Progress Bar */}
-              <div>
-                <div className="flex items-center justify-between text-[11px] font-mono mb-1 text-[#71717a]">
-                  <span>{t.taskProgress}</span>
-                  <span className="font-bold text-[#fafafa]" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>{taskProgress}%</span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-[#27272a] overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-300"
-                    style={{ width: `${taskProgress}%`, backgroundColor: accentColor }}
-                  />
-                </div>
-              </div>
-
-              {/* Controls: Pause / Abort / Retry */}
-              <div className="flex items-center gap-2 pt-1 border-t" style={{ borderColor: theme.border }}>
+        {/* ============================= FILES ============================= */}
+        {activeTab === 'files' && (
+          <div className="flex-1 min-h-0 flex flex-col">
+            <div className="p-1.5 border-b flex items-center gap-1.5" style={{ borderColor: theme.border }}>
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={zh ? '搜索文件…' : 'Search files…'}
+                className="flex-1 h-6 px-2 bg-[#121215] border border-[#27272a] rounded text-[11px] text-[#fafafa] placeholder-[#52525b] focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
+              />
+              <button
+                type="button"
+                onClick={() => void loadDir(treeRoot ?? undefined)}
+                title={zh ? '重新加载目录' : 'Reload directory'}
+                className="p-1 text-[#71717a] hover:text-[#fafafa] cursor-pointer"
+              >
+                <RefreshCw className="w-3 h-3" />
+              </button>
+              {openFile && (
                 <button
                   type="button"
-                  onClick={() => setTaskStatus(taskStatus === 'running' ? 'paused' : 'running')}
-                  className="flex-1 py-1 rounded border text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  style={{
-                    backgroundColor: theme.cardBg,
-                    borderColor: theme.border,
-                    color: theme.mode === 'light' ? '#0f172a' : '#fafafa',
-                  }}
+                  onClick={() => setOpenFile(null)}
+                  title={zh ? '返回文件树' : 'Back to tree'}
+                  className="p-1 text-[#71717a] hover:text-[#fafafa] cursor-pointer"
                 >
-                  {taskStatus === 'running' ? (
-                    <>
-                      <Pause className="w-3 h-3 text-[#f59e0b]" />
-                      <span>{t.pauseTask}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-3 h-3 text-[#34d399]" />
-                      <span>{t.resumeTask}</span>
-                    </>
-                  )}
+                  <ArrowLeft className="w-3 h-3" />
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTaskStatus('paused');
-                    onDispatchLog?.('OVERRIDE', 'orchestrator: task aborted by user from side panel');
-                  }}
-                  className="px-3 py-1 rounded border text-[11px] font-medium text-[#ef4444] hover:bg-[#ef4444]/10 transition-colors cursor-pointer"
-                  style={{ borderColor: theme.border }}
-                >
-                  {t.abortTask}
-                </button>
-              </div>
+              )}
             </div>
 
-            {/* Sub-Agents Grid */}
-            <div>
-              <div className="text-[11px] font-semibold mb-2 flex items-center gap-1.5" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
-                <Bot className="w-3.5 h-3.5" style={{ color: accentColor }} />
-                <span>{t.subAgents}</span>
+            {fileError && (
+              <div className="mx-1.5 mt-1.5 p-1.5 rounded border border-[#ef4444]/40 bg-[#ef4444]/10 text-[10px] text-[#f87171] flex items-start gap-1.5">
+                <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+                <span className="break-words">{fileError}</span>
               </div>
+            )}
 
-              <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                {/* Agent 1 */}
-                <div
-                  className="p-2 rounded border space-y-1"
-                  style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-[11px]" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>Auditor-Agent</span>
-                    <span className="text-[9px] text-[#34d399] font-bold">DONE</span>
-                  </div>
-                  <p className="text-[10px] text-[#71717a]">AST Leak Scanner</p>
-                </div>
-
-                {/* Agent 2 */}
-                <div
-                  className="p-2 rounded border space-y-1"
-                  style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-[11px]" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>Refactor-Agent</span>
-                    <span className="text-[9px] text-[#38bdf8] font-bold animate-pulse">ACTIVE</span>
-                  </div>
-                  <p className="text-[10px] text-[#71717a]">Patch Synthesizer</p>
-                </div>
-
-                {/* Agent 3 */}
-                <div
-                  className="p-2 rounded border space-y-1"
-                  style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-[11px]" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>Sandbox-Guard</span>
-                    <span className="text-[9px] text-[#34d399] font-bold">L3-OK</span>
-                  </div>
-                  <p className="text-[10px] text-[#71717a]">Syscall Whitelist</p>
-                </div>
-
-                {/* Agent 4 */}
-                <div
-                  className="p-2 rounded border space-y-1"
-                  style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-[11px]" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>Test-Runner</span>
-                    <span className="text-[9px] text-[#71717a]">STANDBY</span>
-                  </div>
-                  <p className="text-[10px] text-[#71717a]">Vitest L3 Sandbox</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Checklist of Subtasks */}
-            <div>
-              <div className="text-[11px] font-semibold mb-2 flex items-center justify-between" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5" style={{ color: accentColor }} />
-                  <span>{t.subtaskList}</span>
-                </span>
-                <span className="text-[10px] font-mono text-[#71717a]">
-                  {checklist.filter((c) => c.done).length} / {checklist.length}
-                </span>
-              </div>
-
-              <div className="space-y-1.5">
-                {checklist.map((item) => (
-                  <div
-                    key={item.id}
-                    onClick={() => handleToggleChecklist(item.id)}
-                    className="flex items-center gap-2 p-2 rounded border text-xs cursor-pointer transition-colors"
-                    style={{
-                      backgroundColor: theme.cardBg,
-                      borderColor: theme.border,
-                      opacity: item.done ? 0.75 : 1,
-                    }}
-                  >
-                    <div
-                      className="w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors"
-                      style={{
-                        backgroundColor: item.done ? accentColor : 'transparent',
-                        borderColor: item.done ? accentColor : '#52525b',
-                      }}
-                    >
-                      {item.done && <Check className="w-3 h-3 text-[#09090b] stroke-[3]" />}
-                    </div>
-                    <span
-                      className={`truncate ${item.done ? 'line-through text-[#71717a]' : ''}`}
-                      style={{ color: item.done ? undefined : (theme.mode === 'light' ? '#0f172a' : '#fafafa') }}
-                    >
-                      {item.title}
+            {openFile ? (
+              /* -------- file viewer: the only mounted viewer (pi-web) -------- */
+              <div className="flex-1 min-h-0 flex flex-col">
+                <div className="px-2 py-1.5 border-b flex items-center justify-between gap-2 shrink-0" style={{ borderColor: theme.border }}>
+                  <span className="text-[10px] font-mono text-[#a1a1aa] truncate" title={openFile.path}>
+                    {openFile.relative}
+                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[9px] font-mono text-[#52525b]">
+                      {formatSize(openFile.size)} · {openFile.lines} {zh ? '行' : 'lines'}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => insertMention(`@${openFile.relative}`)}
+                      title={zh ? '把该文件插入输入框 (@ 引用)' : 'Insert an @ reference into the composer'}
+                      className="px-1.5 py-0.5 rounded border text-[10px] text-[#a78bfa] border-[#a78bfa] hover:bg-[#18181b] cursor-pointer font-mono"
+                    >
+                      @
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 min-h-0 overflow-auto">
+                  <pre className="text-[11px] leading-[1.55] font-mono whitespace-pre p-2 text-[#d4d4d8]">
+                    {openFile.content.split('\n').map((line, index) => (
+                      <div key={index} className="flex">
+                        <span className="w-10 shrink-0 text-right pr-2 text-[#52525b] select-none border-r border-[#1e1e24] mr-2">
+                          {index + 1}
+                        </span>
+                        <span className="whitespace-pre-wrap break-all">{line || ' '}</span>
+                      </div>
+                    ))}
+                  </pre>
+                  {openFile.truncated && (
+                    <div className="px-2 pb-2 text-[10px] text-[#71717a]">
+                      {zh ? '（文件过大，仅显示前 200k 字符）' : '(file too large — first 200k characters shown)'}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : searchQuery.trim().length >= 2 ? (
+              /* -------- flat search results -------- */
+              <div className="flex-1 min-h-0 overflow-y-auto p-1">
+                {searchHits.length === 0 && (
+                  <div className="px-2 py-3 text-[11px] text-[#52525b]">{zh ? '没有匹配的文件' : 'No matching files'}</div>
+                )}
+                {searchHits.map((hit) => (
+                  <div key={hit.path} className={`${rowClass} hover:bg-[#18181b]`} onClick={() => void openFilePath(hit.path)}>
+                    <FileCode className="w-3.5 h-3.5 text-[#71717a] shrink-0" />
+                    <span className="truncate text-[#d4d4d8]" title={hit.path}>
+                      {hit.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        insertMention(`@${hit.path}`);
+                      }}
+                      title={zh ? '插入 @ 引用' : 'Insert @ reference'}
+                      className="ml-auto opacity-0 group-hover:opacity-100 px-1 rounded border border-[#27272a] text-[9px] text-[#a78bfa] cursor-pointer font-mono"
+                    >
+                      @
+                    </button>
                   </div>
                 ))}
               </div>
+            ) : (
+              /* -------- lazy workspace tree -------- */
+              <div className="flex-1 min-h-0 overflow-y-auto p-1">
+                {(treeRoot ? entriesByDir[treeRoot] ?? [] : []).map((entry) => (
+                  <TreeRow
+                    key={entry.path}
+                    entry={entry}
+                    depth={0}
+                    rowClass={rowClass}
+                    expanded={Boolean(expandedDirs[entry.path])}
+                    childrenEntries={entriesByDir[entry.path]}
+                    gitStatus={gitStatusByPath[entry.path.replace(/\\/g, '/')]}
+                    onToggle={toggleDir}
+                    onOpen={(path) => void openFilePath(path)}
+                    onMention={insertMention}
+                  />
+                ))}
+                {treeRoot && (entriesByDir[treeRoot]?.length ?? 0) === 0 && !fileError && (
+                  <div className="px-2 py-3 text-[11px] text-[#52525b]">{zh ? '目录为空' : 'Empty directory'}</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============================= DIFFS ============================= */}
+        {activeTab === 'diffs' && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-2">
+            {diffError && <div className="mb-2 text-[10px] text-[#f87171] break-words">{diffError}</div>}
+            <DiffViewer diffs={diffs} />
+          </div>
+        )}
+
+        {/* ============================ TERMINAL =========================== */}
+        {activeTab === 'terminal' && (
+          <div className="flex-1 min-h-0 flex flex-col">
+            <div className="px-2 h-7 border-b flex items-center justify-between shrink-0" style={{ borderColor: theme.border }}>
+              <span className="text-[10px] font-mono text-[#71717a] uppercase">
+                {zh ? 'omp 事件流' : 'omp event stream'} · {logs.length}
+              </span>
+              <button
+                type="button"
+                onClick={onClearLogs}
+                title={zh ? '清空日志' : 'Clear logs'}
+                className="p-1 text-[#71717a] hover:text-[#fafafa] cursor-pointer"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1.5 font-mono text-[10px] leading-[1.5]">
+              {logs.length === 0 && <div className="text-[#52525b]">{zh ? '暂无日志。' : 'No log lines yet.'}</div>}
+              {logs.map((line) => (
+                <div key={line.id} className="flex gap-2">
+                  <span className="text-[#52525b] shrink-0">{line.timestamp}</span>
+                  <span
+                    className="shrink-0 w-[52px]"
+                    style={{
+                      color:
+                        line.level === 'OK'
+                          ? '#34d399'
+                          : line.level === 'OVERRIDE'
+                          ? '#f59e0b'
+                          : line.level === 'CALL'
+                          ? accentColor
+                          : '#71717a',
+                    }}
+                  >
+                    {line.level}
+                  </span>
+                  <span className="text-[#a1a1aa] break-all">{line.message}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* ======================================================== */}
-        {/* TAB 3: GIT CHANGES & VERSION CONTROL (real git)          */}
-        {/* ======================================================== */}
+        {/* ============================== GIT ============================== */}
         {activeTab === 'git' && (
-          <div className="space-y-4 font-mono text-xs">
-            {/* Current branch status */}
-            <div
-              className="p-3 rounded-lg border flex items-center justify-between"
-              style={{ backgroundColor: theme.mode === 'light' ? '#f8fafc' : '#121215', borderColor: theme.border }}
-            >
+          <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-3 font-mono text-xs">
+            <div className="p-2.5 rounded border flex items-center justify-between gap-2" style={{ borderColor: theme.border }}>
               <div className="flex items-center gap-2 min-w-0">
-                <GitBranch className="w-4 h-4 shrink-0" style={{ color: accentColor }} />
+                <GitBranch className="w-3.5 h-3.5 shrink-0" style={{ color: accentColor }} />
                 <div className="min-w-0">
-                  <div className="text-[10px] text-[#71717a] uppercase">{t.currentBranch}</div>
-                  <div className="font-bold text-xs truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+                  <div className="text-[9px] text-[#71717a] uppercase">{t.currentBranch}</div>
+                  <div className="font-bold text-[11px] truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
                     {currentBranch}
                   </div>
                 </div>
               </div>
               <span
-                className={`text-[10px] px-2 py-0.5 rounded border shrink-0 ${
-                  git.snapshot?.dirty
-                    ? 'text-[#f59e0b] bg-[#f59e0b]/10 border-[#f59e0b]/30'
-                    : 'text-[#34d399] bg-[#34d399]/10 border-[#34d399]/30'
-                }`}
+                className="text-[9px] px-1.5 py-0.5 rounded border shrink-0"
+                style={{
+                  borderColor: git.snapshot?.dirty ? '#f59e0b66' : '#34d39966',
+                  color: git.snapshot?.dirty ? '#f59e0b' : '#34d399',
+                }}
               >
-                {git.snapshot?.dirty
-                  ? language === 'zh-CN'
-                    ? `${git.snapshot.changedCount} 个文件改动`
-                    : `${git.snapshot.changedCount} changed`
-                  : language === 'zh-CN'
-                  ? '工作区干净'
-                  : 'clean'}
+                {git.snapshot?.dirty ? `${git.snapshot.changedCount} ${zh ? '改动' : 'changed'}` : zh ? '干净' : 'clean'}
               </span>
             </div>
 
             {git.error && (
-              <div className="p-2 rounded border border-[#ef4444]/40 bg-[#ef4444]/10 text-[10px] text-[#f87171] whitespace-pre-wrap break-words">
+              <div className="p-1.5 rounded border border-[#ef4444]/40 bg-[#ef4444]/10 text-[10px] text-[#f87171] whitespace-pre-wrap break-words">
                 {git.error}
               </div>
             )}
 
-            {/* Changed Files (real `git diff HEAD`) */}
             <div>
-              <div className="flex items-center justify-between text-[11px] mb-2 font-sans font-semibold" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+              <div className="flex items-center justify-between text-[10px] mb-1.5 text-[#71717a]">
                 <span>{t.changedFiles}</span>
-                <span className="font-mono text-[10px] text-[#71717a]">{diffFiles.length} files</span>
+                <span>{diffFiles.length}</span>
               </div>
-
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 {diffFiles.map((file) => (
-                  <div
-                    key={file.path}
-                    className="p-2 rounded border flex items-center justify-between gap-2"
-                    style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-                  >
-                    <div className="flex items-center gap-2 truncate min-w-0">
-                      <span
-                        className="text-[10px] font-bold px-1.5 py-0.2 rounded shrink-0"
-                        style={{
-                          backgroundColor: file.status === 'added' ? '#34d39918' : '#f59e0b18',
-                          color: file.status === 'added' ? '#34d399' : '#f59e0b',
-                        }}
-                      >
-                        {file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : 'M'}
-                      </span>
-                      <span className="text-[11px] truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} title={file.path}>
-                        {file.path}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-[10px] shrink-0 font-mono">
-                      <span className="text-[#34d399]">+{file.additions}</span>
+                  <div key={file.path} className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#d4d4d8' }} title={file.path}>
+                      {file.path}
+                    </span>
+                    <span className="shrink-0">
+                      <span className="text-[#34d399]">+{file.additions}</span>{' '}
                       <span className="text-[#ef4444]">-{file.deletions}</span>
-                    </div>
+                    </span>
                   </div>
                 ))}
-                {diffFiles.length === 0 && (
-                  <div className="p-2 rounded border text-[10px] text-[#52525b]" style={{ borderColor: theme.border }}>
-                    {diffError ?? (language === 'zh-CN' ? '工作区没有未提交改动。' : 'No uncommitted changes.')}
-                  </div>
-                )}
+                {diffFiles.length === 0 && <div className="text-[10px] text-[#52525b]">{zh ? '没有未提交改动。' : 'No uncommitted changes.'}</div>}
               </div>
             </div>
 
-            {/* Commit form (real `git add -A && git commit`) */}
             <form onSubmit={(e) => void handleCommit(e)} className="space-y-2 pt-1 border-t" style={{ borderColor: theme.border }}>
-              <div>
-                <input
-                  type="text"
-                  required
-                  value={commitMessage}
-                  onChange={(e) => setCommitMessage(e.target.value)}
-                  placeholder={t.commitMessagePlaceholder}
-                  className="w-full h-8 px-2.5 rounded border text-xs focus:outline-none"
-                  style={{
-                    backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
-                    borderColor: theme.border,
-                    color: theme.mode === 'light' ? '#0f172a' : '#fafafa',
-                  }}
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span
-                  className="px-2.5 py-1.5 rounded border text-[10px] text-[#71717a]"
-                  style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}
-                  title={language === 'zh-CN' ? '提交会暂存所有改动（git add -A）' : 'Committing stages everything (git add -A)'}
-                >
-                  {t.stageAll}
-                </span>
-
-                <button
-                  type="submit"
-                  disabled={!commitMessage.trim() || diffFiles.length === 0 || git.busy === 'commit'}
-                  className="flex-1 py-1.5 rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 shadow transition-opacity cursor-pointer disabled:opacity-40"
-                  style={{ backgroundColor: accentColor, color: '#09090b' }}
-                >
-                  <GitCommit className="w-3.5 h-3.5" />
-                  <span>{git.busy === 'commit' ? (language === 'zh-CN' ? '提交中…' : 'committing…') : language === 'zh-CN' ? '提交 (git commit)' : 'Commit (git commit)'}</span>
-                </button>
-              </div>
-
+              <input
+                type="text"
+                required
+                value={commitMessage}
+                onChange={(e) => setCommitMessage(e.target.value)}
+                placeholder={t.commitMessagePlaceholder}
+                className="w-full h-6 px-2 rounded border text-[11px] focus:outline-none"
+                style={{ borderColor: theme.border, color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}
+              />
+              <button
+                type="submit"
+                disabled={!commitMessage.trim() || diffFiles.length === 0 || git.busy === 'commit'}
+                className="w-full py-1 rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+                style={{ backgroundColor: accentColor, color: '#09090b' }}
+              >
+                <GitCommit className="w-3 h-3" />
+                <span>{git.busy === 'commit' ? (zh ? '提交中…' : 'committing…') : zh ? '提交 (git commit)' : 'Commit (git commit)'}</span>
+              </button>
               {commitOutput && (
-                <div className="p-2 rounded bg-[#34d399]/15 border border-[#34d399]/40 text-[#34d399] text-[11px] flex items-start gap-1.5">
-                  <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <div className="p-1.5 rounded bg-[#34d399]/15 border border-[#34d399]/40 text-[10px] text-[#34d399] flex items-start gap-1.5">
+                  <Check className="w-3 h-3 shrink-0 mt-0.5" />
                   <span className="break-words">{commitOutput}</span>
                 </div>
               )}
             </form>
 
-            {/* Recent Commit History (real `git log`) */}
-            <div className="pt-2 border-t" style={{ borderColor: theme.border }}>
-              <div className="flex items-center justify-between text-[11px] font-sans font-semibold mb-2 text-[#71717a]">
+            <div className="pt-1 border-t" style={{ borderColor: theme.border }}>
+              <div className="flex items-center justify-between text-[10px] mb-1.5 text-[#71717a]">
                 <span>{t.recentCommits}</span>
-                <button
-                  type="button"
-                  onClick={() => void git.refresh()}
-                  className="font-mono text-[10px] hover:text-[#fafafa] cursor-pointer"
-                >
-                  {language === 'zh-CN' ? '刷新' : 'refresh'}
+                <button type="button" onClick={() => void git.refresh()} className="hover:text-[#fafafa] cursor-pointer">
+                  {zh ? '刷新' : 'refresh'}
                 </button>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 {git.commits.map((commit) => (
-                  <div key={commit.hash} className="text-[10px] text-[#71717a] flex items-center justify-between gap-2">
+                  <div key={commit.hash} className="text-[10px] flex items-center gap-2">
                     <span className="text-[#a1a1aa] font-bold shrink-0">{commit.hash}</span>
-                    <span className="truncate text-left flex-1" style={{ color: theme.mode === 'light' ? '#475569' : '#a1a1aa' }}>
+                    <span className="truncate flex-1" style={{ color: theme.mode === 'light' ? '#475569' : '#a1a1aa' }}>
                       {commit.subject}
                     </span>
-                    <span className="shrink-0">{commit.when}</span>
+                    <span className="shrink-0 text-[#52525b]">{commit.when}</span>
                   </div>
                 ))}
-                {git.commits.length === 0 && <div className="text-[10px] text-[#52525b]">{language === 'zh-CN' ? '暂无提交记录。' : 'No commits yet.'}</div>}
+                {git.commits.length === 0 && <div className="text-[10px] text-[#52525b]">{zh ? '暂无提交记录。' : 'No commits yet.'}</div>}
               </div>
+            </div>
+
+            <div className="pt-1 border-t text-[10px] text-[#52525b] truncate" style={{ borderColor: theme.border }} title={git.snapshot?.remoteUrl ?? undefined}>
+              {git.snapshot?.remoteUrl ? `origin: ${git.snapshot.remoteUrl}` : zh ? '未配置 origin 远程' : 'no origin remote'}
             </div>
           </div>
         )}
+      </aside>
+    </>
+  );
+};
+
+interface TreeRowProps {
+  entry: WorkspaceEntry;
+  depth: number;
+  rowClass: string;
+  expanded: boolean;
+  childrenEntries?: WorkspaceEntry[];
+  gitStatus?: string;
+  onToggle: (dirPath: string) => void;
+  onOpen: (path: string) => void;
+  onMention: (text: string) => void;
+}
+
+const GIT_BADGE_COLOR: Record<string, string> = {
+  added: '#4ade80',
+  modified: '#d6a84b',
+  deleted: '#f87171',
+};
+
+const TreeRow: React.FC<TreeRowProps> = ({
+  entry,
+  depth,
+  rowClass,
+  expanded,
+  childrenEntries,
+  gitStatus,
+  onToggle,
+  onOpen,
+  onMention,
+}) => {
+  const relative = entry.path.replace(/\\/g, '/');
+  return (
+    <>
+      <div
+        className={`${rowClass} hover:bg-[#18181b]`}
+        style={{ paddingLeft: 6 + depth * 12 }}
+        onClick={() => (entry.isDir ? onToggle(entry.path) : onOpen(entry.path))}
+      >
+        {entry.isDir ? (
+          expanded ? (
+            <ChevronDown className="w-3 h-3 text-[#71717a] shrink-0" />
+          ) : (
+            <ChevronRight className="w-3 h-3 text-[#71717a] shrink-0" />
+          )
+        ) : (
+          <span className="w-3 shrink-0" />
+        )}
+        {entry.isDir ? (
+          expanded ? (
+            <FolderOpen className="w-3.5 h-3.5 text-[#71717a] shrink-0" />
+          ) : (
+            <Folder className="w-3.5 h-3.5 text-[#71717a] shrink-0" />
+          )
+        ) : (
+          <FileCode className="w-3.5 h-3.5 text-[#71717a] shrink-0" />
+        )}
+        <span className="truncate text-[#d4d4d8]" title={entry.path}>
+          {entry.name}
+        </span>
+        {gitStatus && (
+          <span
+            className="w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ backgroundColor: GIT_BADGE_COLOR[gitStatus] ?? '#d6a84b' }}
+          />
+        )}
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onMention(`@${relative}${entry.isDir ? '/' : ''}`);
+          }}
+          title="Insert @ reference"
+          className="ml-auto opacity-0 group-hover:opacity-100 px-1 rounded border border-[#27272a] text-[9px] text-[#a78bfa] cursor-pointer font-mono shrink-0"
+        >
+          @
+        </button>
       </div>
-    </aside>
+      {entry.isDir &&
+        expanded &&
+        (childrenEntries ?? []).map((child) => (
+          <TreeRow
+            key={child.path}
+            entry={child}
+            depth={depth + 1}
+            rowClass={rowClass}
+            expanded={false}
+            gitStatus={gitStatus}
+            onToggle={onToggle}
+            onOpen={onOpen}
+            onMention={onMention}
+          />
+        ))}
     </>
   );
 };

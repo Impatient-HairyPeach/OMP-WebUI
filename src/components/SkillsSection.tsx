@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Upload, Plus, Search, RefreshCw, Loader2, AlertCircle, Trash2, FileCode } from 'lucide-react';
+import { Upload, Plus, Search, RefreshCw, Loader2, AlertCircle, Trash2, FileCode, Globe, FolderGit2 } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import { useTheme } from '../context/ThemeContext';
-import { ScopeToggle } from './ScopeToggle';
+import { ScopeSwitch } from './ScopeSwitch';
 import { fetchSkills, runOmpCli, setSkillScope, OmpSkillEntry } from '../omp/cli';
 
 interface SkillsSectionProps {
@@ -216,40 +216,36 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
                 </div>
               </div>
 
-              <div className="flex flex-col items-end gap-2 shrink-0">
-                <ScopeToggle
+              <div className="flex items-center gap-2 shrink-0">
+                <ScopeSwitch
                   accentColor={accentColor}
+                  checked={skill.source !== 'project'}
                   busy={actionBusy === skill.name}
-                  value={skill.source === 'project' ? 'project' : 'global'}
-                  onChange={(scope) => void handleScope(skill, scope as 'global' | 'project')}
-                  options={[
-                    {
-                      id: 'global',
-                      label: zh ? '全局' : 'global',
-                      title: zh ? '所有项目可见（~/.agents/skills）' : 'Visible in every project (~/.agents/skills)',
-                    },
-                    {
-                      id: 'project',
-                      label: zh ? '仅本项目' : 'project',
-                      title: zh
-                        ? '仅本工作空间可见（<项目>/.agents/skills）'
-                        : 'Visible only in this workspace (<project>/.agents/skills)',
-                    },
-                  ]}
+                  icon={<Globe className="w-2 h-2" />}
+                  title={zh ? '全局作用域（~/.agents/skills）' : 'Global scope (~/.agents/skills)'}
+                  onToggle={() => void handleScope(skill, 'global')}
+                />
+                <ScopeSwitch
+                  accentColor={accentColor}
+                  checked={skill.source === 'project'}
+                  busy={actionBusy === skill.name}
+                  icon={<FolderGit2 className="w-2 h-2" />}
+                  title={zh ? '仅本项目（<项目>/.agents/skills）' : 'This project only (<project>/.agents/skills)'}
+                  onToggle={() => void handleScope(skill, 'project')}
                 />
 
                 <button
                   type="button"
                   onClick={() => void handleUninstall(skill)}
                   disabled={actionBusy !== null}
-                  className="flex items-center gap-1 shrink-0 text-[#ef4444] hover:text-[#f87171] hover:underline cursor-pointer text-[11px] font-medium disabled:opacity-50"
+                  title={zh ? '卸载技能' : 'Uninstall skill'}
+                  className="flex items-center gap-1 shrink-0 text-[#ef4444] hover:text-[#f87171] cursor-pointer text-[11px] font-medium disabled:opacity-50"
                 >
                   {actionBusy === skill.name ? (
                     <Loader2 className="w-3 h-3 animate-spin" />
                   ) : (
                     <Trash2 className="w-3 h-3" />
                   )}
-                  {zh ? '卸载' : 'Uninstall'}
                 </button>
               </div>
             </div>

@@ -8,10 +8,12 @@ import {
   Loader2,
   AlertCircle,
   FileJson,
+  Globe,
+  FolderGit2,
 } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import { useTheme } from '../context/ThemeContext';
-import { ScopeToggle } from './ScopeToggle';
+import { ScopeSwitch } from './ScopeSwitch';
 import { fetchPlugins, installPlugin, runOmpCli, setExtensionScope, OmpPluginEntry, type ScopeName } from '../omp/cli';
 
 interface PluginsPayload {
@@ -266,31 +268,32 @@ export const PluginsSection: React.FC = () => {
 
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <span className="text-[10px] text-[#71717a] font-mono uppercase">{zh ? '作用范围' : 'scope'}</span>
-                  <ScopeToggle
-                    accentColor={accentColor}
-                    busy={actionBusy === plugin.name}
-                    value={plugin.scope}
-                    onChange={(scope) => void handleScope(plugin, scope as ScopeName)}
-                    options={[
-                      {
-                        id: 'global',
-                        label: zh ? '全局' : 'global',
-                        title: zh ? '所有项目都加载（写入 omp 插件锁）' : 'Loaded in every project (omp plugin lock)',
-                      },
-                      {
-                        id: 'project',
-                        label: zh ? '仅本项目' : 'project',
-                        title: zh
-                          ? '只在本工作空间加载（通过 omp -e 显式加载）'
-                          : 'Loaded only in this workspace (explicit omp -e)',
-                      },
-                      {
-                        id: 'off',
-                        label: zh ? '停用' : 'off',
-                        title: zh ? '不加载（从 omp 插件锁停用）' : 'Not loaded (disabled in the omp plugin lock)',
-                      },
-                    ]}
-                  />
+                  <div className="flex items-center gap-2">
+                    <ScopeSwitch
+                      accentColor={accentColor}
+                      checked={plugin.scope === 'global'}
+                      busy={actionBusy === plugin.name}
+                      icon={<Globe className="w-2 h-2" />}
+                      title={
+                        zh
+                          ? '全局启用：所有项目都加载（写入 omp 插件锁）'
+                          : 'Enabled globally — loaded in every project (omp plugin lock)'
+                      }
+                      onToggle={() => void handleScope(plugin, plugin.scope === 'global' ? 'off' : 'global')}
+                    />
+                    <ScopeSwitch
+                      accentColor={accentColor}
+                      checked={plugin.scope === 'project'}
+                      busy={actionBusy === plugin.name}
+                      icon={<FolderGit2 className="w-2 h-2" />}
+                      title={
+                        zh
+                          ? '仅本项目：只在本工作空间加载（omp -e 显式加载）'
+                          : 'This project only — loaded here via omp -e'
+                      }
+                      onToggle={() => void handleScope(plugin, plugin.scope === 'project' ? 'off' : 'project')}
+                    />
+                  </div>
                 </div>
 
                 <div className="pt-2 border-t border-[#1e1e24] flex items-center justify-between text-[11px]">

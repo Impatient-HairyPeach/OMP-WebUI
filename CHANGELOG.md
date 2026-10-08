@@ -3,6 +3,57 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.0
+
+Design system ported from `agegr/pi-web`
+- One 15-token palette (`--bg`, `--bg-panel`, `--bg-hover`, `--bg-selected`,
+  `--border`, `--text`, `--text-muted`, `--text-dim`, `--accent`,
+  `--accent-hover`, `--accent-contrast`, `--user-bg`, `--assistant-bg`,
+  `--tool-bg`, `--bg-subtle`) switched by `data-theme` on `<html>`, painted
+  before first render: `light · dark · mist · rose · pine · auto`, dark by
+  default. Existing literal utility classes are remapped onto the tokens, so a
+  theme switch restyles the whole app without touching markup.
+- System fonts only — the Google Fonts link is gone; UI text uses the system
+  sans stack, mono text the system mono stack, both with CJK fallbacks. Base
+  size 14px, `letter-spacing: 0`, pi-web scrollbars.
+- Settings → 界面主题与偏好 opens with the palette row; the blueprint-grid
+  toggle is gone (the overlay was deleted) and the font list now offers system
+  mono faces.
+- Chat column and composer share `--chat-content-max-width` (960px).
+- Assistant messages are no longer boxed; only user turns are bubbles.
+
+Shell
+- The header wordmark is plain `OMP WebUI` (π monogram, `omp` and `oh-my-pi`
+  text removed).
+- The top-left branch selector is gone; branches/commits live in the git dialog
+  and the right panel, and the git button shows a dirty dot.
+- Token / context / rate / cache / cost moved to the top-right of the
+  conversation as icon chips with hover text; the separate metrics bar and the
+  composer gauge are gone (their `/compact` and auto-compaction controls moved
+  onto the context chip).
+- The quick command chips above the composer are gone (`/` completion covers
+  discovery), and the docked event-stream terminal is gone — the stream is a
+  right-panel tab.
+- Git running indicators: a session lights up only while it is streaming (the
+  bridge's session) or while another process appended to it in the last 90s —
+  merely opening a session no longer shows a dot.
+
+Right panel (pi-web layout)
+- Rebuilt as a tabbed toolbox: **文件** (real workspace tree, lazy per
+  directory, git badges, file viewer with line numbers and an `@` button that
+  inserts the path into the composer), **改动** (real working-tree diff),
+  **终端** (live omp event stream), **Git** (branch, changed files, commits,
+  real commit form). The fixture side-chat and task-checklist tabs are gone.
+- New endpoints: `GET /api/fs/list`, `GET /api/fs/file`.
+
+Toggles
+- Skills and extensions use pi-web-style switches instead of text controls:
+  a globe switch (global scope) and a folder switch (this project). Clicking
+  the active switch again turns the extension off; skills move between
+  `~/.agents/skills` and `<project>/.agents/skills`.
+- Providers and their models use the same switches (provider on/off, model
+  use/off) with hover text explaining the effect.
+
 ## 0.2.0
 
 Chat

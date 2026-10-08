@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertCircle,
+  Check,
   ChevronDown,
   ChevronRight,
   Cpu,
   Database,
+  Globe,
   Layers,
   Loader2,
   Receipt,
@@ -14,7 +16,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
-import { ScopeToggle } from '../ScopeToggle';
+import { ScopeSwitch } from '../ScopeSwitch';
 import { fetchModelScope, fetchUsage, setModelScope } from '../../omp/cli';
 import type { OmpModelScope, OmpUsagePayload } from '../../omp/cli';
 import { ModelsView, fetchModelCatalog } from './ModelsView';
@@ -543,21 +545,23 @@ export const ProvidersView: React.FC = () => {
 
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[10px] font-mono text-[#71717a] uppercase">{zh ? '提供商' : 'provider'}</span>
-                        <ScopeToggle
+                        <ScopeSwitch
                           accentColor={accentColor}
+                          checked={providerEnabled}
                           busy={busyKey === p.id}
-                          value={providerEnabled ? 'on' : 'off'}
-                          onChange={(value) => void applyScope({ kind: 'provider', provider: p.id, enabled: value === 'on' }, p.id)}
-                          options={[
-                            { id: 'on', label: zh ? '启用' : 'on', title: zh ? '允许使用该提供商的模型' : 'Allow models from this provider' },
-                            {
-                              id: 'off',
-                              label: zh ? '停用' : 'off',
-                              title: zh
-                                ? '将提供商从 omp 模型注册表移除（disabledProviders）'
-                                : "Remove the provider from omp's model registry (disabledProviders)",
-                            },
-                          ]}
+                          icon={<Globe className="w-2 h-2" />}
+                          title={
+                            providerEnabled
+                              ? zh
+                                ? '已启用：允许使用该提供商的模型（点击停用）'
+                                : 'Enabled — models from this provider are available (click to disable)'
+                              : zh
+                              ? '已停用：该提供商已从 omp 模型注册表移除（disabledProviders）'
+                              : "Disabled — removed from omp's model registry (disabledProviders)"
+                          }
+                          onToggle={() =>
+                            void applyScope({ kind: 'provider', provider: p.id, enabled: !providerEnabled }, p.id)
+                          }
                         />
                       </div>
                     </div>
@@ -605,16 +609,22 @@ export const ProvidersView: React.FC = () => {
                                 )}
                               </div>
 
-                              <ScopeToggle
+                              <ScopeSwitch
                                 accentColor={accentColor}
+                                checked={on}
                                 busy={busyKey === selector}
                                 disabled={!providerEnabled}
-                                value={on ? 'on' : 'off'}
-                                onChange={(value) => void applyScope({ kind: 'model', selector, enabled: value === 'on' }, selector)}
-                                options={[
-                                  { id: 'on', label: zh ? '使用' : 'use' },
-                                  { id: 'off', label: zh ? '停用' : 'off' },
-                                ]}
+                                icon={<Check className="w-2 h-2" />}
+                                title={
+                                  on
+                                    ? zh
+                                      ? '使用该模型（点击停用）'
+                                      : 'This model is available (click to disable)'
+                                    : zh
+                                    ? '已停用：写入 omp enabledModels，模型选择器中不再出现'
+                                    : 'Disabled — written to omp enabledModels, hidden from the model picker'
+                                }
+                                onToggle={() => void applyScope({ kind: 'model', selector, enabled: !on }, selector)}
                               />
                             </div>
                           );

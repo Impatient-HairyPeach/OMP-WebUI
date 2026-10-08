@@ -1,13 +1,26 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { ThemeOption } from '../types';
 import { THEME_OPTIONS } from '../components/views/ThemeView';
+import {
+  applyPalette,
+  loadPalettePreference,
+  paletteToThemeOption,
+  resolvePalette,
+  type PaletteId,
+  type PalettePreference,
+} from '../lib/palettes';
 
 interface ThemeContextType {
+  /** Active palette, mirrored into the shape components read inline. */
   theme: ThemeOption;
   setTheme: (theme: ThemeOption) => void;
   saveCustomTheme: (customTheme: ThemeOption) => void;
   accentColor: string;
   setAccentColor: (color: string) => void;
+  /** pi-web palette switch (light | dark | mist | rose | pine | auto). */
+  paletteId: PalettePreference;
+  setPaletteId: (id: PalettePreference) => void;
+  resolvedPalette: PaletteId;
   uiDensity: 'compact' | 'standard' | 'relaxed';
   setUiDensity: (density: 'compact' | 'standard' | 'relaxed') => void;
   editorFont: string;
@@ -21,112 +34,65 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<ThemeOption>(() => {
-    const saved = localStorage.getItem('omp_theme_id');
-    if (saved === 'custom-theme') {
-      try {
-        const rawCustom = localStorage.getItem('omp_custom_theme_data');
-        if (rawCustom) {
-          return JSON.parse(rawCustom);
-        }
-      } catch (err) {
-        // fallback to default
-      }
-    }
-    const match = THEME_OPTIONS.find((t) => t.id === saved);
-    return match || THEME_OPTIONS[0];
-  });
+  const [paletteId, setPaletteIdState] = useState<PalettePreference>(() => loadPalettePreference());
+  const [resolvedPalette, setResolvedPalette] = useState<PaletteId>(() => resolvePalette(loadPalettePreference()));
+  // A saved accent overrides the palette accent; unset means "follow the palette".
+  const [accentColor, setAccentColorState] = useState<string>(() => localStorage.getItem('omp_accent_color') || '');
+  const [uiDensity, setUiDensityState] = useState<'compact' | 'standard' | 'relaxed'>(
+    () => (localStorage.getItem('omp_ui_density') as 'compact' | 'standard' | 'relaxed') || 'compact'
+  );
+  const [editorFont, setEditorFontState] = useState<string>(
+    () => localStorage.getItem('omp_editor_font') || 'System Mono'
+  );
+  const [enableGrid, setEnableGridState] = useState<boolean>(() => localStorage.getItem('omp_enable_grid') === 'true');
+  const [enableGlow, setEnableGlowState] = useState<boolean>(() => localStorage.getItem('omp_enable_glow') === 'true');
 
-  const [accentColor, setAccentColorState] = useState<string>(() => {
-    return localStorage.getItem('omp_accent_color') || theme.accent;
-  });
-
-  const [uiDensity, setUiDensityState] = useState<'compact' | 'standard' | 'relaxed'>(() => {
-    return (localStorage.getItem('omp_ui_density') as 'compact' | 'standard' | 'relaxed') || 'compact';
-  });
-
-  const [editorFont, setEditorFontState] = useState<string>(() => {
-    return localStorage.getItem('omp_editor_font') || 'Geist Mono';
-  });
-
-  const [enableGrid, setEnableGridState] = useState<boolean>(() => {
-    return localStorage.getItem('omp_enable_grid') !== 'false';
-  });
-
-  const [enableGlow, setEnableGlowState] = useState<boolean>(() => {
-    return localStorage.getItem('omp_enable_glow') !== 'false';
-  });
-
-  // Apply theme & styling dynamically to root document
+  // `auto` must follow a live OS change, not just the value read at boot.
   useEffect(() => {
-    const root = document.documentElement;
-    const isLight = theme.mode === 'light';
-    root.setAttribute('data-theme', theme.id);
-    root.setAttribute('data-theme-mode', isLight ? 'light' : 'dark');
-    root.setAttribute('data-density', uiDensity);
+    if (paletteId !== 'auto' || typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const sync = () => setResolvedPalette(media.matches ? 'light' : 'dark');
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, [paletteId]);
 
-    if (isLight) {
-      root.classList.remove('dark');
-      root.classList.add('light');
-    } else {
-      root.classList.remove('light');
-      root.classList.add('dark');
+  useEffect(() => {
+    const resolved = resolvePalette(paletteId);
+    setResolvedPalette(resolved);
+    applyPalette(resolved, accentColor || null, editorFont);
+    document.documentElement.setAttribute('data-density', uiDensity);
+    try {
+      localStorage.setItem('omp_palette', paletteId);
+      localStorage.setItem('omp_ui_density', uiDensity);
+      localStorage.setItem('omp_editor_font', editorFont);
+      if (accentColor) localStorage.setItem('omp_accent_color', accentColor);
+      else localStorage.removeItem('omp_accent_color');
+    } catch {
+      // storage unavailable — preferences simply won't persist
     }
+  }, [paletteId, accentColor, uiDensity, editorFont]);
 
-    const textColor = isLight ? (theme.text || '#0f172a') : '#fafafa';
-    const textMutedColor = isLight ? (theme.textMuted || '#475569') : '#a1a1aa';
+  useEffect(() => {
+    try {
+      localStorage.setItem('omp_enable_grid', String(enableGrid));
+      localStorage.setItem('omp_enable_glow', String(enableGlow));
+    } catch {
+      // storage unavailable
+    }
+  }, [enableGrid, enableGlow]);
 
-    root.style.setProperty('--theme-bg', theme.background);
-    root.style.setProperty('--theme-card', theme.cardBg);
-    root.style.setProperty('--theme-border', theme.border);
-    root.style.setProperty('--theme-accent', accentColor);
-    root.style.setProperty('--theme-secondary', theme.secondary);
-    root.style.setProperty('--theme-text', textColor);
-    root.style.setProperty('--theme-text-muted', textMutedColor);
-    root.style.setProperty('--font-mono', `'${editorFont}', monospace`);
+  const theme = paletteToThemeOption(resolvedPalette, accentColor || null);
 
-    document.body.style.backgroundColor = theme.background;
-    document.body.style.color = textColor;
-    document.body.style.fontFamily = uiDensity === 'relaxed' ? 'var(--font-sans)' : '';
-
-    localStorage.setItem('omp_theme_id', theme.id);
-    localStorage.setItem('omp_accent_color', accentColor);
-    localStorage.setItem('omp_ui_density', uiDensity);
-    localStorage.setItem('omp_editor_font', editorFont);
-    localStorage.setItem('omp_enable_grid', String(enableGrid));
-    localStorage.setItem('omp_enable_glow', String(enableGlow));
-  }, [theme, accentColor, uiDensity, editorFont, enableGrid, enableGlow]);
-
+  /** Picking one of the legacy presets maps onto the matching palette + accent. */
   const setTheme = (newTheme: ThemeOption) => {
-    setThemeState(newTheme);
+    const nextPalette = newTheme.mode === 'light' ? 'light' : 'dark';
+    setPaletteIdState(nextPalette);
     setAccentColorState(newTheme.accent);
   };
 
   const saveCustomTheme = (custom: ThemeOption) => {
-    localStorage.setItem('omp_custom_theme_data', JSON.stringify(custom));
-    localStorage.setItem('omp_theme_id', custom.id);
-    setThemeState(custom);
+    setPaletteIdState(custom.mode === 'light' ? 'light' : 'dark');
     setAccentColorState(custom.accent);
-  };
-
-  const setAccentColor = (color: string) => {
-    setAccentColorState(color);
-  };
-
-  const setUiDensity = (density: 'compact' | 'standard' | 'relaxed') => {
-    setUiDensityState(density);
-  };
-
-  const setEditorFont = (font: string) => {
-    setEditorFontState(font);
-  };
-
-  const setEnableGrid = (enabled: boolean) => {
-    setEnableGridState(enabled);
-  };
-
-  const setEnableGlow = (enabled: boolean) => {
-    setEnableGlowState(enabled);
   };
 
   return (
@@ -135,16 +101,19 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         theme,
         setTheme,
         saveCustomTheme,
-        accentColor,
-        setAccentColor,
+        accentColor: theme.accent,
+        setAccentColor: setAccentColorState,
+        paletteId,
+        setPaletteId: setPaletteIdState,
+        resolvedPalette,
         uiDensity,
-        setUiDensity,
+        setUiDensity: setUiDensityState,
         editorFont,
-        setEditorFont,
+        setEditorFont: setEditorFontState,
         enableGrid,
-        setEnableGrid,
+        setEnableGrid: setEnableGridState,
         enableGlow,
-        setEnableGlow,
+        setEnableGlow: setEnableGlowState,
       }}
     >
       {children}
@@ -159,3 +128,6 @@ export const useTheme = () => {
   }
   return context;
 };
+
+/** Kept for callers that imported the preset list from here. */
+export { THEME_OPTIONS };
