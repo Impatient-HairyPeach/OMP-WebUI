@@ -9,6 +9,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 import type { GitRepoApi } from '../hooks/useGitRepo';
+import { OmpLogo } from './OmpLogo';
 
 interface HeaderProps {
   activeTab: TopNavTab;
@@ -71,12 +72,13 @@ export const Header: React.FC<HeaderProps> = ({
     >
       {/* Left: Brand, Daemon Status, Branch selector, & Search */}
       <div className="flex items-center gap-3">
-        {/* Brand: plain wordmark (no monogram) */}
+        {/* Brand: omp's mark + plain wordmark */}
         <div
-          className="flex items-center cursor-pointer"
+          className="flex items-center gap-2 cursor-pointer"
           onClick={() => onTabChange('Workspace')}
           title="OMP WebUI"
         >
+          <OmpLogo className="w-5 h-4 shrink-0" style={{ color: theme.text || '#fafafa' }} />
           <span
             className="font-semibold text-[13px] tracking-[-0.01em]"
             style={{ color: theme.text || '#fafafa' }}

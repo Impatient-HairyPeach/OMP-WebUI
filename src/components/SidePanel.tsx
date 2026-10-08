@@ -235,7 +235,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [projectSkills, setProjectSkills] = useState<OmpSkillEntry[]>([]);
   const [projectPlugins, setProjectPlugins] = useState<OmpPluginEntry[]>([]);
   const [scopeBusy, setScopeBusy] = useState<string | null>(null);
-  const [scopeMessage, setScopeMessage] = useState<string | null>(null);
 
   const loadExtras = useCallback(async () => {
     const [skills, plugins] = await Promise.allSettled([fetchSkills(), fetchPlugins()]);
@@ -251,17 +250,12 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   /** This project's opt-in/out for one skill or extension (global state untouched). */
   const applyProjectScope = async (kind: 'skill' | 'extension', name: string, enabled: boolean) => {
     setScopeBusy(name);
-    setScopeMessage(null);
     try {
       await setProjectScope(kind, name, enabled);
-      setScopeMessage(
-        zh
-          ? `${name} 已在本项目${enabled ? '启用' : '停用'}（其它项目不受影响），omp 会话已重启。`
-          : `${name} ${enabled ? 'enabled' : 'disabled'} in this project only; the omp session was restarted.`
-      );
+      onDispatchLog?.('OK', `project.scope: ${name} ${enabled ? 'enabled' : 'disabled'} in this project`);
       await loadExtras();
     } catch (error) {
-      setScopeMessage(error instanceof Error ? error.message : String(error));
+      onDispatchLog?.('OVERRIDE', `project.scope failed for ${name}: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setScopeBusy(null);
     }
@@ -504,21 +498,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         {/* =========================== EXTENSIONS ========================= */}
         {activeTab === 'extensions' && (
           <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-3 text-[11px]">
-            <p className="text-[10px] text-[#71717a] leading-relaxed">
-              {zh
-                ? '每一项只问一件事：在本项目里用不用。全局安装与全局开关在「设置」里管理；这里关掉不会影响其它项目。'
-                : 'Each switch is about this project only: whether the item is used here. Install and global on/off live in Settings; switching off here never affects other projects.'}
-            </p>
-
-            {scopeMessage && (
-              <div
-                className="px-2 py-1.5 rounded border text-[10px]"
-                style={{ borderColor: `${accentColor}55`, color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}
-              >
-                {scopeMessage}
-              </div>
-            )}
-
             <div>
               <div className="flex items-center justify-between text-[10px] font-mono uppercase text-[#71717a] mb-1.5">
                 <span>{zh ? '技能' : 'Skills'}</span>
@@ -534,9 +513,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         {skill.name}
                       </div>
                       <div className="text-[10px] text-[#52525b] truncate">
-                        {skill.source === 'project' ? (zh ? '安装于项目目录' : 'installed here') : zh ? '全局安装' : 'installed globally'}
-                        {' · '}
                         {skill.enabled ? (zh ? '全局已开启' : 'on globally') : zh ? '全局已停用' : 'off globally'}
+                        {' · '}
+                        {skill.projectEnabled ? (zh ? '本项目已开启' : 'on here') : zh ? '本项目已关闭' : 'off here'}
                       </div>
                     </div>
                     <ScopeSwitch
@@ -578,7 +557,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         {plugin.name}
                       </div>
                       <div className="text-[10px] text-[#52525b] truncate">
-                        v{plugin.version} · {plugin.enabled ? (zh ? '全局已启用' : 'on globally') : zh ? '全局已停用' : 'off globally'}
+                        {plugin.enabled ? (zh ? '全局已开启' : 'on globally') : zh ? '全局已停用' : 'off globally'}
+                        {' · '}
+                        {plugin.projectEnabled ? (zh ? '本项目已开启' : 'on here') : zh ? '本项目已关闭' : 'off here'}
                       </div>
                     </div>
                     <ScopeSwitch

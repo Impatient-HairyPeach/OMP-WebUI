@@ -44,6 +44,7 @@ import { DiffViewer } from '../DiffViewer';
 import { MessageActivity } from '../MessageActivity';
 import { ExtensionRequest } from '../ExtensionRequest';
 import { TaskHud } from '../TaskHud';
+import { OmpLogo } from '../OmpLogo';
 import { PanelResizeHandle } from '../PanelResizeHandle';
 import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, fetchSubagents } from '../../omp/cli';
 import type { SubagentRow } from '../../omp/cli';
@@ -678,6 +679,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     else setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 48);
   }, [transcript.length, omp.resumePath, sessionViewMode, omp.isStreaming, atBottom]);
 
+  /** A few slash commands worth one click on an empty conversation (only real ones). */
+  const QUICK_COMMANDS: Array<{ name: string; labelZh: string; labelEn: string }> = [
+    { name: 'skillful', labelZh: '技能', labelEn: 'skills' },
+    { name: 'todo', labelZh: '任务', labelEn: 'todos' },
+    { name: 'compact', labelZh: '压缩上下文', labelEn: 'compact' },
+    { name: 'model', labelZh: '切换模型', labelEn: 'model' },
+  ];
+  const quickCommands = QUICK_COMMANDS.filter((entry) =>
+    omp.slashCommands.some((command) => command.name === entry.name)
+  );
+  const insertCommand = (name: string) => {
+    setInputPrompt((prev) => (prev ? `${prev} /${name}` : `/${name} `));
+    textareaRef.current?.focus();
+  };
+
   const noActiveSession = !omp.resumePath && !omp.sessionId;
 
   const browseTo = async (dir?: string) => {
@@ -1207,176 +1223,54 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
         <div className="flex-1 min-h-0 flex">
           <div ref={scrollRef} onScroll={handleChatScroll} className="flex-1 min-w-0 overflow-y-auto p-6 space-y-4">
             {!sessionActive && transcript.length === 0 ? (
-              /* ==================================================== */
-              /* EMPTY CANVAS (no omp session yet)                     */
-              /* ==================================================== */
-              <div
-                className="h-full min-h-[320px] flex flex-col items-center justify-center text-center p-8 select-none relative overflow-hidden rounded-2xl border"
-                style={{
-                  borderColor: `${theme.border}70`,
-                  background:
-                    theme.mode === 'light'
-                      ? `radial-gradient(circle at 50% 36%, ${accentColor}14 0%, transparent 68%), radial-gradient(#cbd5e1 0.8px, transparent 0.8px)`
-                      : `radial-gradient(circle at 50% 36%, ${accentColor}18 0%, transparent 68%), radial-gradient(#27272a 1px, transparent 1px)`,
-                  backgroundSize: '100% 100%, 24px 24px',
-                }}
-              >
-                <div
-                  className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border shadow-sm text-xs font-mono mb-5 backdrop-blur-md"
-                  style={{
-                    backgroundColor: theme.mode === 'light' ? '#ffffffcc' : '#121215cc',
-                    borderColor: theme.border,
-                    color: theme.mode === 'light' ? '#334155' : '#a1a1aa',
-                  }}
-                >
-                  <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: statusColor }} />
-                  <span className="font-semibold tracking-wider">OMP-CORE STUDIO</span>
-                  <span className="text-[10px] text-[#71717a]">{omp.status}</span>
-                </div>
-
-                <div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 shadow-lg border backdrop-blur-xl transition-transform hover:scale-105"
-                  style={{
-                    backgroundColor: `${accentColor}18`,
-                    borderColor: `${accentColor}35`,
-                    color: accentColor,
-                  }}
-                >
-                  <Sparkles className="w-7 h-7" />
-                </div>
-
-                <h2
-                  className="text-base font-bold tracking-tight mb-1.5"
-                  style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}
-                >
-                  {language === 'zh-CN' ? '智能体工作区已就绪' : 'Agent Workspace Ready'}
-                </h2>
-
-                <p
-                  className="text-xs max-w-md leading-relaxed mb-6"
-                  style={{ color: theme.mode === 'light' ? '#64748b' : '#71717a' }}
-                >
-                  {language === 'zh-CN'
-                    ? '在下方输入指令，或在左侧选择历史会话，即会接管当前的 omp 会话。'
-                    : 'Send an instruction below, or pick a session on the left to resume the live omp session.'}
-                </p>
-
+              /* New conversation: omp's mark plus a few quick slash commands. */
+              <div className="h-full min-h-[320px] flex flex-col items-center justify-center gap-7 select-none">
+                <OmpLogo className="w-20 h-15 opacity-90" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} />
                 <div className="flex items-center justify-center gap-2 flex-wrap text-[11px] font-mono">
-                  <span
-                    className="px-2.5 py-1 rounded-md border flex items-center gap-1.5"
-                    style={{
-                      backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
-                      borderColor: theme.border,
-                      color: theme.mode === 'light' ? '#475569' : '#a1a1aa',
-                    }}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
-                    <span>omp: {omp.status}</span>
-                  </span>
-
-                  <span
-                    className="px-2.5 py-1 rounded-md border flex items-center gap-1.5"
-                    style={{
-                      backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
-                      borderColor: theme.border,
-                      color: theme.mode === 'light' ? '#475569' : '#a1a1aa',
-                    }}
-                  >
-                    <Brain className="w-3 h-3 text-[#38bdf8]" />
-                    <span>{omp.modelLabel ?? (language === 'zh-CN' ? '模型待定' : 'model pending')}</span>
-                  </span>
-
-                  <span
-                    className="px-2.5 py-1 rounded-md border flex items-center gap-1.5"
-                    style={{
-                      backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
-                      borderColor: theme.border,
-                      color: theme.mode === 'light' ? '#475569' : '#a1a1aa',
-                    }}
-                  >
-                    <FolderKanban className="w-3 h-3" style={{ color: accentColor }} />
-                    <span title={omp.workspace}>{omp.workspace ? basename(omp.workspace) : 'workspace'}</span>
-                  </span>
+                  {quickCommands.map((entry) => (
+                    <button
+                      key={entry.name}
+                      type="button"
+                      onClick={() => insertCommand(entry.name)}
+                      title={omp.slashCommands.find((command) => command.name === entry.name)?.description}
+                      className="px-2.5 py-1 rounded-md border hover:border-[#a78bfa] transition-colors cursor-pointer"
+                      style={{
+                        backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
+                        borderColor: theme.border,
+                        color: theme.mode === 'light' ? '#475569' : '#a1a1aa',
+                      }}
+                    >
+                      /{entry.name}
+                      <span className="ml-1.5 text-[10px] text-[#71717a]">{language === 'zh-CN' ? entry.labelZh : entry.labelEn}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : transcript.length === 0 ? (
-              /* ==================================================== */
-              /* SESSION OPENED, NO TURNS YET                          */
-              /* ==================================================== */
-              <div
-                className="h-full min-h-[320px] flex flex-col items-center justify-center text-center p-8 select-none relative overflow-hidden rounded-2xl border"
-                style={{
-                  borderColor: `${theme.border}70`,
-                  background:
-                    theme.mode === 'light'
-                      ? `radial-gradient(circle at 50% 36%, ${accentColor}14 0%, transparent 68%), radial-gradient(#cbd5e1 0.8px, transparent 0.8px)`
-                      : `radial-gradient(circle at 50% 36%, ${accentColor}18 0%, transparent 68%), radial-gradient(#27272a 1px, transparent 1px)`,
-                  backgroundSize: '100% 100%, 24px 24px',
-                }}
-              >
-                <div
-                  className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border shadow-sm text-xs font-mono mb-4 backdrop-blur-md"
-                  style={{
-                    backgroundColor: `${accentColor}15`,
-                    borderColor: `${accentColor}40`,
-                    color: accentColor,
-                  }}
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  <span className="font-semibold truncate max-w-[260px]">{sessionTitle}</span>
+              <div className="h-full min-h-[320px] flex flex-col items-center justify-center gap-7 select-none">
+                <OmpLogo className="w-20 h-15 opacity-90" style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }} />
+                <div className="flex items-center justify-center gap-2 flex-wrap text-[11px] font-mono">
+                  {quickCommands.map((entry) => (
+                    <button
+                      key={entry.name}
+                      type="button"
+                      onClick={() => insertCommand(entry.name)}
+                      title={omp.slashCommands.find((command) => command.name === entry.name)?.description}
+                      className="px-2.5 py-1 rounded-md border hover:border-[#a78bfa] transition-colors cursor-pointer"
+                      style={{
+                        backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
+                        borderColor: theme.border,
+                        color: theme.mode === 'light' ? '#475569' : '#a1a1aa',
+                      }}
+                    >
+                      /{entry.name}
+                      <span className="ml-1.5 text-[10px] text-[#71717a]">{language === 'zh-CN' ? entry.labelZh : entry.labelEn}</span>
+                    </button>
+                  ))}
                 </div>
-
-                <div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 shadow-lg border backdrop-blur-xl transition-transform hover:scale-105"
-                  style={{
-                    backgroundColor: `${accentColor}18`,
-                    borderColor: `${accentColor}35`,
-                    color: accentColor,
-                  }}
-                >
-                  <Terminal className="w-7 h-7" />
-                </div>
-
-                <h2
-                  className="text-base font-bold tracking-tight mb-1.5"
-                  style={{ color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}
-                >
-                  {language === 'zh-CN' ? '会话已就绪，尚无消息' : 'Session ready, no turns yet'}
-                </h2>
-
-                <p
-                  className="text-xs max-w-md leading-relaxed mb-6"
-                  style={{ color: theme.mode === 'light' ? '#64748b' : '#71717a' }}
-                >
-                  {omp.modelLabel ?? (language === 'zh-CN' ? '等待模型就绪' : 'waiting for the model catalog')}
-                </p>
-
-                {omp.slashCommands.length > 0 && (
-                  <div className="flex items-center justify-center gap-2 flex-wrap text-[11px] font-mono">
-                    {omp.slashCommands.slice(0, 4).map((command) => (
-                      <button
-                        key={command.name}
-                        type="button"
-                        onClick={() => {
-                          const name = command.name.startsWith('/') ? command.name : `/${command.name}`;
-                          setInputPrompt((prev) => (prev ? `${prev} ${name}` : `${name} `));
-                          textareaRef.current?.focus();
-                        }}
-                        title={command.description}
-                        className="px-2.5 py-1 rounded-md border hover:border-[#a78bfa] transition-colors cursor-pointer"
-                        style={{
-                          backgroundColor: theme.mode === 'light' ? '#ffffff' : '#121215',
-                          borderColor: theme.border,
-                          color: theme.mode === 'light' ? '#475569' : '#a1a1aa',
-                        }}
-                      >
-                        {command.name.startsWith('/') ? command.name : `/${command.name}`}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             ) : (
+
               /* ==================================================== */
               /* ACTIVE CONVERSATION THREAD                          */
               /* ==================================================== */
