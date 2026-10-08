@@ -681,10 +681,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
   /** A few slash commands worth one click on an empty conversation (only real ones). */
   const QUICK_COMMANDS: Array<{ name: string; labelZh: string; labelEn: string }> = [
-    { name: 'skillful', labelZh: '技能', labelEn: 'skills' },
+    // Labels follow omp's own wording; the tooltip is omp's own description.
+    { name: 'skillful', labelZh: '技能清单开关', labelEn: 'skill listing' },
     { name: 'todo', labelZh: '任务', labelEn: 'todos' },
     { name: 'compact', labelZh: '压缩上下文', labelEn: 'compact' },
-    { name: 'model', labelZh: '切换模型', labelEn: 'model' },
+    { name: 'context', labelZh: '上下文用量', labelEn: 'context' },
   ];
   const quickCommands = QUICK_COMMANDS.filter((entry) =>
     omp.slashCommands.some((command) => command.name === entry.name)
