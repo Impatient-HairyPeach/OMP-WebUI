@@ -86,36 +86,49 @@
     --density-gap: 0.5rem;
   }
 
-  /* Density only nudges the base size; the palette is theme-driven. */
+  /* Density nudges the base size (Tailwind's rem sizes follow it). */
   [data-density="compact"] {
     --density-padding: 0.5rem;
     --density-gap: 0.375rem;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   [data-density="standard"] {
     --density-padding: 0.75rem;
     --density-gap: 0.5rem;
-    font-size: 14px;
+    font-size: 15px;
   }
 
   [data-density="relaxed"] {
     --density-padding: 1rem;
     --density-gap: 0.75rem;
-    font-size: 15px;
+    font-size: 16px;
   }
 
   html {
-    font-size: 14px;
+    font-size: 15px;
   }
 
   body {
     background-color: var(--bg);
     color: var(--text);
     letter-spacing: 0;
-    font-size: 14px;
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* The literal sizes in older markup sit one step below the rem scale. */
+  .text-\[9px\] {
+    font-size: 10px !important;
+  }
+  .text-\[10px\] {
+    font-size: 11px !important;
+  }
+  .text-\[11px\] {
+    font-size: 12px !important;
+  }
+  .text-\[12px\] {
+    font-size: 13px !important;
   }
 
   /* pi-web scrollbars: transparent track, mixed-down thumb, 10px. */

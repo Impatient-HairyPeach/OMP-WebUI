@@ -280,6 +280,26 @@ export const fetchMcpServers = () => getJson<{ path: string; exists: boolean; se
 /** Reveal one of omp's own configuration files in the OS file manager. */
 export const revealFile = (filePath: string) =>
   postJson<{ ok: boolean; path: string }>("/api/reveal", { path: filePath });
+
+export interface SubagentRow {
+  id?: string;
+  name?: string;
+  agent?: string;
+  status?: string;
+  model?: string;
+  task?: string;
+  tokens?: number;
+  cost?: number;
+  durationMs?: number;
+  [key: string]: unknown;
+}
+
+/** Running subagents reported by omp's own `get_subagents` command. */
+export const fetchSubagents = async (): Promise<SubagentRow[]> => {
+  const frame = await postJson<Record<string, unknown>>("/api/commands", { type: "get_subagents" });
+  const payload = (frame.data ?? frame) as { subagents?: SubagentRow[] };
+  return Array.isArray(payload.subagents) ? payload.subagents : [];
+};
 export const fetchSkills = () => getJson<{ skills: OmpSkillEntry[]; roots: string[] }>("/api/omp/skills");
 export const fetchAgents = () => getJson<{ agents: OmpAgentEntry[]; dir: string; error?: string }>("/api/omp/agents");
 export const fetchPlugins = () => getJson<{ path: string; exists: boolean; plugins: OmpPluginEntry[] }>("/api/omp/plugins");

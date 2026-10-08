@@ -42,8 +42,11 @@ import { useI18n } from '../../context/I18nContext';
 import { DiffViewer } from '../DiffViewer';
 import { MessageActivity } from '../MessageActivity';
 import { ExtensionRequest } from '../ExtensionRequest';
+import { TaskHud } from '../TaskHud';
 import { PanelResizeHandle } from '../PanelResizeHandle';
-import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff } from '../../omp/cli';
+import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, fetchSubagents } from '../../omp/cli';
+import type { SubagentRow } from '../../omp/cli';
+import { todosFromTranscript } from '../../lib/todoList';
 import { Mic, Volume2 } from 'lucide-react';
 import { useOmpSession } from '../../hooks/useOmpSession';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
@@ -141,6 +144,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [activeMsgId, setActiveMsgId] = useState<string | null>(null);
   const [atBottom, setAtBottom] = useState(true);
+  /** Running subagents reported by omp's `get_subagents` command. */
+  const [subagents, setSubagents] = useState<SubagentRow[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -236,6 +241,26 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       onDispatchLog(line.level === 'info' || line.level === 'omp' ? 'INFO' : 'OVERRIDE', line.message);
     }
   }, [logs, onDispatchLog]);
+
+  // Subagents come from omp itself; poll while a turn is running (and once after it ends).
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const rows = await fetchSubagents();
+        if (!cancelled) setSubagents(rows);
+      } catch {
+        if (!cancelled) setSubagents([]);
+      }
+    };
+    void load();
+    if (!omp.isStreaming) return;
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [omp.isStreaming, omp.sessionId]);
 
   // ---- Derived session state (all real) ----
   const sessionActive = Boolean(omp.resumePath || omp.sessionId);
@@ -1613,6 +1638,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
         {/* Bottom Rich Prompt Bar */}
         <div className="p-4 border-t border-[#27272a] bg-[#0c0c0e]">
           <div className="w-full mx-auto space-y-2" style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}>
+            {/* Work state for this turn: todos + running subagents (omp-style HUD) */}
+            <TaskHud
+              todos={todosFromTranscript(omp.messages)}
+              subagents={subagents}
+              zh={language === 'zh-CN'}
+              accentColor={accentColor}
+            />
             {/* Editing an earlier turn banner */}
             {editingEntryId && (
               <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#18181b] border border-[#a78bfa]/50 text-xs font-mono text-[#a1a1aa]">

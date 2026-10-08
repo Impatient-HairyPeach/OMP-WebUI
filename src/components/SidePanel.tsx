@@ -11,7 +11,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
-  ArchiveRestore,
   ArrowLeft,
   Check,
   ChevronDown,
@@ -19,15 +18,17 @@ import {
   FileCode,
   FilePlus,
   Folder,
+  FolderGit2,
   FolderOpen,
   GitBranch,
   GitCommit,
   Loader2,
+  Puzzle,
   RefreshCw,
-  ScrollText,
   Trash2,
   X,
 } from 'lucide-react';
+import { ScopeSwitch } from './ScopeSwitch';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 import { PanelResizeHandle } from './PanelResizeHandle';
@@ -38,8 +39,14 @@ import {
   fetchDirEntries,
   fetchFileContent,
   fetchGitDiff,
+  fetchPlugins,
+  fetchSkills,
   fetchWorkspaceFiles,
+  setExtensionScope,
+  setSkillScope,
   type GitDiffFile,
+  type OmpPluginEntry,
+  type OmpSkillEntry,
   type WorkspaceEntry,
   type WorkspaceFile,
 } from '../omp/cli';
@@ -47,7 +54,7 @@ import { SIDE_PANEL } from '../lib/panelLayout';
 import { renderMarkdown } from '../lib/miniMarkdown';
 import type { FileDiffItem, LogEntry } from '../types';
 
-export type SidePanelTab = 'files' | 'diffs' | 'git';
+export type SidePanelTab = 'files' | 'diffs' | 'extensions' | 'git';
 
 interface SidePanelProps {
   isOpen: boolean;
@@ -219,6 +226,47 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     }
   };
 
+  // --- extensions tab: this project's skills + extensions ---
+  const [projectSkills, setProjectSkills] = useState<OmpSkillEntry[]>([]);
+  const [projectPlugins, setProjectPlugins] = useState<OmpPluginEntry[]>([]);
+  const [scopeBusy, setScopeBusy] = useState<string | null>(null);
+  const [scopeMessage, setScopeMessage] = useState<string | null>(null);
+
+  const loadExtras = useCallback(async () => {
+    const [skills, plugins] = await Promise.allSettled([fetchSkills(), fetchPlugins()]);
+    if (skills.status === 'fulfilled') setProjectSkills(skills.value.skills);
+    if (plugins.status === 'fulfilled') setProjectPlugins(plugins.value.plugins);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'extensions') return;
+    void loadExtras();
+  }, [isOpen, activeTab, loadExtras, git.snapshot?.current]);
+
+  /** This project's availability for one skill (project install) or extension (pin). */
+  const applyProjectScope = async (
+    kind: 'skill' | 'extension',
+    name: string,
+    enabled: boolean
+  ) => {
+    setScopeBusy(name);
+    setScopeMessage(null);
+    try {
+      if (kind === 'skill') await setSkillScope(name, enabled ? 'project' : 'global');
+      else await setExtensionScope(name, enabled ? 'project' : 'global');
+      setScopeMessage(
+        zh
+          ? `${name} 已${enabled ? '在本项目启用' : '恢复为全局状态'}，omp 会话已重启。`
+          : `${name} ${enabled ? 'enabled for this project' : 'restored to the global state'}; the omp session was restarted.`
+      );
+      await loadExtras();
+    } catch (error) {
+      setScopeMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setScopeBusy(null);
+    }
+  };
+
   if (!isOpen) return null;
 
   const isImageFile = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(openFile?.name ?? '');
@@ -228,6 +276,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const tabs: Array<{ id: SidePanelTab; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: 'files', label: zh ? '文件' : 'Files', icon: <FileCode className="w-3.5 h-3.5" /> },
     { id: 'diffs', label: zh ? '改动' : 'Diffs', icon: <FilePlus className="w-3.5 h-3.5" />, badge: diffs.length },
+    { id: 'extensions', label: zh ? '扩展' : 'Extras', icon: <Puzzle className="w-3.5 h-3.5" /> },
     { id: 'git', label: zh ? 'Git' : 'Git', icon: <GitBranch className="w-3.5 h-3.5" /> },
   ];
 
@@ -448,6 +497,115 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           <div className="flex-1 min-h-0 overflow-y-auto p-2">
             {diffError && <div className="mb-2 text-[10px] text-[#f87171] break-words">{diffError}</div>}
             <DiffViewer diffs={diffs} />
+          </div>
+        )}
+
+        {/* =========================== EXTENSIONS ========================= */}
+        {activeTab === 'extensions' && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-3 text-[11px]">
+            <p className="text-[10px] text-[#71717a] leading-relaxed">
+              {zh
+                ? '这里控制的是「本项目」：技能是否安装在本项目里、扩展是否只在本项目加载。全局开关在「设置」里。'
+                : 'This tab is about the current project: whether a skill is installed here and whether an extension loads only here. Global switches live in Settings.'}
+            </p>
+
+            {scopeMessage && (
+              <div className="px-2 py-1.5 rounded border text-[10px]" style={{ borderColor: `${accentColor}55`, color: theme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+                {scopeMessage}
+              </div>
+            )}
+
+            <div>
+              <div className="flex items-center justify-between text-[10px] font-mono uppercase text-[#71717a] mb-1.5">
+                <span>{zh ? '技能' : 'Skills'}</span>
+                <span>{projectSkills.filter((skill) => skill.source === 'project').length}/{projectSkills.length}</span>
+              </div>
+              <div className="space-y-1">
+                {projectSkills.map((skill) => (
+                  <div key={skill.path} className="flex items-center justify-between gap-2 px-1.5 py-1 rounded hover:bg-[#18181b]">
+                    <div className="min-w-0">
+                      <div className="font-mono text-[#d4d4d8] truncate" title={skill.name}>
+                        {skill.name}
+                      </div>
+                      <div className="text-[10px] text-[#52525b] truncate">
+                        {skill.source === 'project' ? (zh ? '已安装到本项目' : 'installed here') : zh ? '全局安装' : 'global'}
+                        {skill.enabled ? '' : zh ? ' · 全局已停用' : ' · globally off'}
+                      </div>
+                    </div>
+                    <ScopeSwitch
+                      accentColor={accentColor}
+                      checked={skill.source === 'project'}
+                      busy={scopeBusy === skill.name}
+                      icon={<FolderGit2 className="w-2 h-2" />}
+                      title={
+                        skill.source === 'project'
+                          ? zh
+                            ? '本项目已安装 — 点击移回全局（~/.agents/skills）'
+                            : 'Installed for this project — click to move it back to the global scope'
+                          : zh
+                          ? '点击安装到本项目（<项目>/.agents/skills）'
+                          : 'Click to install it into this project (<project>/.agents/skills)'
+                      }
+                      onToggle={() => void applyProjectScope('skill', skill.name, skill.source !== 'project')}
+                    />
+                  </div>
+                ))}
+                {projectSkills.length === 0 && (
+                  <div className="px-1.5 py-2 text-[10px] text-[#52525b]">{zh ? '未发现技能。' : 'No skills found.'}</div>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-2 border-t" style={{ borderColor: theme.border }}>
+              <div className="flex items-center justify-between text-[10px] font-mono uppercase text-[#71717a] mb-1.5">
+                <span>{zh ? '扩展' : 'Extensions'}</span>
+                <span>{projectPlugins.filter((plugin) => plugin.scope === 'project').length}/{projectPlugins.length}</span>
+              </div>
+              <div className="space-y-1">
+                {projectPlugins.map((plugin) => (
+                  <div key={plugin.name} className="flex items-center justify-between gap-2 px-1.5 py-1 rounded hover:bg-[#18181b]">
+                    <div className="min-w-0">
+                      <div className="font-mono text-[#d4d4d8] truncate" title={plugin.name}>
+                        {plugin.name}
+                      </div>
+                      <div className="text-[10px] text-[#52525b] truncate">
+                        v{plugin.version} ·{' '}
+                        {plugin.scope === 'project'
+                          ? zh
+                            ? '仅本项目'
+                            : 'project only'
+                          : plugin.scope === 'global'
+                          ? zh
+                            ? '全局启用'
+                            : 'global'
+                          : zh
+                          ? '全局已停用'
+                          : 'off'}
+                      </div>
+                    </div>
+                    <ScopeSwitch
+                      accentColor={accentColor}
+                      checked={plugin.scope === 'project'}
+                      busy={scopeBusy === plugin.name}
+                      icon={<FolderGit2 className="w-2 h-2" />}
+                      title={
+                        plugin.scope === 'project'
+                          ? zh
+                            ? '仅本项目加载 — 点击恢复全局状态'
+                            : 'Loaded only here — click to restore the global state'
+                          : zh
+                          ? '点击只在本项目加载（omp -e）'
+                          : 'Click to load it only in this project (omp -e)'
+                      }
+                      onToggle={() => void applyProjectScope('extension', plugin.name, plugin.scope !== 'project')}
+                    />
+                  </div>
+                ))}
+                {projectPlugins.length === 0 && (
+                  <div className="px-1.5 py-2 text-[10px] text-[#52525b]">{zh ? '未安装扩展。' : 'No extensions installed.'}</div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
