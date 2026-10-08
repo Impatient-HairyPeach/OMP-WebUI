@@ -71,13 +71,12 @@ export const Header: React.FC<HeaderProps> = ({
     >
       {/* Left: Brand, Daemon Status, Branch selector, & Search */}
       <div className="flex items-center gap-3">
-        {/* Brand: omp's mark + plain wordmark */}
+        {/* Brand: plain wordmark (the mark lives in the browser tab) */}
         <div
-          className="flex items-center gap-2 cursor-pointer"
+          className="flex items-center cursor-pointer"
           onClick={() => onTabChange('Workspace')}
           title="OMP WebUI"
         >
-          <img src={theme.mode === 'light' ? '/logo-light.png' : '/logo-dark.png'} alt="omp" className="h-[18px] w-auto shrink-0" />
           <span
             className="font-semibold text-[13px] tracking-[-0.01em]"
             style={{ color: theme.text || '#fafafa' }}

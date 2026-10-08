@@ -5,6 +5,9 @@ Settings (`v<version> · <build date>`).
 
 ## 0.3.5
 
+- Header: the top-left logo image is gone; the wordmark `OMP WebUI` stays (the
+  mark is still the favicon and the new-conversation logo).
+
 - Providers: the balance slot is real now. `GET /api/omp/provider-usage` runs
   omp's own `omp usage --json --redact` (cached five minutes) and each provider
   card shows every quota window omp reports — 5-hour / weekly / monthly / 30-day
