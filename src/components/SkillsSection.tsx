@@ -3,7 +3,7 @@ import { Upload, Plus, Search, RefreshCw, Loader2, AlertCircle, Trash2, FileCode
 import { useI18n } from '../context/I18nContext';
 import { useTheme } from '../context/ThemeContext';
 import { ScopeSwitch } from './ScopeSwitch';
-import { fetchSkills, runOmpCli, setSkillScope, OmpSkillEntry } from '../omp/cli';
+import { fetchSkills, runOmpCli, setSkillEnabled, setSkillScope, OmpSkillEntry } from '../omp/cli';
 
 interface SkillsSectionProps {
   onUploadSkill: () => void;
@@ -66,6 +66,26 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
         zh
           ? `已将 ${skill.name} 移动到${scope === 'global' ? '全局' : '本项目'}作用域，omp 会话已重启。`
           : `${skill.name} moved to the ${scope} scope; the omp session was restarted.`
+      );
+      await load();
+    } catch (err) {
+      setOutput(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  /** Turn one skill on/off (omp reads hide / disable-model-invocation). */
+  const handleToggle = async (skill: OmpSkillEntry) => {
+    if (actionBusy) return;
+    setActionBusy(skill.name);
+    setOutput(null);
+    try {
+      await setSkillEnabled(skill.name, !skill.enabled);
+      setOutput(
+        zh
+          ? `${skill.name} 已${skill.enabled ? '停用' : '启用'}，omp 会话已重启。`
+          : `${skill.name} ${skill.enabled ? 'disabled' : 'enabled'}; the omp session was restarted.`
       );
       await load();
     } catch (err) {
@@ -184,55 +204,86 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
         </div>
       )}
 
-      {/* Real skill rows */}
-      <div className="space-y-2">
+      {/* Real skill cards (same shape as the extension cards) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {filtered.map((skill) => (
           <div
             key={skill.path}
-            className="border border-[#27272a] rounded p-3 transition-colors bg-[#0c0c0e] hover:border-[#3f3f46]"
+            className={`flex flex-col justify-between border rounded p-3 transition-colors ${
+              skill.enabled ? 'border-[#27272a] bg-[#0c0c0e] hover:border-[#3f3f46]' : 'border-[#222226] bg-[#09090b]/70 opacity-90'
+            }`}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                  <span className="font-mono text-xs font-semibold text-[#a78bfa]">{skill.name}</span>
-                  <span
-                    className={`px-1.5 py-0.5 text-[9px] font-mono rounded border ${
-                      skill.source === 'project'
-                        ? 'text-[#a78bfa] bg-[#a78bfa]/10 border-[#a78bfa]/30'
-                        : 'text-[#a1a1aa] bg-[#18181b] border-[#27272a]'
-                    }`}
-                  >
-                    {skill.source === 'project' ? (zh ? '项目' : 'project') : zh ? '用户' : 'user'}
-                  </span>
+            <div>
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <div className="flex items-start gap-2 min-w-0">
+                  <div className="p-1 rounded bg-[#18181b] border border-[#27272a] shrink-0 mt-0.5">
+                    <FileCode className="w-4 h-4 text-[#a78bfa]" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-semibold text-[#fafafa] tracking-tight font-mono truncate" title={skill.name}>
+                      {skill.name}
+                    </h3>
+                    <div className="text-[10px] font-mono text-[#71717a]">
+                      {skill.source === 'project' ? (zh ? '本项目安装' : 'project') : zh ? '全局安装' : 'global'}
+                    </div>
+                  </div>
                 </div>
 
-                <p className="text-xs text-[#a1a1aa] leading-relaxed mb-1.5">
-                  {skill.description || (zh ? '（无描述）' : '(no description)')}
-                </p>
-
-                <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#71717a] min-w-0">
-                  <FileCode className="w-3 h-3 shrink-0" />
-                  <span className="truncate">{skill.path}</span>
-                </div>
+                <span
+                  className={`px-1.5 py-0.5 text-[10px] font-mono rounded border shrink-0 ${
+                    skill.enabled
+                      ? 'text-[#34d399] bg-[#34d399]/10 border-[#34d399]/30'
+                      : 'text-[#71717a] bg-[#121215] border-[#27272a]'
+                  }`}
+                >
+                  {skill.enabled ? (zh ? '已启用' : 'enabled') : zh ? '已停用' : 'disabled'}
+                </span>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <p className="text-[11px] text-[#a1a1aa] leading-relaxed my-2.5 line-clamp-3">
+                {skill.description || (zh ? '（无描述）' : '(no description)')}
+              </p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="text-[10px] font-mono text-[#71717a] uppercase">{zh ? '启用' : 'enabled'}</span>
                 <ScopeSwitch
                   accentColor={accentColor}
-                  checked={skill.source !== 'project'}
+                  checked={skill.enabled}
                   busy={actionBusy === skill.name}
                   icon={<Globe className="w-2 h-2" />}
-                  title={zh ? '全局作用域（~/.agents/skills）' : 'Global scope (~/.agents/skills)'}
-                  onToggle={() => void handleScope(skill, 'global')}
+                  title={
+                    skill.enabled
+                      ? zh
+                        ? '已启用 — 点击停用（写入 SKILL.md front-matter）'
+                        : 'Enabled — click to disable (writes SKILL.md front matter)'
+                      : zh
+                      ? '已停用 — 点击启用'
+                      : 'Disabled — click to enable'
+                  }
+                  onToggle={() => void handleToggle(skill)}
                 />
-                <ScopeSwitch
-                  accentColor={accentColor}
-                  checked={skill.source === 'project'}
-                  busy={actionBusy === skill.name}
-                  icon={<FolderGit2 className="w-2 h-2" />}
-                  title={zh ? '仅本项目（<项目>/.agents/skills）' : 'This project only (<project>/.agents/skills)'}
-                  onToggle={() => void handleScope(skill, 'project')}
-                />
+              </div>
+
+              <div className="pt-2 border-t border-[#1e1e24] flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleScope(skill, skill.source === 'project' ? 'global' : 'project')}
+                  disabled={actionBusy !== null}
+                  title={
+                    skill.source === 'project'
+                      ? zh
+                        ? '移动到全局（~/.agents/skills）'
+                        : 'Move to the global scope (~/.agents/skills)'
+                      : zh
+                      ? '移动到这里安装（<项目>/.agents/skills）'
+                      : 'Install for this project (<project>/.agents/skills)'
+                  }
+                  className="text-[10px] font-mono text-[#a1a1aa] hover:text-[#fafafa] cursor-pointer disabled:opacity-50 truncate"
+                >
+                  {skill.source === 'project' ? (zh ? '移到全局' : 'move global') : zh ? '移到本项目' : 'move project'}
+                </button>
 
                 <button
                   type="button"
@@ -241,11 +292,7 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
                   title={zh ? '卸载技能' : 'Uninstall skill'}
                   className="flex items-center gap-1 shrink-0 text-[#ef4444] hover:text-[#f87171] cursor-pointer text-[11px] font-medium disabled:opacity-50"
                 >
-                  {actionBusy === skill.name ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-3 h-3" />
-                  )}
+                  {actionBusy === skill.name ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                 </button>
               </div>
             </div>

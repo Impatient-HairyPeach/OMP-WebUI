@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { ThemeOption } from '../types';
-import { THEME_OPTIONS } from '../components/views/ThemeView';
 import {
   applyPalette,
+  loadCustomPalette,
   loadPalettePreference,
   paletteToThemeOption,
   resolvePalette,
   saveCustomBase,
+  storeCustomPalette,
+  type CustomPalette,
   type PaletteId,
   type PalettePreference,
 } from '../lib/palettes';
@@ -14,8 +16,9 @@ import {
 interface ThemeContextType {
   /** Active palette, mirrored into the shape components read inline. */
   theme: ThemeOption;
-  setTheme: (theme: ThemeOption) => void;
-  saveCustomTheme: (customTheme: ThemeOption) => void;
+  /** Custom palette built in Settings → 界面主题与偏好. */
+  customPalette: CustomPalette | null;
+  saveCustomPalette: (palette: CustomPalette) => void;
   accentColor: string;
   setAccentColor: (color: string) => void;
   /** pi-web palette switch (light | dark | mist | rose | pine | auto). */
@@ -47,6 +50,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
   const [enableGrid, setEnableGridState] = useState<boolean>(() => localStorage.getItem('omp_enable_grid') === 'true');
   const [enableGlow, setEnableGlowState] = useState<boolean>(() => localStorage.getItem('omp_enable_glow') === 'true');
+  const [customPalette, setCustomPaletteState] = useState<CustomPalette | null>(() => loadCustomPalette());
 
   // `auto` must follow a live OS change, not just the value read at boot.
   useEffect(() => {
@@ -60,11 +64,16 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     const resolved = resolvePalette(paletteId);
     setResolvedPalette(resolved);
-    applyPalette(resolved, accentColor || null, editorFont);
+    if (paletteId === 'custom' && customPalette) {
+      // A custom palette paints its own tokens and fixes the base mode.
+      applyPalette(customPalette.mode, accentColor || customPalette.accent, editorFont, customPalette);
+    } else {
+      applyPalette(resolved, accentColor || null, editorFont, null);
+    }
     document.documentElement.setAttribute('data-density', uiDensity);
     try {
       localStorage.setItem('omp_palette', paletteId);
-      if (paletteId === 'custom') saveCustomBase(resolved);
+      if (paletteId === 'custom' && customPalette) saveCustomBase(customPalette.mode);
       localStorage.setItem('omp_ui_density', uiDensity);
       localStorage.setItem('omp_editor_font', editorFont);
       if (accentColor) localStorage.setItem('omp_accent_color', accentColor);
@@ -72,7 +81,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {
       // storage unavailable — preferences simply won't persist
     }
-  }, [paletteId, accentColor, uiDensity, editorFont]);
+  }, [paletteId, accentColor, uiDensity, editorFont, customPalette]);
 
   useEffect(() => {
     try {
@@ -83,26 +92,24 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [enableGrid, enableGlow]);
 
-  const theme = paletteToThemeOption(resolvedPalette, accentColor || null);
+  const theme = paletteToThemeOption(
+    customPalette && paletteId === 'custom' ? customPalette.mode : resolvedPalette,
+    accentColor || customPalette?.accent || null
+  );
 
-  /** Picking one of the legacy presets maps onto the matching palette + accent. */
-  const setTheme = (newTheme: ThemeOption) => {
-    const nextPalette = newTheme.mode === 'light' ? 'light' : 'dark';
-    setPaletteIdState(nextPalette);
-    setAccentColorState(newTheme.accent);
-  };
-
-  const saveCustomTheme = (custom: ThemeOption) => {
-    setPaletteIdState(custom.mode === 'light' ? 'light' : 'dark');
-    setAccentColorState(custom.accent);
+  /** Persist the custom palette built in Settings and switch to it. */
+  const saveCustomPalette = (palette: CustomPalette) => {
+    setCustomPaletteState(palette);
+    storeCustomPalette(palette);
+    setPaletteIdState('custom');
   };
 
   return (
     <ThemeContext.Provider
       value={{
         theme,
-        setTheme,
-        saveCustomTheme,
+        customPalette,
+        saveCustomPalette,
         accentColor: theme.accent,
         setAccentColor: setAccentColorState,
         paletteId,
@@ -130,6 +137,3 @@ export const useTheme = () => {
   }
   return context;
 };
-
-/** Kept for callers that imported the preset list from here. */
-export { THEME_OPTIONS };

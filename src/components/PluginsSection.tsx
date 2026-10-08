@@ -267,33 +267,27 @@ export const PluginsSection: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-[10px] text-[#71717a] font-mono uppercase">{zh ? '作用范围' : 'scope'}</span>
-                  <div className="flex items-center gap-2">
-                    <ScopeSwitch
-                      accentColor={accentColor}
-                      checked={plugin.scope === 'global'}
-                      busy={actionBusy === plugin.name}
-                      icon={<Globe className="w-2 h-2" />}
-                      title={
-                        zh
-                          ? '全局启用：所有项目都加载（写入 omp 插件锁）'
-                          : 'Enabled globally — loaded in every project (omp plugin lock)'
-                      }
-                      onToggle={() => void handleScope(plugin, plugin.scope === 'global' ? 'off' : 'global')}
-                    />
-                    <ScopeSwitch
-                      accentColor={accentColor}
-                      checked={plugin.scope === 'project'}
-                      busy={actionBusy === plugin.name}
-                      icon={<FolderGit2 className="w-2 h-2" />}
-                      title={
-                        zh
-                          ? '仅本项目：只在本工作空间加载（omp -e 显式加载）'
-                          : 'This project only — loaded here via omp -e'
-                      }
-                      onToggle={() => void handleScope(plugin, plugin.scope === 'project' ? 'off' : 'project')}
-                    />
-                  </div>
+                  <span className="text-[10px] font-mono text-[#71717a] uppercase">{zh ? '启用' : 'enabled'}</span>
+                  <ScopeSwitch
+                    accentColor={accentColor}
+                    checked={plugin.scope !== 'off'}
+                    busy={actionBusy === plugin.name}
+                    icon={<Globe className="w-2 h-2" />}
+                    title={
+                      plugin.scope === 'off'
+                        ? zh
+                          ? '已停用 — 点击启用（写入 omp 插件锁）'
+                          : 'Disabled — click to enable (writes the omp plugin lock)'
+                        : plugin.scope === 'project'
+                        ? zh
+                          ? '已启用（仅本项目）— 点击停用'
+                          : 'Enabled for this project — click to disable'
+                        : zh
+                        ? '已全局启用 — 点击停用'
+                        : 'Enabled globally — click to disable'
+                    }
+                    onToggle={() => void handleScope(plugin, plugin.scope === 'off' ? 'global' : 'off')}
+                  />
                 </div>
 
                 <div className="pt-2 border-t border-[#1e1e24] flex items-center justify-between text-[11px]">

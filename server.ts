@@ -1199,11 +1199,11 @@ const PLUGIN_LOCK = path.join(homedir(), ".omp", "plugins", "omp-plugins.lock.js
 const USER_SKILLS = process.env.OMP_SKILLS_DIR || path.join(homedir(), ".agents", "skills");
 
 /** Parse the tiny front-matter subset omp writes in skill/agent markdown. */
-function readFrontMatter(file: string): { name?: string; description?: string; tools?: string[] } {
+function readFrontMatter(file: string): { name?: string; description?: string; tools?: string[]; hidden?: boolean } {
   const head = readHead(file, 4096);
   const match = head.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return {};
-  const out: { name?: string; description?: string; tools?: string[] } = {};
+  const out: { name?: string; description?: string; tools?: string[]; hidden?: boolean } = {};
   let listKey: string | null = null;
   for (const rawLine of match[1].split(/\r?\n/)) {
     const line = rawLine.trimEnd();
@@ -1218,9 +1218,24 @@ function readFrontMatter(file: string): { name?: string; description?: string; t
     const value = rawValue.replace(/^["']|["']$/g, "").trim();
     if (key === "name" && value) out.name = value;
     if (key === "description" && value) out.description = value;
+    // omp hides a skill when either flag is truthy.
+    if ((key === "hide" || key === "disable-model-invocation") && value === "true") out.hidden = true;
     listKey = key === "tools" && !value ? "tools" : null;
   }
   return out;
+}
+
+/** Enable/disable a skill by toggling the front-matter flag omp reads. */
+function toggleSkillFrontMatter(file: string, enabled: boolean): void {
+  const raw = readFileSync(file, "utf8");
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  const body = match ? raw.slice(match[0].length) : raw;
+  const kept = (match ? match[1] : "")
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(hide|disable-model-invocation)\s*:/.test(line))
+    .filter((line) => line.trim() !== "");
+  if (!enabled) kept.push("disable-model-invocation: true");
+  writeFileSync(file, `---\n${kept.join("\n")}\n---\n${body}`, "utf8");
 }
 
 function readJsonFile<T>(file: string, fallback: T): T {
@@ -1295,7 +1310,7 @@ app.get("/api/omp/skills", (_req, res) => {
     { root: path.join(workspace, ".agents", "skills"), source: "project" as const },
     { root: path.join(workspace, ".omp", "skills"), source: "project" as const },
   ];
-  const skills: Array<{ name: string; description?: string; source: string; path: string }> = [];
+  const skills: Array<{ name: string; description?: string; source: string; path: string; enabled: boolean }> = [];
   for (const { root, source } of roots) {
     let entries;
     try {
@@ -1308,10 +1323,45 @@ app.get("/api/omp/skills", (_req, res) => {
       const skillFile = path.join(root, entry.name, "SKILL.md");
       if (!existsSync(skillFile)) continue;
       const meta = readFrontMatter(skillFile);
-      skills.push({ name: meta.name || entry.name, description: meta.description, source, path: skillFile });
+      skills.push({
+        name: meta.name || entry.name,
+        description: meta.description,
+        source,
+        path: skillFile,
+        enabled: meta.hidden !== true,
+      });
     }
   }
   res.json({ skills, roots: roots.map((entry) => entry.root) });
+});
+
+/** Enable/disable one skill by writing the front-matter flag omp reads. */
+app.post("/api/skills/enable", async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  const enabled = req.body?.enabled !== false;
+  if (!name || name === "." || name === ".." || /[\\/]/.test(name)) {
+    res.status(400).json({ error: "invalid skill name" });
+    return;
+  }
+  const candidates = [
+    path.join(USER_SKILLS, name, "SKILL.md"),
+    path.join(workspace, ".agents", "skills", name, "SKILL.md"),
+    path.join(workspace, ".omp", "skills", name, "SKILL.md"),
+  ];
+  const file = candidates.find((candidate) => existsSync(candidate));
+  if (!file) {
+    res.status(404).json({ error: `skill not found on disk: ${name}` });
+    return;
+  }
+  try {
+    toggleSkillFrontMatter(file, enabled);
+    // omp reads skills at session start.
+    await enqueue(() => restartChild({}));
+    emit("log", { level: "info", message: `skill.enable: ${name} -> ${enabled ? "on" : "off"}` });
+    res.json({ ok: true, name, enabled, restarted: true, path: file });
+  } catch (error) {
+    res.status(400).json({ error: String(error instanceof Error ? error.message : error) });
+  }
 });
 
 /** Bundled task agents, materialized with omp's own `agents unpack` into a temp dir. */

@@ -87,7 +87,7 @@ export interface OmpSessionApi {
   searchSessionContent: (query: string) => Promise<Array<{ path: string; snippet: string; hits: number }>>;
 }
 
-const DIALOG_METHODS: ReadonlyArray<OmpDialogRequest["method"]> = ["confirm", "select", "input", "editor"];
+const DIALOG_METHODS: ReadonlyArray<OmpDialogRequest["method"]> = ["confirm", "select", "input", "editor", "ask"];
 
 function isDialogMethod(method: OmpExtensionUIRequest["method"]): method is OmpDialogRequest["method"] {
   return (DIALOG_METHODS as readonly string[]).includes(method);
@@ -369,9 +369,6 @@ export function useOmpSession(): OmpSessionApi {
             pushLog("info", `extension wants to open ${String(request.url ?? "")}`);
           } else if (method === "cancel") {
             setDialogs((prev) => prev.filter((dialog) => dialog.id !== String(request.targetId ?? "")));
-          } else if (method === "ask") {
-            // We never opt in to `ask` dialogs, so decline instead of stalling the agent.
-            void bridgeRef.current?.command({ type: "extension_ui_response", id: request.id, cancelled: true });
           } else if (isDialogMethod(method)) {
             setDialogs((prev) => [
               ...prev,

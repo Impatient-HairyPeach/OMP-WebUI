@@ -41,6 +41,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
 import { DiffViewer } from '../DiffViewer';
 import { MessageActivity } from '../MessageActivity';
+import { ExtensionRequest } from '../ExtensionRequest';
 import { PanelResizeHandle } from '../PanelResizeHandle';
 import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff } from '../../omp/cli';
 import { Mic, Volume2 } from 'lucide-react';
@@ -138,7 +139,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-  const [dialogValue, setDialogValue] = useState('');
   const [activeMsgId, setActiveMsgId] = useState<string | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -236,12 +236,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       onDispatchLog(line.level === 'info' || line.level === 'omp' ? 'INFO' : 'OVERRIDE', line.message);
     }
   }, [logs, onDispatchLog]);
-
-  const dialogId = omp.dialog?.id ?? null;
-  const dialogPrefill = omp.dialog?.prefill ?? '';
-  useEffect(() => {
-    setDialogValue(dialogPrefill);
-  }, [dialogId, dialogPrefill]);
 
   // ---- Derived session state (all real) ----
   const sessionActive = Boolean(omp.resumePath || omp.sessionId);
@@ -1557,6 +1551,19 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                 )}
               </div>
             )}
+
+            {/* Extension UI request (confirm / select / input / editor / ask):
+                shown in the conversation flow so choices are picked in place. */}
+            {omp.dialog && (
+              <div className="w-full mx-auto" style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}>
+                <ExtensionRequest
+                  dialog={omp.dialog}
+                  zh={language === 'zh-CN'}
+                  accentColor={accentColor}
+                  onAnswer={(response) => void omp.answerDialog(response)}
+                />
+              </div>
+            )}
           </div>
 
           {/* Right rail: one tick per turn — click to jump, spy follows viewport */}
@@ -2109,111 +2116,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
         </div>
       </main>
 
-      {/* Extension UI dialog (confirm / select / input / editor) */}
-      {omp.dialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none">
-          <div className="w-full max-w-md bg-[#0c0c0e] border border-[#27272a] rounded-lg shadow-2xl overflow-hidden text-xs">
-            <div className="px-4 py-3 border-b border-[#27272a] bg-[#121215] flex items-center justify-between">
-              <span className="font-semibold text-[#fafafa] font-sans truncate">{omp.dialog.title}</span>
-              <button
-                type="button"
-                onClick={() => void omp.answerDialog({ id: omp.dialog?.id, cancelled: true })}
-                className="text-[#71717a] hover:text-[#fafafa] cursor-pointer shrink-0 ml-2"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-3">
-              {omp.dialog.message && (
-                <p className="text-[11px] text-[#a1a1aa] whitespace-pre-wrap font-mono">{omp.dialog.message}</p>
-              )}
-
-              {omp.dialog.method === 'select' && (
-                <div className="space-y-1">
-                  {(omp.dialog.options ?? []).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => void omp.answerDialog({ id: omp.dialog?.id, value: option })}
-                      className="w-full text-left px-3 py-2 rounded bg-[#121215] border border-[#27272a] hover:border-[#a78bfa] text-[#fafafa] font-mono cursor-pointer transition-colors"
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {(omp.dialog.method === 'input' || omp.dialog.method === 'editor') && (
-                <textarea
-                  rows={omp.dialog.method === 'editor' ? 6 : 2}
-                  value={dialogValue}
-                  onChange={(e) => setDialogValue(e.target.value)}
-                  placeholder={omp.dialog.placeholder}
-                  className="w-full p-2.5 bg-[#121215] border border-[#27272a] rounded text-[#fafafa] placeholder-[#52525b] focus:outline-none focus:ring-1 focus:ring-[#a78bfa] font-mono resize-none"
-                />
-              )}
-
-              {omp.dialog.method === 'confirm' && (
-                <p className="text-[11px] text-[#71717a]">
-                  {language === 'zh-CN' ? '等待你批准该扩展操作。' : 'The extension is waiting for your approval.'}
-                </p>
-              )}
-
-              {omp.dialog.method === 'ask' && (
-                <p className="text-[11px] text-[#71717a]">
-                  {language === 'zh-CN'
-                    ? '该对话类型暂不支持，请取消以继续。'
-                    : 'This dialog type is not supported; cancel to let the agent continue.'}
-                </p>
-              )}
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#27272a]">
-                <button
-                  type="button"
-                  onClick={() => void omp.answerDialog({ id: omp.dialog?.id, cancelled: true })}
-                  className="px-3 py-1.5 rounded border border-[#27272a] text-[#a1a1aa] hover:bg-[#18181b] cursor-pointer"
-                >
-                  {t.cancel}
-                </button>
-
-                {omp.dialog.method === 'confirm' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void omp.answerDialog({ id: omp.dialog?.id, confirmed: false })}
-                      className="px-3 py-1.5 rounded bg-[#18181b] border border-[#ef4444]/50 hover:bg-[#ef4444]/20 text-[#ef4444] cursor-pointer"
-                    >
-                      {language === 'zh-CN' ? '拒绝' : 'Deny'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void omp.answerDialog({ id: omp.dialog?.id, confirmed: true })}
-                      className="px-3.5 py-1.5 rounded text-[#09090b] font-medium cursor-pointer flex items-center gap-1 shadow-sm"
-                      style={{ backgroundColor: accentColor }}
-                    >
-                      <Check className="w-3 h-3" />
-                      <span>{language === 'zh-CN' ? '批准执行' : 'Approve'}</span>
-                    </button>
-                  </>
-                )}
-
-                {(omp.dialog.method === 'input' || omp.dialog.method === 'editor') && (
-                  <button
-                    type="button"
-                    onClick={() => void omp.answerDialog({ id: omp.dialog?.id, value: dialogValue })}
-                    className="px-3.5 py-1.5 rounded text-[#09090b] font-medium cursor-pointer flex items-center gap-1 shadow-sm"
-                    style={{ backgroundColor: accentColor }}
-                  >
-                    <Send className="w-3 h-3" />
-                    <span>{language === 'zh-CN' ? '提交' : 'Submit'}</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
       {/* Workspace picker: browse real folders on this machine */}
       {workspacePickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm select-none">

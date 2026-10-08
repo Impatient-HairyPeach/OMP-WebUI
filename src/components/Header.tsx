@@ -113,16 +113,8 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
       </div>
 
-      {/* Right Actions: OMP Config, Multi-functional Side Panel, Settings gear */}
+      {/* Right Actions: side panel, settings, git */}
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onOpenSettingsTab?.('omp_config')}
-          title={language === 'zh-CN' ? '查看 .omprc 配置（真实 config.yml）' : 'Inspect .omprc config (real config.yml)'}
-          className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded bg-[#121215] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-[#fafafa] text-xs font-mono transition-colors cursor-pointer"
-        >
-          <span>.omprc</span>
-        </button>
 
         <button
           type="button"

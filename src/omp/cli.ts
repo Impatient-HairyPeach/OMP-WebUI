@@ -63,6 +63,8 @@ export interface OmpSkillEntry {
   description?: string;
   source: string;
   path: string;
+  /** false when the skill carries omp's hide / disable-model-invocation flag. */
+  enabled: boolean;
 }
 
 export interface OmpAgentEntry {
@@ -161,6 +163,13 @@ export type ScopeName = "global" | "project" | "off";
 /** Move a skill between the global and the project skills root, then reload the session. */
 export const setSkillScope = (name: string, scope: "global" | "project") =>
   postJson<{ ok: boolean; name: string; scope: string; restarted: boolean }>("/api/skills/scope", { name, scope });
+
+/** Turn one skill on/off (writes the front-matter flag omp reads). */
+export const setSkillEnabled = (name: string, enabled: boolean) =>
+  postJson<{ ok: boolean; name: string; enabled: boolean; restarted: boolean; path: string }>("/api/skills/enable", {
+    name,
+    enabled,
+  });
 
 /** Global / this-project-only / off for an installed extension. */
 export const setExtensionScope = (name: string, scope: ScopeName) =>

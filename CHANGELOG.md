@@ -3,6 +3,34 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.2
+
+Choice prompts
+- Extension UI requests (confirm / select / input / editor / **ask**) are now
+  rendered **inline in the conversation** instead of a modal, so a question with
+  options is answered where it appears. The `ask` method is fully supported:
+  single- and multi-select questions, `recommended` preselecting an option,
+  optional custom text per question, and omp's exact response contract (one
+  answer per question in order, ids echoed, a custom input replacing the
+  selection on single-select questions).
+
+Theme
+- The curated preset gallery and its 600-line preset table are gone; the
+  section is now titled **主题** with exactly 跟随系统 / 深色 / 浅色 / 自定义.
+  The custom studio persists a full palette (background, panel, border, text,
+  accent) and paints its tokens directly.
+- The header's `.omprc` shortcut is gone (the config view stays in Settings).
+
+Skills and extensions
+- Both sections render the same three-column cards with **one switch per card**
+  (on/off) instead of scope text controls.
+- Skills: the switch writes omp's own front-matter flag
+  (`hide` / `disable-model-invocation`) — a real enable/disable — and a small
+  action still moves a skill between the global and the project root.
+- Extensions: the switch drives `omp plugin enable|disable`.
+- New endpoint: `POST /api/skills/enable`; `GET /api/omp/skills` now reports
+  `enabled`.
+
 ## 0.3.1
 
 Fixes

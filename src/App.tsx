@@ -217,12 +217,8 @@ export default function App() {
 
                   {activeSidebarTab === 'theme_preferences' && (
                     <ThemeView
-                      onSelectTheme={(t) => {
-                        addLog('OK', `theme: applied [${t.name}] preset (${t.category})`);
-                        showToast(`Theme changed to ${t.name}`);
-                      }}
                       onSelectAccentColor={(color) => {
-                        addLog('INFO', `theme: custom accent tint set to ${color}`);
+                        addLog('INFO', `theme: accent set to ${color}`);
                         showToast(`Accent color updated`);
                       }}
                     />
