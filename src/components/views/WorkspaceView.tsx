@@ -35,7 +35,6 @@ import {
   Brain,
   Gauge,
   Layers,
-  Activity,
   Coins,
   Loader2,
 } from 'lucide-react';
@@ -1280,10 +1279,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                         <span className="text-[#34d399]">{omp.cacheHitRate !== null ? `${(omp.cacheHitRate * 100).toFixed(1)}%` : '—'}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span>{language === 'zh-CN' ? '生成速度' : 'throughput'}</span>
-                        <span className="text-[#38bdf8]">{typeof omp.state?.tokensPerSecond === 'number' ? `${omp.state.tokensPerSecond.toFixed(1)} tok/s` : '—'}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
                         <span>{language === 'zh-CN' ? '累计成本' : 'cost'}</span>
                         <span className="text-[#a78bfa]">${(omp.usage?.costEstimate ?? 0).toFixed(4)}</span>
                       </div>
@@ -1331,17 +1326,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
               >
                 <Coins className="w-3.5 h-3.5" />
                 <span>{omp.usage.totalTokens >= 1000 ? `${(omp.usage.totalTokens / 1000).toFixed(1)}k` : omp.usage.totalTokens}</span>
-              </span>
-            )}
-
-            {/* Generation rate (real tokens/s, shown only while it is measured) */}
-            {typeof omp.state?.tokensPerSecond === 'number' && (
-              <span
-                title={`${language === 'zh-CN' ? '生成速率' : 'generation rate'}: ${omp.state.tokensPerSecond.toFixed(1)} tok/s`}
-                className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-[#a1a1aa]"
-              >
-                <Activity className={`w-3.5 h-3.5 ${omp.isStreaming ? 'animate-pulse' : ''}`} />
-                <span>{omp.state.tokensPerSecond.toFixed(1)}</span>
               </span>
             )}
 

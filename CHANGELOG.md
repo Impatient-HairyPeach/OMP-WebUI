@@ -3,6 +3,12 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.9
+
+- The top-right generation-rate chip is gone (and the "throughput" row in the
+  context popover with it). The live `≈ tok/s` line above a streaming turn stays,
+  since that is what makes the rate readable while it is still moving.
+
 ## 0.3.8
 
 - Light theme is the classic one now: white paper `#ffffff`, cool grey panels
