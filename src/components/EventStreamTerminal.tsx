@@ -5,8 +5,6 @@ import {
   Maximize2,
   Minimize2,
   Trash2,
-  Play,
-  Pause,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -59,7 +57,6 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
     edge: 'start',
     disabled: !isExpanded || isMaximized,
   });
-  const [isStreaming, setIsStreaming] = useState(true);
   const [copied, setCopied] = useState(false);
   /** Result of the last real bridge round-trip (Zap button). */
   const [ping, setPing] = useState<{ ms: number; ok: boolean; detail: string } | null>(null);
@@ -97,45 +94,12 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const shellInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll when new log appears in MCP mode
+  // Auto-scroll when a new log line arrives in MCP mode
   useEffect(() => {
-    if (isExpanded && (isStreaming || terminalType !== 'mcp')) {
+    if (isExpanded && terminalType === 'mcp') {
       terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [logs, bashHistory, pwshHistory, isExpanded, isStreaming, terminalType]);
-
-  // Periodic simulated events if streaming is on
-  useEffect(() => {
-    if (!isStreaming || terminalType !== 'mcp') return;
-
-    const interval = setInterval(() => {
-      const sampleEvents: { level: LogEntry['level']; msg: string }[] = [
-        {
-          level: 'INFO',
-          msg: `mcp.daemon heartbeat: active ping 1.2ms [scope:${projectName}]`,
-        },
-        {
-          level: 'CALL',
-          msg: `subagent.call: validated AST sandbox isolation for prompt execution`,
-        },
-        {
-          level: 'OK',
-          msg: `filesystem-server: read_file cached buffer valid (hash: 8f3d1e)`,
-        },
-        {
-          level: 'INFO',
-          msg: `github-api-mcp: rate limit token bucket replenished (4,821/5,000)`,
-        },
-      ];
-
-      if (Math.random() > 0.65) {
-        const item = sampleEvents[Math.floor(Math.random() * sampleEvents.length)];
-        onAddLog(item.level, item.msg);
-      }
-    }, 7000);
-
-    return () => clearInterval(interval);
-  }, [isStreaming, projectName, onAddLog, terminalType]);
+  }, [logs, bashHistory, pwshHistory, isExpanded, terminalType]);
 
   /**
    * Real round-trip to the bridge: GET /api/health is answered by the server
@@ -444,18 +408,6 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
                 )}
               </button>
 
-              {/* Stream pause/play */}
-              <button
-                onClick={() => setIsStreaming(!isStreaming)}
-                title={isStreaming ? 'Pause log stream' : 'Resume log stream'}
-                className="hover:text-[#fafafa] transition-colors cursor-pointer"
-              >
-                {isStreaming ? (
-                  <Pause className="w-3 h-3 text-[#34d399]" />
-                ) : (
-                  <Play className="w-3 h-3 text-[#a1a1aa]" />
-                )}
-              </button>
             </>
           )}
 

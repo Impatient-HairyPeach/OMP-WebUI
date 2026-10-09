@@ -1677,7 +1677,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                     {omp.isStreaming && (
                       <div className="flex items-center gap-2 text-xs font-mono text-[#a78bfa] animate-pulse">
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span>{t.orchestrating}</span>
+                        <span>
+                          {t.orchestrating}
+                          {subagents.length > 0
+                            ? ` · ${subagents.length} ${language === 'zh-CN' ? '个子代理在跑' : 'subagent(s) running'}`
+                            : ''}
+                        </span>
                       </div>
                     )}
                   </>

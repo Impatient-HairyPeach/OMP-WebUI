@@ -67,7 +67,7 @@ Production build: `bun run build && bun run start`.
 - omp emits one message per step, so a turn is folded into a single bubble with its blocks in the original order; the fold keeps the turn's first session-log entry as the branch/fork anchor.
 - Replies are markdown on screen and **markdown source** in the clipboard (`复制 Markdown 源码`) — tables stay copyable as pipes.
 - Right rail: one tick per turn — hover shows a preview of that turn, click to jump, highlights the visible turn, jump-to-latest button.
-- The bottom terminal / event console is docked, expandable and **resizable** (drag its top edge, double-click to reset); the composer keeps its own drag handle.
+- The bottom terminal / event console is docked, expandable and **resizable** (drag its top edge, double-click to reset); the composer keeps its own drag handle. Its MCP tab shows only real events (bridge/omp log lines, your own actions, the real ping/health round-trip) — the simulated event generator is gone.
 - `/` completion is grouped by omp's own command source (系统内置 / 技能 / 扩展 / 提示词) in a 460px two-column panel; `@` completion lists workspace files.
 - Token, context, generation-rate and cache figures are icon chips at the top-right of the conversation (hover for the numbers); the context chip opens `/compact` and the auto-compaction toggle.
 - Message actions: copy (whole turn — markdown source), edit-from-here (session-log branch), retry, fork the session at a turn, quote (assistant turns *and* your own prompts), read aloud. Message text is selectable, so a few words or paragraphs can be copied directly.
@@ -91,9 +91,10 @@ Settings → 界面主题与偏好 switches it; components read tokens, not colo
 
 Tabs: **文件** (real workspace tree, `@` path insertion into the composer, and a
 viewer with 源码 / 预览 — markdown renders, images stream, code shows line
-numbers), **改动** (real working-tree diff), **Git** (branch, changed files,
-commits, real commit form). Width is draggable and remembered. The terminal and
-the omp event stream live at the bottom of the chat column, as before.
+numbers), **改动** (real working-tree diff), **任务** (the agent's own todo list and
+running subagents, both foldable), **Git** (branch, changed files, commits, real
+commit form). Width is draggable and remembered. The terminal and the omp event
+stream live at the bottom of the chat column, as before.
 
 ## Layout
 

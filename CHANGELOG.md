@@ -3,6 +3,19 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.14
+
+- The streaming line no longer claims "子代理正在调度执行图与隔离沙箱..." — that was
+  a static label shown whenever omp was generating, unrelated to subagents. It
+  now reads 正在生成回复… and appends the real count (`· 2 个子代理在跑`) only when
+  omp actually reports running subagents through `get_subagents`.
+- The bottom console's MCP tab no longer fabricates events. It used to append
+  invented lines every few seconds ("mcp.daemon heartbeat", "subagent.call:
+  validated AST sandbox isolation…", "filesystem-server: read_file cached
+  buffer…", "github-api-mcp: rate limit token bucket…") behind a Pause/Play
+  toggle. The generator and that toggle are gone; the tab shows only what really
+  arrives (bridge/omp log lines, your own actions, the ping round-trip).
+
 ## 0.3.13
 
 - The "expand thinking blocks" button is gone from the composer toolbar. Thinking
