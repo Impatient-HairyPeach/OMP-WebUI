@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   Archive,
   ArchiveRestore,
-  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -89,6 +88,16 @@ interface AttachedFile {
 
 const basename = (value: string): string =>
   value.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || value;
+
+/** mm:ss for the working stopwatch next to the streaming label (h:mm:ss past an hour). */
+function formatStopwatch(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`;
+}
 
 /** omp-terminal style elapsed time: 12s / 1m23s / 1h02m. */
 const formatElapsed = (seconds: number): string => {
@@ -725,10 +734,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
     setInputPrompt('');
     setAttachedFiles([]);
-  };
-
-  const handleStop = () => {
-    void omp.abort();
   };
 
   // ---- Voice: dictation into the composer + omp TTS read-out ----
@@ -1547,89 +1552,6 @@ return (
               </span>
             )}
 
-            {/* Token / context / rate / cost / cache chips: icon + hover text, top-right (pi-web) */}
-            <div className="relative flex items-center">
-              <button
-                type="button"
-                onClick={() => setCompactMenuOpen((prev) => !prev)}
-                disabled={omp.isStreaming}
-                title={
-                  contextUsage
-                    ? `${language === 'zh-CN' ? '上下文' : 'context'} ${contextUsage.tokens.toLocaleString()} / ${Math.round(
-                        contextUsage.contextWindow / 1000
-                      )}k (${contextUsage.percent.toFixed(1)}%) · ${
-                        language === 'zh-CN' ? '点击压缩 / 自动压缩' : 'click for compact / auto-compaction'
-                      }`
-                    : language === 'zh-CN'
-                    ? '上下文用量等待中…'
-                    : 'context usage pending…'
-                }
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[#18181b] transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <Gauge className="w-3.5 h-3.5" style={{ color: accentColor }} />
-                <span className="text-[10px] text-[#a1a1aa]">
-                  {contextUsage ? `${contextUsage.percent.toFixed(0)}%` : '—'}
-                </span>
-              </button>
-
-              {compactMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setCompactMenuOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1.5 w-72 rounded-lg bg-[#18181b] border border-[#27272a] shadow-2xl py-1.5 z-50 text-xs font-mono">
-                    <div className="px-3 py-1 text-[10px] text-[#71717a] uppercase border-b border-[#27272a] mb-1">
-                      {language === 'zh-CN' ? '上下文与吞吐' : 'Context & throughput'}
-                    </div>
-                    <div className="px-3 py-1.5 space-y-1 text-[10px] text-[#a1a1aa]">
-                      <div className="flex items-center justify-between">
-                        <span>{language === 'zh-CN' ? '上下文' : 'context'}</span>
-                        <span className="text-[#fafafa]">
-                          {contextUsage
-                            ? `${contextUsage.tokens.toLocaleString()} / ${Math.round(contextUsage.contextWindow / 1000)}k (${contextUsage.percent.toFixed(1)}%)`
-                            : '—'}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>{language === 'zh-CN' ? '缓存命中' : 'cache hit'}</span>
-                        <span className="text-[#34d399]">{omp.cacheHitRate !== null ? `${(omp.cacheHitRate * 100).toFixed(1)}%` : '—'}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>{language === 'zh-CN' ? '累计成本' : 'cost'}</span>
-                        <span className="text-[#a78bfa]">${(omp.usage?.costEstimate ?? 0).toFixed(4)}</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={omp.isStreaming}
-                      onClick={() => {
-                        void omp.compact();
-                        setCompactMenuOpen(false);
-                      }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer flex items-center gap-1.5 text-[#fafafa] disabled:opacity-40"
-                    >
-                      <Sparkles className="w-3 h-3 text-[#a78bfa]" />
-                      <span>{language === 'zh-CN' ? '立即压缩上下文 (/compact)' : 'Compact context now (/compact)'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void omp.setAutoCompaction(!omp.autoCompaction);
-                        setCompactMenuOpen(false);
-                      }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer flex items-center justify-between border-t border-[#27272a]"
-                    >
-                      <span className="flex items-center gap-1.5 text-[#fafafa]">
-                        <Layers className="w-3 h-3 text-[#38bdf8]" />
-                        <span>{language === 'zh-CN' ? '自动压缩' : 'Auto-compaction'}</span>
-                      </span>
-                      <span className={omp.autoCompaction ? 'text-[#34d399]' : 'text-[#71717a]'}>
-                        {omp.autoCompaction ? (language === 'zh-CN' ? '已开启' : 'on') : language === 'zh-CN' ? '已关闭' : 'off'}
-                      </span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-
             {/* Consumed tokens for this session (real usage) */}
             {omp.usage && (
               <span
@@ -1695,11 +1617,6 @@ return (
             <span className="text-[11px] flex items-center gap-1 shrink-0" style={{ color: statusColor }}>
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
               {omp.status}
-              {omp.isStreaming && (
-                <span className="text-[#71717a] font-mono" title={language === 'zh-CN' ? '本轮已用时' : 'working for'}>
-                  · {language === 'zh-CN' ? '工作' : 'working'} {formatElapsed(workingSeconds)}
-                </span>
-              )}
               {approval.mode && (
                 <span
                   className="font-mono"
@@ -1818,6 +1735,9 @@ return (
                           {subagents.length > 0
                             ? ` · ${subagents.length} ${language === 'zh-CN' ? '个子代理在跑' : 'subagent(s) running'}`
                             : ''}
+                        </span>
+                        <span className="font-mono tabular-nums text-[#71717a]" title={language === 'zh-CN' ? '本轮已用时' : 'working for'}>
+                          {formatStopwatch(workingSeconds)}
                         </span>
                       </div>
                     )}
@@ -2269,7 +2189,7 @@ return (
 
               {/* Toolbar Controls */}
               <div className="px-3 py-2 bg-[#0c0c0e] border-t border-[#1e1e24] flex items-center justify-between text-xs flex-wrap gap-2 rounded-b-lg">
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
                   {/* Model dropdown: real omp model catalog, grouped by provider */}
                   <div className="relative">
                     <button
@@ -2284,10 +2204,8 @@ return (
                       }`}
                       title={modelSwitching ? `${modelSwitching} …` : omp.modelLabel ?? undefined}
                     >
-                      {modelSwitching ? (
+                      {modelSwitching && (
                         <Loader2 className="w-3 h-3 animate-spin shrink-0" style={{ color: accentColor }} />
-                      ) : (
-                        <Brain className="w-3 h-3 text-[#a78bfa] shrink-0" />
                       )}
                       <span className="truncate">
                         {modelSwitching
@@ -2401,57 +2319,141 @@ return (
                   </button>
                   <input type="file" multiple ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
 
-                  {/* Voice input: browser dictation straight into the composer */}
-                  {speechSupported && (
+                </div>
+                    {/* Context / compact: chip moved down from the top banner */}
+                    <div className="relative flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => setCompactMenuOpen((prev) => !prev)}
+                        disabled={omp.isStreaming}
+                        title={
+                          contextUsage
+                            ? `${language === 'zh-CN' ? '上下文' : 'context'} ${contextUsage.tokens.toLocaleString()} / ${Math.round(
+                                contextUsage.contextWindow / 1000
+                              )}k (${contextUsage.percent.toFixed(1)}%) · ${
+                                language === 'zh-CN' ? '点击压缩 / 自动压缩' : 'click for compact / auto-compaction'
+                              }`
+                            : language === 'zh-CN'
+                            ? '上下文用量等待中…'
+                            : 'context usage pending…'
+                        }
+                        className="flex items-center gap-1 px-2 py-1.5 rounded border border-[#27272a] bg-[#18181b] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <Gauge className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                        <span className="text-[10px] font-mono">
+                          {contextUsage ? `${contextUsage.percent.toFixed(0)}%` : '—'}
+                        </span>
+                      </button>
+
+                      {compactMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setCompactMenuOpen(false)} />
+                          <div className="absolute right-0 bottom-full mb-1.5 w-72 rounded-lg bg-[#18181b] border border-[#27272a] shadow-2xl py-1.5 z-50 text-xs font-mono">
+                            <div className="px-3 py-1 text-[10px] text-[#71717a] uppercase border-b border-[#27272a] mb-1">
+                              {language === 'zh-CN' ? '上下文与吞吐' : 'Context & throughput'}
+                            </div>
+                            <div className="px-3 py-1.5 space-y-1 text-[10px] text-[#a1a1aa]">
+                              <div className="flex items-center justify-between">
+                                <span>{language === 'zh-CN' ? '上下文' : 'context'}</span>
+                                <span className="text-[#fafafa]">
+                                  {contextUsage
+                                    ? `${contextUsage.tokens.toLocaleString()} / ${Math.round(contextUsage.contextWindow / 1000)}k (${contextUsage.percent.toFixed(1)}%)`
+                                    : '—'}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span>{language === 'zh-CN' ? '缓存命中' : 'cache hit'}</span>
+                                <span className="text-[#34d399]">{omp.cacheHitRate !== null ? `${(omp.cacheHitRate * 100).toFixed(1)}%` : '—'}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span>{language === 'zh-CN' ? '累计成本' : 'cost'}</span>
+                                <span className="text-[#a78bfa]">${(omp.usage?.costEstimate ?? 0).toFixed(4)}</span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={omp.isStreaming}
+                              onClick={() => {
+                                void omp.compact();
+                                setCompactMenuOpen(false);
+                              }}
+                              className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer flex items-center gap-1.5 text-[#fafafa] disabled:opacity-40"
+                            >
+                              <Sparkles className="w-3 h-3 text-[#a78bfa]" />
+                              <span>{language === 'zh-CN' ? '立即压缩上下文 (/compact)' : 'Compact context now (/compact)'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void omp.setAutoCompaction(!omp.autoCompaction);
+                                setCompactMenuOpen(false);
+                              }}
+                              className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer flex items-center justify-between border-t border-[#27272a]"
+                            >
+                              <span className="flex items-center gap-1.5 text-[#fafafa]">
+                                <Layers className="w-3 h-3 text-[#38bdf8]" />
+                                <span>{language === 'zh-CN' ? '自动压缩' : 'Auto-compaction'}</span>
+                              </span>
+                              <span className={omp.autoCompaction ? 'text-[#34d399]' : 'text-[#71717a]'}>
+                                {omp.autoCompaction ? (language === 'zh-CN' ? '已开启' : 'on') : language === 'zh-CN' ? '已关闭' : 'off'}
+                              </span>
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Voice input: browser dictation straight into the composer */}
+                    {speechSupported && (
+                      <button
+                        type="button"
+                        onClick={toggleListening}
+                        title={
+                          listening
+                            ? language === 'zh-CN'
+                              ? '停止语音输入'
+                              : 'Stop voice input'
+                            : language === 'zh-CN'
+                            ? '语音输入（浏览器听写，支持中英混合）'
+                            : 'Voice input (browser dictation)'
+                        }
+                        className={`p-1.5 rounded border transition-colors cursor-pointer relative ${
+                          listening
+                            ? 'bg-[#ef4444]/15 border-[#ef4444]/60 text-[#ef4444]'
+                            : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46]'
+                        }`}
+                      >
+                        <Mic className={`w-3.5 h-3.5 ${listening ? 'animate-pulse' : ''}`} />
+                        {interimTranscript && (
+                          <span className="absolute -top-7 right-0 px-2 py-0.5 rounded bg-[#18181b] border border-[#27272a] text-[10px] font-mono text-[#a1a1aa] whitespace-nowrap max-w-[240px] truncate">
+                            {interimTranscript}
+                          </span>
+                        )}
+                      </button>
+                    )}
+
+                    {/* Read replies aloud with omp's local TTS engine */}
                     <button
                       type="button"
-                      onClick={toggleListening}
+                      onClick={() => setAutoRead((prev) => !prev)}
                       title={
-                        listening
+                        autoRead
                           ? language === 'zh-CN'
-                            ? '停止语音输入'
-                            : 'Stop voice input'
+                            ? '关闭自动朗读新回复'
+                            : 'Turn off auto-read for new replies'
                           : language === 'zh-CN'
-                          ? '语音输入（浏览器听写，支持中英混合）'
-                          : 'Voice input (browser dictation)'
+                          ? '自动朗读新回复（omp say 本地 TTS）'
+                          : 'Auto-read new replies (omp say local TTS)'
                       }
-                      className={`p-1.5 rounded border transition-colors cursor-pointer relative ${
-                        listening
-                          ? 'bg-[#ef4444]/15 border-[#ef4444]/60 text-[#ef4444]'
+                      className={`p-1.5 rounded border transition-colors cursor-pointer ${
+                        autoRead
+                          ? 'bg-[#18181b] border-[#a78bfa]/60 text-[#a78bfa]'
                           : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46]'
                       }`}
                     >
-                      <Mic className={`w-3.5 h-3.5 ${listening ? 'animate-pulse' : ''}`} />
-                      {interimTranscript && (
-                        <span className="absolute -top-7 right-0 px-2 py-0.5 rounded bg-[#18181b] border border-[#27272a] text-[10px] font-mono text-[#a1a1aa] whitespace-nowrap max-w-[240px] truncate">
-                          {interimTranscript}
-                        </span>
-                      )}
+                      <Volume2 className="w-3.5 h-3.5" />
                     </button>
-                  )}
 
-                  {/* Read replies aloud with omp's local TTS engine */}
-                  <button
-                    type="button"
-                    onClick={() => setAutoRead((prev) => !prev)}
-                    title={
-                      autoRead
-                        ? language === 'zh-CN'
-                          ? '关闭自动朗读新回复'
-                          : 'Turn off auto-read for new replies'
-                        : language === 'zh-CN'
-                        ? '自动朗读新回复（omp say 本地 TTS）'
-                        : 'Auto-read new replies (omp say local TTS)'
-                    }
-                    className={`p-1.5 rounded border transition-colors cursor-pointer ${
-                      autoRead
-                        ? 'bg-[#18181b] border-[#a78bfa]/60 text-[#a78bfa]'
-                        : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46]'
-                    }`}
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
                     {/* Tool approval: omp's own tools.approvalMode (icon like its neighbours) */}
                     <div className="relative">
                       <button
@@ -2493,7 +2495,7 @@ return (
                                   }`}
                                 >
                                   <span className="flex items-center justify-between gap-2">
-                                    <span style={{ color: mode === 'yolo' ? '#f59e0b' : '#fafafa' }}>{label}</span>
+                                    <span style={{ color: mode === 'yolo' ? '#f59e0b' : theme.mode === 'light' ? '#1f2328' : '#fafafa' }}>{label}</span>
                                     {isCurrent && <Check className="w-3 h-3 text-[#34d399]" />}
                                   </span>
                                   <span className="block text-[10px] text-[#71717a] mt-0.5">
@@ -2512,7 +2514,7 @@ return (
 
 
 
-                {/* Right Action: Send OR Steer / Queue */}
+                {/* Right Action: Send · Stop while a turn runs · Steer/Queue once you type */}
                 <div className="flex items-center gap-1.5">
                   {!omp.isStreaming ? (
                     <button
@@ -2520,10 +2522,22 @@ return (
                       onClick={handleSubmit}
                       disabled={!inputPrompt.trim() && attachedFiles.length === 0}
                       title={language === 'zh-CN' ? '发送指令 (Enter)' : 'Send (Enter)'}
-                      className="p-2 rounded text-[#09090b] font-semibold text-xs transition-colors cursor-pointer disabled:opacity-40 shadow-sm flex items-center justify-center"
+                      className="h-8 px-5 rounded text-[#09090b] font-semibold text-xs transition-colors cursor-pointer disabled:opacity-40 shadow-sm flex items-center justify-center gap-1.5"
                       style={{ backgroundColor: accentColor }}
                     >
                       <Send className="w-3.5 h-3.5 fill-current" />
+                      <span>{language === 'zh-CN' ? '发送' : 'Send'}</span>
+                    </button>
+                  ) : !inputPrompt.trim() ? (
+                    /* Working with an empty composer: the one useful action is stop. */
+                    <button
+                      type="button"
+                      onClick={() => void omp.abort()}
+                      title={language === 'zh-CN' ? '停止本轮生成 (Esc)' : 'Stop this turn (Esc)'}
+                      className="h-8 px-5 rounded font-semibold text-xs transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-1.5 bg-[#ef4444] text-white hover:bg-[#dc2626]"
+                    >
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                      <span>{language === 'zh-CN' ? '停止' : 'Stop'}</span>
                     </button>
                   ) : (
                     <div className="relative flex items-center">
@@ -2531,8 +2545,7 @@ return (
                         <button
                           type="button"
                           onClick={handleSubmit}
-                          disabled={!inputPrompt.trim()}
-                          className="p-2 text-xs font-semibold cursor-pointer disabled:opacity-40 transition-colors flex items-center justify-center"
+                          className="h-8 px-4 text-xs font-semibold cursor-pointer transition-colors flex items-center justify-center gap-1.5"
                           style={{
                             backgroundColor: steerOrQueueMode === 'steer' ? '#f59e0b' : '#38bdf8',
                             color: '#09090b',
@@ -2552,12 +2565,13 @@ return (
                           ) : (
                             <ListOrdered className="w-3.5 h-3.5" />
                           )}
+                          <span>{steerOrQueueMode === 'steer' ? (language === 'zh-CN' ? '引导' : 'Steer') : language === 'zh-CN' ? '排队' : 'Queue'}</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => setSteerModeDropdownOpen(!steerModeDropdownOpen)}
-                          className="px-1.5 py-2 bg-[#18181b] hover:bg-[#27272a] text-[#fafafa] border-l border-[#27272a] cursor-pointer flex items-center justify-center"
+                          className="h-8 px-1.5 bg-[#18181b] hover:bg-[#27272a] text-[#fafafa] border-l border-[#27272a] cursor-pointer flex items-center justify-center"
                           title={language === 'zh-CN' ? '切换 Steer / Queue' : 'Switch Steer or Queue'}
                         >
                           <ChevronDown className="w-3 h-3" />
@@ -2605,19 +2619,6 @@ return (
                         </>
                       )}
                     </div>
-                  )}
-
-                  {/* Stop the in-flight turn */}
-                  {omp.isStreaming && (
-                    <button
-                      type="button"
-                      onClick={handleStop}
-                      title={language === 'zh-CN' ? '停止生成 (Stop)' : 'Stop generating'}
-                      aria-label="Stop generating"
-                      className="p-2 rounded bg-[#18181b] border border-[#ef4444]/50 text-[#ef4444] hover:bg-[#ef4444]/15 hover:border-[#ef4444] transition-colors cursor-pointer flex items-center justify-center"
-                    >
-                      <Square className="w-3.5 h-3.5 fill-current" />
-                    </button>
                   )}
                 </div>
 

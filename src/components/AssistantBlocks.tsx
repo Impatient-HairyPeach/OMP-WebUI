@@ -140,8 +140,8 @@ function ToolBlock({ block, zh, onInsertCommand }: { block: ToolBlockItem; zh: b
         title={open ? (zh ? '收起工具详情' : 'Collapse tool details') : zh ? '展开工具详情' : 'Expand tool details'}
         className="w-full flex items-center gap-2 px-2.5 py-1 text-left cursor-pointer hover:bg-[#141417] transition-colors"
       >
-        <Terminal className="w-3 h-3 shrink-0 text-[#7dd7e8]" />
-        <span className="text-[10px] font-mono text-[#f5f5f5] font-medium shrink-0">{block.tool}</span>
+        <Terminal className="w-3 h-3 shrink-0 text-[var(--accent-2)]" />
+        <span className="text-[10px] font-mono text-[#fafafa] font-medium shrink-0">{block.tool}</span>
         <span className="text-[10px] font-mono text-[#71717a] truncate flex-1">{block.intent || block.command || ''}</span>
         {block.status === 'running' ? (
           <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: statusColor }} />
@@ -160,7 +160,7 @@ function ToolBlock({ block, zh, onInsertCommand }: { block: ToolBlockItem; zh: b
       {open && (
         <div className="px-2.5 pb-2 pt-1 space-y-1.5 border-t border-[#1e1e24] font-mono">
           {block.command && (
-            <div className="text-[10px] text-[#7dd7e8] bg-[#09090b] px-2 py-1 rounded border border-[#1e1e24] flex items-center justify-between gap-2">
+            <div className="text-[10px] text-[var(--accent-2)] bg-[#09090b] px-2 py-1 rounded border border-[#1e1e24] flex items-center justify-between gap-2">
               <span className="truncate">
                 <span className="text-[#71717a] select-none">$ </span>
                 {block.command}
@@ -169,7 +169,7 @@ function ToolBlock({ block, zh, onInsertCommand }: { block: ToolBlockItem; zh: b
                 <button
                   type="button"
                   onClick={() => onInsertCommand(block.command ?? '')}
-                  className="text-[9px] text-[#71717a] hover:text-[#7dd7e8] shrink-0 hover:underline cursor-pointer"
+                  className="text-[9px] text-[#71717a] hover:text-[var(--accent-2)] shrink-0 hover:underline cursor-pointer"
                   title={zh ? '填入输入框' : 'Insert into prompt'}
                 >
                   {zh ? '填入' : 'Insert'}
@@ -236,7 +236,7 @@ const AssistantBlocksView: React.FC<AssistantBlocksProps> = ({
           <span className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse" style={{ backgroundColor: 'var(--accent)' }} />
           <span>{zh ? '生成中' : 'generating'}</span>
           {rate !== null && (
-            <span className="text-[#7dd7e8]">
+            <span className="text-[var(--accent-2)]">
               {metrics?.rateIsEstimate ? '≈ ' : ''}
               {rate.toFixed(1)} tok/s
             </span>
