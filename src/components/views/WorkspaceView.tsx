@@ -60,7 +60,6 @@ import {
   loadSectionOpen,
   loadThinkingVisible,
   saveSectionOpen,
-  saveThinkingVisible,
   saveExpandedProjects,
   saveHiddenProjects,
 } from '../../lib/panelLayout';
@@ -155,8 +154,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [activeMsgId, setActiveMsgId] = useState<string | null>(null);
-  /** Global default for reasoning visibility; each block can still toggle itself. */
-  const [showThinking, setShowThinking] = useState<boolean>(() => loadThinkingVisible());
+  /** Default for reasoning visibility (a stored preference); each block toggles itself. */
+  const [showThinking] = useState<boolean>(() => loadThinkingVisible());
   /** Left panel sections: both collapse independently and remember it. */
   const [projectsOpen, setProjectsOpen] = useState(() => loadSectionOpen('projects'));
   const [recentOpen, setRecentOpen] = useState(() => loadSectionOpen('recent'));
@@ -254,10 +253,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
    */
   const isSessionRunning = (session: OmpSessionSummary): boolean =>
     session.current ? omp.isStreaming : Boolean(session.live);
-
-  useEffect(() => {
-    saveThinkingVisible(showThinking);
-  }, [showThinking]);
 
   useEffect(() => {
     saveSectionOpen('projects', projectsOpen);
@@ -2271,28 +2266,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                       )}
                     </button>
                   )}
-
-                  {/* Global default for reasoning blocks (each block can still override) */}
-                  <button
-                    type="button"
-                    onClick={() => setShowThinking((prev) => !prev)}
-                    title={
-                      showThinking
-                        ? language === 'zh-CN'
-                          ? '默认展开思考块（点击改为默认折叠）'
-                          : 'Thinking blocks open by default (click to fold them)'
-                        : language === 'zh-CN'
-                        ? '默认折叠思考块（点击展开）'
-                        : 'Thinking blocks folded by default (click to expand)'
-                    }
-                    className={`p-1.5 rounded border transition-colors cursor-pointer ${
-                      showThinking
-                        ? 'bg-[#18181b] border-[#a78bfa]/60 text-[#a78bfa]'
-                        : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46]'
-                    }`}
-                  >
-                    <Brain className="w-3.5 h-3.5" />
-                  </button>
 
                   {/* Read replies aloud with omp's local TTS engine */}
                   <button

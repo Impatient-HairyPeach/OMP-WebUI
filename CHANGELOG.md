@@ -3,6 +3,13 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.13
+
+- The "expand thinking blocks" button is gone from the composer toolbar. Thinking
+  folds still open and close one at a time (each block keeps its own toggle); the
+  only thing removed is the global switch, and its stored default is still read
+  at startup for anyone who had set it.
+
 ## 0.3.12
 
 - Slash completion works mid-conversation again. Root cause: the app only knew

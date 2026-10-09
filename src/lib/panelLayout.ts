@@ -59,11 +59,6 @@ export function loadThinkingVisible(): boolean {
   return window.localStorage.getItem(THINKING_VISIBLE_KEY) === 'true';
 }
 
-export function saveThinkingVisible(visible: boolean): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(THINKING_VISIBLE_KEY, String(visible));
-}
-
 /** Collapsible left-panel sections: 项目 / 最近 keep their open state. */
 export const SECTION_OPEN_KEYS = {
   projects: 'omp-studio:section-projects-open',
