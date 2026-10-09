@@ -1355,12 +1355,19 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
               </span>
             )}
 
+            {/* Status text published by omp extensions (setStatus): one span per chip,
+                each with its own tooltip, so a long value is not cut off mid-number. */}
             {omp.statusChips.length > 0 && (
-              <span
-                className="hidden xl:inline text-[10px] text-[#71717a] truncate max-w-[160px]"
-                title={omp.statusChips.map((chip) => `${chip.key}: ${chip.text}`).join('\n')}
-              >
-                {omp.statusChips.map((chip) => chip.text).join(' · ')}
+              <span className="hidden xl:flex items-center gap-1.5 text-[10px] text-[#71717a] min-w-0">
+                {omp.statusChips.map((chip) => (
+                  <span
+                    key={chip.key}
+                    className="truncate max-w-[320px] shrink-0"
+                    title={`${chip.key}: ${chip.text}`}
+                  >
+                    {chip.text}
+                  </span>
+                ))}
               </span>
             )}
 

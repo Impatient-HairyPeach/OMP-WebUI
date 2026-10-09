@@ -3,6 +3,13 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.15
+
+- Extension status chips are no longer cut off mid-number. The row used to join
+  every `setStatus` chip into one `truncate max-w-[160px]` span, so a value like
+  `· DS cache 324/324 · 68.8M/…` lost its tail; each chip is now its own span
+  with its own tooltip and a wider budget.
+
 ## 0.3.14
 
 - The streaming line no longer claims "子代理正在调度执行图与隔离沙箱..." — that was
