@@ -48,7 +48,7 @@ import { TaskHud } from '../TaskHud';
 import { PanelResizeHandle } from '../PanelResizeHandle';
 import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, fetchSubagents } from '../../omp/cli';
 import type { SubagentRow } from '../../omp/cli';
-import { todosFromTranscript } from '../../lib/todoList';
+import { currentTurnStart, todosFromTranscript } from '../../lib/todoList';
 import { publishWorkState } from '../../lib/workState';
 import { Mic, Volume2 } from 'lucide-react';
 import { useOmpSession } from '../../hooks/useOmpSession';
@@ -323,12 +323,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     };
   }, [omp.isStreaming, omp.sessionId]);
 
-  // Publish the turn's work state so the right panel's task tab can show it.
-  const transcriptTodos = todosFromTranscript(omp.messages);
-  useEffect(() => {
-    publishWorkState({ todos: transcriptTodos, subagents });
-  }, [transcriptTodos, subagents]);
-
   // ---- Derived session state (all real) ----
   const sessionActive = Boolean(omp.resumePath || omp.sessionId);
   const sessionTitle =
@@ -336,6 +330,19 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     (omp.resumePath ? basename(omp.resumePath) : null) ??
     (language === 'zh-CN' ? '新会话' : 'new session');
   const transcript: ChatMessage[] = omp.liveMessage ? [...omp.messages, omp.liveMessage] : omp.messages;
+
+  // Publish the turn's work state so the right panel's task tab can show it.
+  // Derived from the rendered transcript (settled turns + the live one) and
+  // scoped to the turn in flight, so it updates while the agent is still working
+  // and never shows the previous turn's finished list.
+  const transcriptTodos = useMemo(
+    () => todosFromTranscript(transcript.slice(currentTurnStart(transcript))),
+    [transcript]
+  );
+  useEffect(() => {
+    publishWorkState({ todos: transcriptTodos, subagents });
+  }, [transcriptTodos, subagents]);
+
   const contextUsage = omp.state?.contextUsage ?? null;
   const statusColor =
     omp.status === 'ready' ? '#34d399' : omp.status === 'starting' || omp.status === 'connecting' ? '#f59e0b' : '#ef4444';
@@ -1858,7 +1865,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
           <div className="w-full mx-auto space-y-2" style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}>
             {/* Work state for this turn: todos + running subagents (omp-style HUD) */}
             <TaskHud
-              todos={todosFromTranscript(omp.messages)}
+              todos={transcriptTodos}
               subagents={subagents}
               zh={language === 'zh-CN'}
               accentColor={accentColor}

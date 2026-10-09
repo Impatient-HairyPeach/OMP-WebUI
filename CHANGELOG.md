@@ -3,6 +3,22 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.20
+
+- The task list (composer HUD and the right panel's 任务 tab) updates live again.
+  Two causes:
+  - Tool results arrive as their own `toolResult` message, and the live path only
+    appended assistant messages, so a tool block kept its empty output until the
+    session was reloaded — which is why the todo list never appeared while the
+    agent worked. Results are now folded into the calling block
+    (`attachToolResult`, matched by tool-call id), and into the streaming turn.
+  - The list was read from the settled transcript and unscoped, so a new turn kept
+    showing the previous turn's finished list. It is now derived from the rendered
+    transcript (settled turns **plus** the live one) and scoped to the turn in
+    flight (`currentTurnStart`).
+  Verified in the browser on a real todo turn: the HUD went 0/3 → 2/3 → 3/3 while
+  the agent was still streaming, and the tool rows show their outputs immediately.
+
 ## 0.3.19
 
 - Completion alerts (Settings → 界面主题与偏好 → 完成提醒), both off by default:

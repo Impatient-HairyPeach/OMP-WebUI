@@ -293,8 +293,44 @@ export function upsertLiveTool(turn: LiveTurn, tool: OmpToolExecution): LiveTurn
   if (at < 0) return { ...turn, blocks: [...turn.blocks, block] };
   const blocks = [...turn.blocks];
   const previous = blocks[at];
-  blocks[at] = previous.kind === "tool" ? { ...previous, ...block, output: block.output ?? previous.output } : block;
+  blocks[at] =
+    previous.kind === "tool"
+      ? {
+          ...previous,
+          ...block,
+          // A result-only update carries no name; keep the one we already have.
+          tool: block.tool && block.tool !== "tool" ? block.tool : previous.tool,
+          output: block.output ?? previous.output,
+        }
+      : block;
   return { ...turn, blocks };
+}
+
+/**
+ * Attach a tool result to the block that called it. omp delivers the result as
+ * its own message *after* the assistant message, so a transcript built
+ * message-by-message (the live path) has to fold it back in — otherwise tool
+ * outputs stay empty until the session is reloaded.
+ */
+export function attachToolResult(messages: ChatMessage[], result: OmpMessage): ChatMessage[] {
+  const id = result.toolCallId;
+  if (!id) return messages;
+  const output = toolOutputOf(result);
+  const status: 'success' | 'failed' = result.isError ? 'failed' : 'success';
+  let changed = false;
+  const next = messages.map((message) => {
+    if (message.role !== "assistant" || !message.blocks?.length) return message;
+    let touched = false;
+    const blocks = message.blocks.map((block) => {
+      if (block.kind !== "tool" || block.id !== id) return block;
+      touched = true;
+      return { ...block, output: output ?? block.output, status };
+    });
+    if (!touched) return message;
+    changed = true;
+    return { ...message, blocks };
+  });
+  return changed ? next : messages;
 }
 
 /** Fold one live streaming turn into a chat message (used while the agent is still running). */

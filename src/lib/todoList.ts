@@ -56,7 +56,19 @@ export function parseTodoText(text: string): TodoGroup[] {
   return groups;
 }
 
-/** The newest todo list in the transcript, or null when the agent never wrote one. */
+/**
+ * Index of the turn in flight: everything after the last user message. Callers
+ * pass that slice so the HUD shows *this* turn's list instead of the last list
+ * the agent ever wrote (which lingers as "all done" once a new turn starts).
+ */
+export function currentTurnStart(messages: ChatMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === 'user') return index;
+  }
+  return 0;
+}
+
+/** The newest todo list in `messages`, or null when the agent never wrote one. */
 export function todosFromTranscript(messages: ChatMessage[]): TodoGroup[] | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const tools = (messages[index].blocks ?? [])

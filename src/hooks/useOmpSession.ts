@@ -10,6 +10,7 @@ import { repairSession as repairSessionHeader } from "../omp/cli";
 import { alertTurnComplete } from "../lib/alerts";
 import {
   appendLiveText,
+  attachToolResult,
   appendLiveThinking,
   blockText,
   emptyLiveTurn,
@@ -363,6 +364,21 @@ export function useOmpSession(): OmpSessionApi {
         case "message_end": {
           const message = frame.message as OmpMessage | undefined;
           if (!message) break;
+          if (message.role === "toolResult") {
+            // Results arrive as their own message: fold them into the call block
+            // (and into the streaming turn) so outputs show up immediately.
+            setMessages((prev) => attachToolResult(prev, message));
+            mutateLive((turn) =>
+              upsertLiveTool(turn, {
+                toolCallId: String(message.toolCallId ?? ""),
+                toolName: "",
+                result: { content: message.content },
+                isError: Boolean(message.isError),
+                done: true,
+              })
+            );
+            break;
+          }
           // Calibrate chars-per-token from what omp itself reports for this step.
           const stepChars = blockText(message.content, "text").length + blockText(message.content, "thinking").length;
           const stepTokens = message.usage?.output ?? 0;
