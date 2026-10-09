@@ -72,6 +72,12 @@ export class OmpBridge {
     return (await res.json()) as OmpFrame;
   }
 
+  /** The session the bridge is already running (used on page load). */
+  async currentSession(): Promise<OmpSessionPayload> {
+    const res = await fetch("/api/session/current");
+    return (await res.json()) as OmpSessionPayload;
+  }
+
   async openSession(path: string): Promise<OmpSessionPayload> {
     return postJson<OmpSessionPayload>("/api/session/open", { path });
   }

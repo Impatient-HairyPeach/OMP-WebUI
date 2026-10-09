@@ -526,6 +526,8 @@ interface SessionSummary {
   cwd: string;
   updatedAt: string;
   messageCount: number;
+  /** The log has an omp header, i.e. `omp --resume` will accept it. */
+  resumable: boolean;
   /** Freshly written — an agent is very likely appending to it right now. */
   live: boolean;
   /** The session this bridge is currently running. */
@@ -549,39 +551,92 @@ function readHeadGz(file: string, bytes = 65536): string {
   }
 }
 
-/** Parse the first lines of a session log (compressed or not) into a list entry. */
-function summarizeSessionLog(head: string, fallbackId: string, mtimeMs: number): { id: string; title: string; cwd: string; updatedAt: string; messageCount: number } {
-  const lines = head.split("\n").filter(Boolean);
+/**
+ * Summarize one session log for the list: identity and title come from the head
+ * (the `session` line and the first prompt), while **updatedAt is the timestamp
+ * of the last entry in the file** — the moment the conversation actually
+ * stopped, not the moment it started — and the message count is the real number
+ * of message entries in the whole log.
+ */
+function summarizeSessionLog(text: string, fallbackId: string, mtimeMs: number): { id: string; title: string; cwd: string; updatedAt: string; messageCount: number; resumable: boolean } {
   let title = "";
   let cwd = "";
   let id = fallbackId;
   let updatedAt = new Date(mtimeMs).toISOString();
-  let messageCount = 0;
-  for (const line of lines.slice(0, 80)) {
-    let entry: Json;
+  let firstPrompt = "";
+
+  const readEntry = (line: string): Json | null => {
+    if (!line.includes("{")) return null;
     try {
-      entry = JSON.parse(line);
+      return JSON.parse(line) as Json;
     } catch {
-      continue;
+      return null;
     }
+  };
+
+  // Head: identity, the omp title entry, and the first user prompt as fallback.
+  for (const line of text.slice(0, 65536).split("\n")) {
+    const entry = readEntry(line);
+    if (!entry) continue;
     if (entry.type === "title" && typeof entry.title === "string" && entry.title.trim()) title = entry.title.trim();
     if (entry.type === "session") {
       if (entry.id) id = String(entry.id);
       if (entry.cwd) cwd = String(entry.cwd);
-      if (entry.timestamp) updatedAt = String(entry.timestamp);
     }
-    if (entry.type === "message") {
-      messageCount += 1;
-      if (!title && entry.message?.role === "user") {
-        const text = (entry.message.content || [])
-          .map((block: Json) => (block.type === "text" ? block.text : ""))
-          .join(" ")
-          .trim();
-        if (text) title = text.slice(0, 80);
-      }
+    if (entry.type === "message" && entry.message?.role === "user" && !firstPrompt) {
+      const prompt = (entry.message.content || [])
+        .map((block: Json) => (block.type === "text" ? block.text : ""))
+        .join(" ")
+        .trim();
+      if (prompt) firstPrompt = prompt.slice(0, 80);
     }
   }
-  return { id, title: title || id.slice(0, 8), cwd, updatedAt, messageCount };
+
+  // Tail: the last entry wins for "when did this conversation last move", and a
+  // late title entry (`title_change`) beats the head's first guess.
+  for (const line of text.slice(-131072).split("\n")) {
+    const entry = readEntry(line);
+    if (!entry) continue;
+    if (entry.type === "title" && typeof entry.title === "string" && entry.title.trim()) title = entry.title.trim();
+    if (entry.timestamp && typeof entry.timestamp === "string") updatedAt = entry.timestamp;
+  }
+
+  const messageCount = (text.match(/"type"\s*:\s*"message"/g) || []).length;
+  // omp needs a `session` header near the top; a log written without one can
+  // never be resumed, so the list marks it instead of offering a dead entry.
+  const resumable = text
+    .slice(0, 8192)
+    .split("\n")
+    .slice(0, 4)
+    .some((line) => {
+      if (!line.includes("{")) return false;
+      try {
+        return (JSON.parse(line) as Json).type === "session";
+      } catch {
+        return false;
+      }
+    });
+  return { id, title: title || firstPrompt || id.slice(0, 8), cwd, updatedAt, messageCount, resumable };
+}
+
+/** Session summaries are re-read only when the log actually changed. */
+const sessionSummaryCache = new Map<string, { key: string; summary: ReturnType<typeof summarizeSessionLog> }>();
+
+function summarizeSessionFile(full: string, fallbackId: string, mtimeMs: number, size: number) {
+  const key = `${mtimeMs}:${size}`;
+  const cached = sessionSummaryCache.get(full);
+  if (cached && cached.key === key) return cached.summary;
+  const summary = summarizeSessionLog(readText(full), fallbackId, mtimeMs);
+  sessionSummaryCache.set(full, { key, summary });
+  return summary;
+}
+
+function readText(file: string): string {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
 }
 
 /** Sessions live at `<root>/<project>/<file>.jsonl`; deeper files are subagent transcripts. */
@@ -631,15 +686,18 @@ function scanSessions(limit = 400): SessionSummary[] {
   const now = Date.now();
   for (const full of collectSessionFiles()) {
     let mtime: number;
+    let size: number;
     try {
-      mtime = statSync(full).mtimeMs;
+      const info = statSync(full);
+      mtime = info.mtimeMs;
+      size = info.size;
     } catch {
       continue;
     }
     const fallbackId = path.basename(full).replace(/\.jsonl$/, "");
     out.push({
       path: full,
-      ...summarizeSessionLog(readHead(full), fallbackId, mtime),
+      ...summarizeSessionFile(full, fallbackId, mtime, size),
       live: now - mtime < 90000,
       current: Boolean(resumePath) && path.resolve(resumePath as string) === path.resolve(full),
     });
@@ -835,6 +893,28 @@ app.post("/api/session/open", async (req, res) => {
     res.status(400).json({ error: `not an omp session file: ${requested}` });
     return;
   }
+  // omp refuses a log whose header is missing ("session header is missing or
+  // malformed") and then never reports ready, which would leave the request
+  // hanging for a minute and blank the transcript. Check first, answer now, and
+  // leave the running session untouched.
+  const headerOk = readText(resolved)
+    .slice(0, 8192)
+    .split("\n")
+    .slice(0, 4)
+    .some((line) => {
+      if (!line.includes("{")) return false;
+      try {
+        return (JSON.parse(line) as Json).type === "session";
+      } catch {
+        return false;
+      }
+    });
+  if (!headerOk) {
+    res.status(409).json({
+      error: `omp cannot resume ${path.basename(resolved)}: the session header is missing or malformed`,
+    });
+    return;
+  }
   const summary = scanSessions().find((s) => path.resolve(s.path) === resolved);
   const cwd = summary?.cwd && existsSync(summary.cwd) ? summary.cwd : workspace;
   // The restart and the transcript reads must not be interleaved with another session switch,
@@ -842,6 +922,89 @@ app.post("/api/session/open", async (req, res) => {
   try {
     const payload = await enqueue(async () => {
       await restartChild({ cwd, resume: resolved });
+      const [state, messages, entries, branches] = await Promise.all([
+        sendCommand({ type: "get_state" }, 20000),
+        sendCommand({ type: "get_messages" }, 20000),
+        sendCommand({ type: "get_entries" }, 20000),
+        sendCommand({ type: "get_branch_messages" }, 20000),
+      ]);
+      return {
+        ...sessionSnapshot(),
+        state: state.data ?? null,
+        messages: messages.data?.messages ?? [],
+        entries: entries.data?.entries ?? [],
+        branches: branches.data?.messages ?? [],
+      };
+    });
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+/**
+ * Logs written without omp's `session` header (a crashed or partial write) can
+ * never be resumed. The id and timestamp are both in the file name, so the
+ * header can be reconstructed; the original file is kept as `<name>.bak.jsonl`.
+ */
+function sessionHeaderFor(file: string): string | null {
+  const name = path.basename(file);
+  const match = name.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_([0-9a-f-]+)\.jsonl$/i);
+  if (!match) return null;
+  const timestamp = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}.${match[7]}Z`;
+  const id = match[8];
+  const projectDir = path.basename(path.dirname(file));
+  const cwd = projectDir.startsWith("--") && projectDir.endsWith("--")
+    ? projectDir.slice(2, -2).replace(/--/g, path.sep)
+    : workspace;
+  return JSON.stringify({ type: "session", version: 3, id, timestamp, cwd });
+}
+
+app.post("/api/session/repair", (req, res) => {
+  try {
+    const requested = String((req.body ?? {}).path ?? "");
+    const resolved = path.resolve(requested);
+    if (!resolved.endsWith(".jsonl") || !resolved.startsWith(path.resolve(SESSION_ROOT)) || !existsSync(resolved)) {
+      res.status(400).json({ error: `not an omp session file: ${requested}` });
+      return;
+    }
+    const text = readText(resolved);
+    const already = text
+      .slice(0, 8192)
+      .split("\n")
+      .slice(0, 4)
+      .some((line) => {
+        if (!line.includes("{")) return false;
+        try {
+          return (JSON.parse(line) as Json).type === "session";
+        } catch {
+          return false;
+        }
+      });
+    if (already) {
+      res.status(409).json({ error: "this log already has a session header" });
+      return;
+    }
+    const header = sessionHeaderFor(resolved);
+    if (!header) {
+      res.status(409).json({ error: "cannot derive a session id from this file name" });
+      return;
+    }
+    const backup = resolved.replace(/\.jsonl$/, ".bak.jsonl");
+    if (!existsSync(backup)) writeFileSync(backup, text, "utf8");
+    writeFileSync(resolved, `${header}\n${text}`, "utf8");
+    sessionSummaryCache.delete(resolved);
+    res.json({ path: resolved, header: JSON.parse(header) as Json, backup });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+/** Transcript of the session the child is *already* running: no restart, so a
+    page reload can rebuild the chat instead of starting from an empty list. */
+app.get("/api/session/current", async (_req, res) => {
+  try {
+    const payload = await enqueue(async () => {
       const [state, messages, entries, branches] = await Promise.all([
         sendCommand({ type: "get_state" }, 20000),
         sendCommand({ type: "get_messages" }, 20000),

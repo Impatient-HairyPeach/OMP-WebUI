@@ -157,6 +157,8 @@ export interface OmpSessionSummary {
   cwd: string;
   updatedAt: string;
   messageCount: number;
+  /** False when the log has no omp header, so omp would refuse to resume it. */
+  resumable?: boolean;
   /** Written in the last 90s — an agent is most likely appending right now. */
   live?: boolean;
   /** The session this bridge is currently running. */

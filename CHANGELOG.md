@@ -113,6 +113,43 @@ Settings (`v<version> · <build date>`).
   panel (Ctrl+Alt+B) and search (Ctrl+F). Press Backspace/Delete or ✕ to leave a
   binding empty, which disables that shortcut; Ctrl means ⌘ on macOS.
 
+## 0.3.8
+
+- Chat history works again. Two separate defects:
+  - Session rows reported the **session start** time (the header entry) as
+    "… ago"; they now use the log's last entry, and the message count is the real
+    number of messages in the file instead of the first 80 lines. Summaries are
+    cached per file revision.
+  - Some logs were written without omp's `session` header. `omp --resume` refuses
+    those ("the session header is missing or malformed") and never reports ready,
+    so opening them hung for about a minute and then blanked the transcript. The
+    bridge now checks the header first and answers in ~30 ms with a clear 409, the
+    conversation keeps its previous content, and the UI shows a dismissible red
+    banner. Such rows are dimmed with an explanation and a wrench button that
+    rebuilds the header (id + timestamp come from the file name, the original is
+    kept as `<name>.bak.jsonl`). The three real logs in this workspace that were
+    missing a header were repaired, so their replies are readable again.
+- Text selection works in the transcript: the workspace no longer disables it, so
+  you can copy a few characters or a few paragraphs instead of the whole turn.
+- Your own prompts can be quoted (`引用自己这条指令`) like model replies.
+- Assistant turns are labelled with the model **and provider**
+  (`DeepSeek V4.1 Flash (opencode-go)`) — the same label as the top-right chip.
+- Reasoning blocks are readable: the body uses the muted text tier instead of the
+  dim one, and the folded preview uses the dim tier instead of 70% of it.
+- A live generation readout (rate + output tokens) sits above the turn's blocks
+  while it streams.
+- Shortcuts, with a Settings section (界面主题与偏好 → 快捷键) that records new
+  combinations: `Ctrl+B` left panel, `Ctrl+Alt+B` right panel, `Ctrl+F` search.
+  `Ctrl` is ⌘ on macOS, bindings persist, and plain keys still type normally.
+- Left panel: 项目 and 最近 collapse **independently** (they used to fold
+  together), each remembering its state; the session search sits above both.
+- Light theme is a classic one now: white paper, cool grey panels
+  (#f6f8fa/#eef2f6/#e4e9ef), ink text (#1f2328) and a single blue accent
+  (#0969da). Measured contrast on the page: text 15.8:1, muted 6.1:1, dim 5.2:1,
+  accent 5.2:1, white on the accent fill 5.2:1 — every tier stays ≥4.5:1 on the
+  panel and hover surfaces too. "Classic Blue" joined the accent swatches, and
+  the palette section's description (plus its English gloss) is gone.
+
 ## 0.3.7
 
 - Assistant turns now render the way pi-web does. omp's `message.content` order

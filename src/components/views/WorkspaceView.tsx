@@ -3,40 +3,42 @@ import { ChatMessage } from '../../types';
 import type { FileDiffItem } from '../../types';
 import type { OmpLogLine, OmpModelOption, OmpSessionSummary } from '../../omp/protocol';
 import {
-  Plus,
-  Search,
-  MessageSquare,
-  Sparkles,
-  Terminal,
-  FolderKanban,
+  AlertTriangle,
+  Archive,
+  ArchiveRestore,
+  Brain,
   Check,
   ChevronDown,
   ChevronRight,
-  Trash2,
-  Archive,
-  ArchiveRestore,
-  Send,
+  ChevronsDown,
+  Coins,
+  Compass,
+  Copy,
+  EyeOff,
   FileCode,
+  FolderKanban,
   FolderOpen,
+  Gauge,
+  GitBranch,
+  GitCompare,
+  Layers,
+  ListOrdered,
+  Loader2,
+  MessageSquare,
   PanelLeftOpen,
   Paperclip,
-  Compass,
-  ListOrdered,
-  X,
-  Copy,
-  GitBranch,
-  Quote,
-  GitCompare,
   Pencil,
+  Plus,
+  Quote,
   RotateCcw,
+  Search,
+  Send,
+  Sparkles,
   Square,
-  ChevronsDown,
-  EyeOff,
-  Brain,
-  Gauge,
-  Layers,
-  Coins,
-  Loader2,
+  Terminal,
+  Trash2,
+  Wrench,
+  X,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
@@ -980,12 +982,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                       return (
                         <div
                           key={session.path}
+                          title={session.resumable === false ? (language === 'zh-CN' ? '该日志缺少 omp 头部，无法恢复' : 'no omp header — this log cannot be resumed') : undefined}
                           onClick={() => {
                             // Opening a session always shows the transcript, never the diff view.
                             setSessionViewMode('chat');
                             void omp.openSession(session.path);
                           }}
                           className={`group flex items-center justify-between p-2 rounded transition-colors cursor-pointer text-xs ${
+                            session.resumable === false ? 'opacity-55' : ''
+                          } ${
                             isSelected
                               ? 'bg-[#18181b] text-[#fafafa] border border-[#27272a]'
                               : 'text-[#a1a1aa] hover:text-[#fafafa] hover:bg-[#121215] border border-transparent'
@@ -1031,6 +1036,23 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                             <span className="hidden group-hover:inline text-[9px] font-mono text-[#52525b]" title={language === 'zh-CN' ? '消息数' : 'messages'}>
                               {session.messageCount}
                             </span>
+                            {session.resumable === false && session.messageCount > 0 && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void omp.repairSession(session.path);
+                                }}
+                                title={
+                                  language === 'zh-CN'
+                                    ? '缺少 omp 头部：重建头部后即可恢复该会话（原文件保留为 .bak.jsonl）'
+                                    : 'Missing omp header: rebuild it to resume this session (original kept as .bak.jsonl)'
+                                }
+                                className="hidden group-hover:block p-0.5 text-[#f59e0b] hover:text-[#fbbf24] rounded cursor-pointer"
+                              >
+                                <Wrench className="w-3 h-3" />
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1699,6 +1721,26 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
             {/* Extension UI request (confirm / select / input / editor / ask):
                 shown in the conversation flow so choices are picked in place. */}
+            {omp.sessionError && (
+              <div className="w-full mx-auto" style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}>
+                <div className="flex items-start gap-2 p-3 rounded-lg border border-[#ef4444]/40 bg-[#ef4444]/10 text-[11px] text-[#f87171]">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span className="flex-1 whitespace-pre-wrap break-words">
+                    {language === 'zh-CN' ? '无法打开该会话：' : 'Could not open that session: '}
+                    {omp.sessionError}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={omp.clearSessionError}
+                    className="shrink-0 text-[#f87171] hover:text-[#fafafa] cursor-pointer"
+                    title={language === 'zh-CN' ? '关闭' : 'Dismiss'}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
             {omp.dialog && (
               <div className="w-full mx-auto" style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}>
                 <ExtensionRequest

@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, FileDiffItem, SessionTokenUsage } from "../types";
 import { OmpBridge } from "../omp/client";
+import { repairSession as repairSessionHeader } from "../omp/cli";
 import {
   appendLiveText,
   appendLiveThinking,
@@ -55,6 +56,11 @@ export interface OmpSessionApi {
   usage: SessionTokenUsage | null;
   messages: ChatMessage[];
   liveMessage: ChatMessage | null;
+  /** Last session-open failure (kept until the next successful open). */
+  sessionError: string | null;
+  clearSessionError: () => void;
+  /** Rebuild a missing omp header, then open the repaired log. */
+  repairSession: (path: string) => Promise<void>;
   isStreaming: boolean;
   queued: { steering: string[]; followUp: string[] };
   /** Pull one queued message back out of omp (true when it was still queued). */
@@ -129,10 +135,15 @@ export function useOmpSession(): OmpSessionApi {
   const [state, setState] = useState<OmpSessionState | null>(null);
   const [usage, setUsage] = useState<SessionTokenUsage | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  /** openSession, referenced by repairSession which is declared above it. */
+  const openSessionRef = useRef<(path: string) => Promise<void>>(async () => {});
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [turnActive, setTurnActive] = useState(false);
   const liveRef = useRef<LiveTurn | null>(null);
   const liveDirty = useRef(false);
+  /** Set below once `loadCurrentSession` exists; the status handler is wired first. */
+  const loadCurrentSessionRef = useRef<() => Promise<void>>(async () => {});
   /* Live generation rate: a 3s rolling window over streamed characters, divided
      by the chars-per-token ratio measured on the last finished turn (omp's own
      `tokensPerSecond` is a per-turn figure, so it cannot move while streaming). */
@@ -487,7 +498,12 @@ export function useOmpSession(): OmpSessionApi {
       setStatus(next);
       if (detail.workspace) setWorkspace(detail.workspace);
       if (detail.resumePath !== undefined) setResumePath(detail.resumePath);
-      if (next === "ready") void refreshState();
+      if (next === "ready") {
+        void refreshState();
+        // The child is up (fresh start, resume, workspace switch): pull the
+        // transcript it is holding so the chat is never blank on load.
+        void loadCurrentSessionRef.current();
+      }
       if (next === "exited") pushLog("warn", `omp process exited${detail.exit ? ` (${detail.exit})` : ""}`);
     };
     logHandlerRef.current = (level, message) => pushLog(level, message);
@@ -528,6 +544,38 @@ export function useOmpSession(): OmpSessionApi {
     void refreshDiffs();
   }, [refreshDiffs, pushLog]);
 
+  /**
+   * Rebuild the transcript for the session the bridge is already running. Without
+   * this a page reload left the chat empty — the child kept the history, the UI
+   * never asked for it, so only messages sent after the reload were visible.
+   */
+  const loadCurrentSession = useCallback(async () => {
+    const bridge = bridgeRef.current;
+    if (!bridge || liveRef.current) return;
+    try {
+      adoptSession(await bridge.currentSession());
+    } catch (error) {
+      pushLog("warn", `could not read the running session: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [adoptSession, pushLog]);
+
+  /** Repair a headerless log, then open it — the only way back into such a session. */
+  const repairSession = useCallback(
+    async (path: string) => {
+      pushLog("info", `repairing session header: ${path.split(/[\\/]/).pop()}`);
+      try {
+        await repairSessionHeader(path);
+        await refreshSessions();
+        await openSessionRef.current(path);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        pushLog("error", `could not repair session: ${detail}`);
+        setSessionError(detail);
+      }
+    },
+    [pushLog, refreshSessions]
+  );
+
   const openSession = useCallback(
     async (path: string) => {
       const bridge = bridgeRef.current;
@@ -535,10 +583,13 @@ export function useOmpSession(): OmpSessionApi {
       pushLog("info", `resuming session ${path.split(/[\\/]/).pop()}`);
       try {
         const payload = await bridge.openSession(path);
+        setSessionError(null);
         adoptSession(payload);
       } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
         console.error("omp: session open failed", error);
-        pushLog("error", `could not open session: ${error instanceof Error ? error.message : String(error)}`);
+        pushLog("error", `could not open session ${path.split(/[\\/]/).pop()}: ${detail}`);
+        setSessionError(detail);
       }
     },
     [adoptSession, pushLog]
@@ -556,6 +607,8 @@ export function useOmpSession(): OmpSessionApi {
     },
     [adoptSession, pushLog, workspace]
   );
+
+  openSessionRef.current = openSession;
 
   const send = useCallback(
     async (text: string, behavior?: "steer" | "followUp") => {
@@ -599,6 +652,8 @@ export function useOmpSession(): OmpSessionApi {
     },
     []
   );
+
+  loadCurrentSessionRef.current = loadCurrentSession;
 
   const abort = useCallback(async () => {
     const bridge = bridgeRef.current;
@@ -795,6 +850,9 @@ export function useOmpSession(): OmpSessionApi {
     usage,
     messages,
     liveMessage,
+    sessionError,
+    clearSessionError: () => setSessionError(null),
+    repairSession,
     isStreaming: Boolean(turnActive || state?.isStreaming || live),
     queued,
     removeQueuedMessage,

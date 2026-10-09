@@ -242,6 +242,10 @@ export interface GitDiffFile {
 
 export const fetchGitSnapshot = () => getJson<GitSnapshot>("/api/git/branches");
 
+/** Rebuild the omp header of a log that was written without one. */
+export const repairSession = (path: string) =>
+  postJson<{ path: string; header: { id?: string }; backup: string }>("/api/session/repair", { path });
+
 export interface WorkspaceEntry {
   name: string;
   isDir: boolean;
