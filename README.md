@@ -74,6 +74,7 @@ Production build: `bun run build && bun run start`.
 - Assistant turns are labelled `Model (provider)`; thinking blocks are low-emphasis folds that stream a live `≈ tok/s` rate above the turn.
 - Voice: browser dictation into the composer (mic) and read-aloud through `omp say`, with the browser voice as fallback.
 - Keyboard shortcuts (rebindable in Settings → 界面主题与偏好 → 快捷键, empty = off): toggle the left panel (Ctrl+B), the right panel (Ctrl+Alt+B) and session search (Ctrl+F).
+- Work state: the task list (from the agent's own `todo` output) and running subagents show above the composer as one expandable summary row, and again in the right panel's 任务 tab (`详情` jumps there). The omp steering/follow-up queue expands into its messages, and any of them can be withdrawn from omp's queue straight back into the composer for editing.
 - Sessions: two columns — **项目** (grouped by project directory; each folder collapses, the active folder opens automatically, hover a folder to drop it from the list) and **最近** (the newest turns across every project). Both are searchable, and archive/restore + delete live on each row, alongside model + thinking-level switching from omp's own catalogs.
 
 ## Theme

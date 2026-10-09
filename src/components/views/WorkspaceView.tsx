@@ -160,6 +160,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   /** Left panel sections: both collapse independently and remember it. */
   const [projectsOpen, setProjectsOpen] = useState(() => loadSectionOpen('projects'));
   const [recentOpen, setRecentOpen] = useState(() => loadSectionOpen('recent'));
+  /** omp steering / follow-up queue: counts always, contents on expand. */
+  const [queueOpen, setQueueOpen] = useState(false);
   /** Hovered tick in the message rail → a floating preview of that turn. */
   const [railPreview, setRailPreview] = useState<{ id: string; top: number; right: number } | null>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -468,6 +470,19 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     if (!msg.entryId) return;
     onDispatchLog('OK', `session.fork: snapshotting the session at entry ${msg.entryId}`);
     void omp.forkAt(msg.entryId);
+  };
+
+  /** Pull a queued message back out of omp and continue editing it in the composer. */
+  const handleEditQueued = async (text: string, queue: 'steering' | 'followUp') => {
+    const removed = await omp.removeQueuedMessage(text, queue);
+    if (!removed) {
+      onDispatchLog('INFO', `queue: ${queue} message already delivered, nothing to withdraw`);
+      return;
+    }
+    setInputPrompt(text);
+    setQueueOpen(true);
+    textareaRef.current?.focus();
+    onDispatchLog('INFO', `queue: withdrew a ${queue} message back into the composer`);
   };
 
   const handleQuoteMessage = (content: string) => {
@@ -1793,6 +1808,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
               subagents={subagents}
               zh={language === 'zh-CN'}
               accentColor={accentColor}
+              onOpenDetails={() =>
+                window.dispatchEvent(new CustomEvent('omp:open-side-panel', { detail: { tab: 'tasks' } }))
+              }
             />
             {/* Editing an earlier turn banner */}
             {editingEntryId && (
@@ -1815,20 +1833,63 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
               </div>
             )}
 
-            {/* omp's own steering / follow-up queue */}
+            {/* omp's own steering / follow-up queue: counts on the bar, contents on demand */}
             {(omp.queued.steering.length > 0 || omp.queued.followUp.length > 0) && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#18181b] border border-[#27272a] text-xs font-mono text-[#a1a1aa]">
-                <ListOrdered className="w-3.5 h-3.5 text-[#38bdf8] shrink-0" />
-                <span className="truncate">
-                  {language === 'zh-CN' ? 'omp 队列' : 'omp queue'}:{' '}
-                  {omp.queued.steering.length > 0 && (
-                    <strong className="text-[#f59e0b]">{omp.queued.steering.length} steer</strong>
-                  )}
-                  {omp.queued.steering.length > 0 && omp.queued.followUp.length > 0 && <span> · </span>}
-                  {omp.queued.followUp.length > 0 && (
-                    <strong className="text-[#38bdf8]">{omp.queued.followUp.length} follow-up</strong>
-                  )}
-                </span>
+              <div className="rounded bg-[#18181b] border border-[#27272a] text-xs font-mono text-[#a1a1aa]">
+                <button
+                  type="button"
+                  onClick={() => setQueueOpen((prev) => !prev)}
+                  aria-expanded={queueOpen}
+                  title={queueOpen ? (language === 'zh-CN' ? '折叠队列' : 'Collapse queue') : language === 'zh-CN' ? '展开队列内容' : 'Expand queue contents'}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer"
+                >
+                  {queueOpen ? <ChevronDown className="w-3.5 h-3.5 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
+                  <ListOrdered className="w-3.5 h-3.5 text-[#38bdf8] shrink-0" />
+                  <span className="truncate flex-1">
+                    {language === 'zh-CN' ? 'omp 队列' : 'omp queue'}:{' '}
+                    {omp.queued.steering.length > 0 && (
+                      <strong className="text-[#f59e0b]">{omp.queued.steering.length} steer</strong>
+                    )}
+                    {omp.queued.steering.length > 0 && omp.queued.followUp.length > 0 && <span> · </span>}
+                    {omp.queued.followUp.length > 0 && (
+                      <strong className="text-[#38bdf8]">{omp.queued.followUp.length} follow-up</strong>
+                    )}
+                  </span>
+                </button>
+                {queueOpen && (
+                  <div className="px-3 pb-2 space-y-1 border-t border-[#1e1e24] pt-1.5 max-h-[200px] overflow-y-auto">
+                    {(
+                      [
+                        ...omp.queued.steering.map((text) => ({ text, queue: 'steering' as const })),
+                        ...omp.queued.followUp.map((text) => ({ text, queue: 'followUp' as const })),
+                      ]
+                    ).map((item, index) => (
+                      <div key={`${item.queue}-${index}`} className="flex items-start gap-2">
+                        <span
+                          className={`text-[9px] px-1 py-px rounded shrink-0 uppercase ${
+                            item.queue === 'steering' ? 'bg-[#f59e0b]/15 text-[#f59e0b]' : 'bg-[#38bdf8]/15 text-[#38bdf8]'
+                          }`}
+                        >
+                          {item.queue === 'steering' ? 'steer' : 'next'}
+                        </span>
+                        <span className="text-[11px] text-[#d4d4d8] whitespace-pre-wrap break-words flex-1">{item.text}</span>
+                        {/* Withdraw from omp's queue and drop it back into the composer */}
+                        <button
+                          type="button"
+                          onClick={() => void handleEditQueued(item.text, item.queue)}
+                          title={
+                            language === 'zh-CN'
+                              ? '撤回这条排队消息，放回输入框重新编辑'
+                              : 'Withdraw this queued message into the composer for editing'
+                          }
+                          className="p-1 rounded border border-[#27272a] text-[#71717a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer shrink-0"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

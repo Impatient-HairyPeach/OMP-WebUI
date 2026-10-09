@@ -3,6 +3,21 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.10
+
+- Tasks and subagents are visible in both places now, and both fold:
+  above the composer the HUD is one summary row (`任务列表 x/y` + progress +
+  `子代理 n`) that expands into the grouped task list and the running subagent
+  rows; its "详情" button opens the right panel on the 任务 tab, which renders
+  the same work state (previously that tab was empty even though the workspace
+  already published the data to it).
+- The omp steering / follow-up queue above the composer expands into the actual
+  queued messages, tagged `steer` / `next`.
+- Every queued message has a withdraw button: it calls omp's own
+  `remove_queued_message` and drops the text back into the composer for editing
+  (focused, ready to resend). If the message was already delivered, omp reports
+  `removed: false` and the UI says so instead of duplicating it.
+
 ## 0.3.9
 
 - The top-right generation-rate chip is gone (and the "throughput" row in the

@@ -57,6 +57,8 @@ export interface OmpSessionApi {
   liveMessage: ChatMessage | null;
   isStreaming: boolean;
   queued: { steering: string[]; followUp: string[] };
+  /** Pull one queued message back out of omp (true when it was still queued). */
+  removeQueuedMessage: (message: string, queue: "steering" | "followUp") => Promise<boolean>;
   slashCommands: OmpSlashCommand[];
   logs: OmpLogLine[];
   statusChips: Array<{ key: string; text: string }>;
@@ -570,6 +572,29 @@ export function useOmpSession(): OmpSessionApi {
     [pushLog]
   );
 
+  /**
+   * Withdraw a queued message from omp (rpc `remove_queued_message`), so the UI
+   * can put it back into the composer for editing. omp matches on the exact
+   * message text it queued; `removed: false` means it was already delivered.
+   */
+  const removeQueuedMessage = useCallback(
+    async (message: string, queue: "steering" | "followUp"): Promise<boolean> => {
+      const bridge = bridgeRef.current;
+      if (!bridge) return false;
+      const response = await bridge.command({ type: "remove_queued_message", message, queue });
+      const removed = Boolean((response.data as { removed?: boolean } | undefined)?.removed);
+      if (removed) {
+        // omp also pushes a queue_update frame; refresh from state for certainty.
+        const state = await bridge.command({ type: "get_state" }).catch(() => null);
+        const queued = (state?.data as { queuedMessages?: { steering: string[]; followUp: string[] } } | undefined)
+          ?.queuedMessages;
+        if (queued) setQueued(queued);
+      }
+      return removed;
+    },
+    []
+  );
+
   const abort = useCallback(async () => {
     const bridge = bridgeRef.current;
     if (!bridge) return;
@@ -767,6 +792,7 @@ export function useOmpSession(): OmpSessionApi {
     liveMessage,
     isStreaming: Boolean(turnActive || state?.isStreaming || live),
     queued,
+    removeQueuedMessage,
     slashCommands,
     logs,
     statusChips,

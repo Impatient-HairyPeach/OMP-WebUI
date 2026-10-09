@@ -74,6 +74,18 @@ export default function App() {
   });
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
+  /* Anything in the workspace can ask for a right-panel tab (e.g. the task HUD's
+     "details" button → 任务). */
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: SidePanelTab }>).detail?.tab;
+      if (tab) setSidePanelTab(tab);
+      setSidePanelOpen(true);
+    };
+    window.addEventListener('omp:open-side-panel', onOpen);
+    return () => window.removeEventListener('omp:open-side-panel', onOpen);
+  }, []);
+
   /* Keyboard shortcuts (set in Settings → 界面主题与偏好): the right panel is ours,
      the left panel / search belong to the workspace view, which listens for the
      same event. Editable fields keep their keys unless the binding has a modifier. */

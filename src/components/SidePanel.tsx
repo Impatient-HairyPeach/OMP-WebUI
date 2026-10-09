@@ -23,6 +23,7 @@ import {
   GitBranch,
   GitCommit,
   ListChecks,
+  Users,
   Loader2,
   Puzzle,
   RefreshCw,
@@ -30,6 +31,7 @@ import {
   X,
 } from 'lucide-react';
 import { ScopeSwitch } from './ScopeSwitch';
+import { StatusIcon } from './TaskHud';
 import { useWorkState } from '../lib/workState';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
@@ -234,6 +236,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
   // --- tasks tab: the current turn's todo list and subagents (published by the workspace) ---
   const work = useWorkState();
+  /** Right panel task/subagent sections fold on their own. */
+  const [tasksOpen, setTasksOpen] = useState(true);
+  const [subagentsOpen, setSubagentsOpen] = useState(true);
 
   // --- extensions tab: this project's skills + extensions ---
   const [projectSkills, setProjectSkills] = useState<OmpSkillEntry[]>([]);
@@ -592,6 +597,126 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           </div>
         )}
 
+
+        {/* ============================== TASKS ============================== */}
+        {activeTab === 'tasks' && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-3 font-mono text-xs">
+            {(() => {
+              const tasks = (work.todos ?? []).flatMap((group) => group.tasks);
+              if (tasks.length === 0 && work.subagents.length === 0) {
+                return (
+                  <div className="p-2.5 rounded border text-[10px] text-[#71717a]" style={{ borderColor: theme.border }}>
+                    {zh
+                      ? '当前没有任务或子代理。omp 写出 todo 列表 / 启动子代理后会出现在这里。'
+                      : 'No tasks or subagents right now. They appear here once omp writes a todo list or spawns a subagent.'}
+                  </div>
+                );
+              }
+              const done = tasks.filter((task) => task.status === 'done').length;
+              const running = tasks.filter((task) => task.status === 'in_progress').length;
+              return (
+                <>
+                  {tasks.length > 0 && (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setTasksOpen((prev) => !prev)}
+                        aria-expanded={tasksOpen}
+                        className="w-full flex items-center gap-2 p-2.5 rounded border cursor-pointer text-left"
+                        style={{ borderColor: theme.border }}
+                      >
+                        {tasksOpen ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+                        <ListChecks className="w-3.5 h-3.5 shrink-0" style={{ color: accentColor }} />
+                        <span className="text-[10px] uppercase text-[#71717a] truncate flex-1">
+                          {zh ? '任务列表' : 'Task list'}
+                        </span>
+                        <span className="text-[10px] text-[#52525b] shrink-0">
+                          {done}/{tasks.length}
+                          {running > 0 ? ` · ${running} …` : ''}
+                        </span>
+                      </button>
+
+                      {tasksOpen && (
+                        <div className="space-y-2 pl-1">
+                          {(work.todos ?? []).map((group, groupIndex) => {
+                            const groupDone = group.tasks.filter((task) => task.status === 'done').length;
+                            return (
+                              <div key={`${group.phase ?? 'phase'}-${groupIndex}`} className="space-y-1">
+                                <div className="flex items-center justify-between gap-2 text-[10px] text-[#71717a] uppercase">
+                                  <span className="truncate">{group.phase || (zh ? '任务' : 'tasks')}</span>
+                                  <span className="text-[#52525b] shrink-0">
+                                    {groupDone}/{group.tasks.length}
+                                  </span>
+                                </div>
+                                {group.tasks.map((task, taskIndex) => (
+                                  <div key={`${task.text}-${taskIndex}`} className="flex items-start gap-1.5 pl-1">
+                                    <StatusIcon status={task.status} accentColor={accentColor} />
+                                    <span
+                                      className={`text-[11px] leading-snug break-words ${
+                                        task.status === 'done' ? 'text-[#71717a] line-through' : 'text-[#d4d4d8]'
+                                      }`}
+                                    >
+                                      {task.text}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {work.subagents.length > 0 && (
+                    <div className="space-y-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setSubagentsOpen((prev) => !prev)}
+                        aria-expanded={subagentsOpen}
+                        className="w-full flex items-center gap-2 p-2.5 rounded border cursor-pointer text-left"
+                        style={{ borderColor: theme.border }}
+                      >
+                        {subagentsOpen ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+                        <Users className="w-3.5 h-3.5 shrink-0" style={{ color: accentColor }} />
+                        <span className="text-[10px] uppercase text-[#71717a] truncate flex-1">
+                          {zh ? '子代理' : 'Subagents'}
+                        </span>
+                        <span className="text-[10px] text-[#52525b] shrink-0">{work.subagents.length}</span>
+                      </button>
+                      {subagentsOpen &&
+                        work.subagents.map((agent, index) => {
+                          const label = String(agent.name ?? agent.agent ?? agent.id ?? `#${index + 1}`);
+                          const tokens = typeof agent.tokens === 'number' ? agent.tokens : null;
+                          const duration = typeof agent.durationMs === 'number' ? `${Math.round(agent.durationMs / 1000)}s` : null;
+                          return (
+                            <div key={`${label}-${index}`} className="p-2 rounded border space-y-0.5" style={{ borderColor: theme.border }}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] truncate" style={{ color: accentColor }} title={label}>
+                                  {label}
+                                </span>
+                                <span className="text-[10px] text-[#52525b] shrink-0">{String(agent.status ?? 'running')}</span>
+                              </div>
+                              {Boolean(agent.task ?? agent.model) && (
+                                <div className="text-[10px] text-[#a1a1aa] break-words">{String(agent.task ?? agent.model)}</div>
+                              )}
+                              {(tokens !== null || duration) && (
+                                <div className="text-[10px] text-[#71717a]">
+                                  {tokens !== null ? `${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tok` : ''}
+                                  {tokens !== null && duration ? ' · ' : ''}
+                                  {duration ?? ''}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
 
         {/* ============================== GIT ============================== */}
         {activeTab === 'git' && (
