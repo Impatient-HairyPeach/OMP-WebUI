@@ -3,6 +3,38 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.7
+
+- Assistant turns now render the way pi-web does. omp's `message.content` order
+  is preserved as a list of blocks — thinking / text / tool — and each kind has
+  its own component: thinking blocks are low-emphasis and fold (consecutive
+  thinking is one fold, thinking separated by text or a tool call stays split;
+  a redacted block says so instead of leaking its signature), text blocks go
+  through a real markdown renderer (GFM tables, ordered and unordered lists,
+  code fences, links, quotes) and tool blocks show the command, the arguments on
+  demand and the output. The brain button in the composer is the global default;
+  every block still overrides it, and folding only affects the DOM.
+- Because omp emits one message per step, a turn is folded into one bubble whose
+  blocks stay in the order the model produced them (verified on a real 123-tool
+  turn: one bubble, one thinking fold) while keeping the turn's first
+  session-log entry as the branch/fork anchor. Reasoning is no longer merged to
+  the top of the turn.
+- Replies are markdown on screen, and the copy button still yields the untouched
+  markdown source.
+- Left panel: **项目 / Projects** and **最近 / Recent** columns. The "removed
+  projects" section is gone — dropping a project from the list is still possible
+  (hover a folder) and its sessions stay reachable in Recent, which also unhides
+  the project when opened.
+- The message rail's ticks show a preview card on hover (role, time, step/tool
+  counts and the turn's text) instead of only a tooltip.
+- The bottom terminal / event console is resizable while expanded (drag its top
+  edge, arrow keys nudge, double-click resets); the height is remembered.
+- Composer: no focus box while typing (the accent border and the focus outline
+  are gone; buttons keep the cyan omp focus ring) and its text is the same size
+  as the conversation (13.5px).
+- The provider card's balance slot shows real quota windows from
+  `omp usage --json` (see 0.3.5) — unchanged, listed here for continuity.
+
 ## 0.3.6
 
 - Theme: the dark palette is now omp's own midnight look — pure black surfaces

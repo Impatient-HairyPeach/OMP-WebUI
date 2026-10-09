@@ -253,8 +253,7 @@
 .border-\[\#a78bfa\]\/40,
 .border-\[\#a78bfa\]\/50,
 .border-\[\#a78bfa\]\/60,
-.hover\:border-\[\#a78bfa\]:hover,
-.focus-within\:border-\[\#a78bfa\]:focus-within {
+.hover\:border-\[\#a78bfa\]:hover {
   border-color: var(--accent) !important;
 }
 .bg-\[\#a78bfa\]\/15,
@@ -269,9 +268,18 @@
 .focus\:ring-\[\#a78bfa\]:focus {
   --tw-ring-color: var(--accent-2) !important;
 }
-:focus-visible {
+/* Buttons and links only: the composer and other text fields own their focus
+   styling, so no outline box appears around what you are typing in. */
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-2) 70%, transparent);
   outline-offset: 1px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
 }
 ::selection {
   background: color-mix(in srgb, var(--accent) 32%, transparent);

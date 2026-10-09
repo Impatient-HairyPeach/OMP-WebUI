@@ -14,6 +14,9 @@ export interface OmpContentBlock {
   type: string;
   text?: string;
   thinking?: string;
+  /** Provider returned reasoning it will not expose in text (signature only). */
+  redacted?: boolean;
+  thinkingSignature?: string;
   id?: string;
   name?: string;
   arguments?: Record<string, unknown>;

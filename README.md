@@ -63,17 +63,22 @@ Production build: `bun run build && bun run start`.
 ## Chat features
 
 - Streaming transcript from omp: text, thinking, tool calls with real results, abort, steer, follow-up queue.
-- Assistant activity uses three-level progressive disclosure (same shape as `kahme247/ompweb` and `agegr/pi-web`): a collapsed **Process details** fold per turn → collapsed per-activity rows with one-line previews → expansion showing the `$ command`, the raw input on demand, the thinking text and tool output capped at 260px.
+- An assistant turn is an ordered list of content blocks, exactly as omp emits them (`thinking` → `text` → `toolCall` → …), rendered the way pi-web does it: thinking blocks are low-emphasis and fold (a run of consecutive thinking is one fold, thinking split by text/tool calls stays split), text blocks go through the markdown renderer (tables, ordered/unordered lists, code fences, links), tool blocks show the `$ command`, the arguments on demand and the output. The brain button in the composer sets the default (`折叠`/`展开`, remembered); each block can still override it, and folding never touches the session log.
+- omp emits one message per step, so a turn is folded into a single bubble with its blocks in the original order; the fold keeps the turn's first session-log entry as the branch/fork anchor.
+- Replies are markdown on screen and **markdown source** in the clipboard (`复制 Markdown 源码`) — tables stay copyable as pipes.
+- Right rail: one tick per turn — hover shows a preview of that turn, click to jump, highlights the visible turn, jump-to-latest button.
+- The bottom terminal / event console is docked, expandable and **resizable** (drag its top edge, double-click to reset); the composer keeps its own drag handle.
 - `/` completion is grouped by omp's own command source (系统内置 / 技能 / 扩展 / 提示词) in a 460px two-column panel; `@` completion lists workspace files.
 - Token, context, generation-rate and cache figures are icon chips at the top-right of the conversation (hover for the numbers); the context chip opens `/compact` and the auto-compaction toggle.
 - Message actions: copy, edit-from-here (session-log branch), retry, fork the session at a turn, quote, read aloud.
-- Right rail: one tick per turn — click to jump, highlights the visible turn, jump-to-latest button.
 - Voice: browser dictation into the composer (mic) and read-aloud through `omp say`, with the browser voice as fallback.
-- Sessions: grouped by project directory (each folder collapses, the active folder opens automatically), searchable, archive/restore, delete, plus model + thinking-level switching from omp's own catalogs.
+- Sessions: two columns — **项目** (grouped by project directory; each folder collapses, the active folder opens automatically, hover a folder to drop it from the list) and **最近** (the newest turns across every project). Both are searchable, and archive/restore + delete live on each row, alongside model + thinking-level switching from omp's own catalogs.
 
 ## Theme
 
-Two palettes ported from pi-web plus `auto` and `custom`: **跟随系统 / 深色 /
+Two palettes plus `auto` and `custom`: the dark palette is omp's own midnight
+look (pure-black surfaces, magenta accent, cyan focus rings and selection),
+the light one is pi-web's; **跟随系统 / 深色 /
 浅色 / 自定义** (`data-theme` on `<html>`, applied before first paint). Custom
 keeps the chosen base palette and uses the accent you pick. Fonts are system
 stacks only — no webfont is downloaded, Latin and CJK both come from the OS.

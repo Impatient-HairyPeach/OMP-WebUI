@@ -6,7 +6,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, FileDiffItem, SessionTokenUsage } from "../types";
 import { OmpBridge } from "../omp/client";
-import { emptyLiveTurn, liveTurnToChatMessage, transcriptToChatMessages, type LiveTurn } from "../omp/transcript";
+import {
+  appendLiveText,
+  appendLiveThinking,
+  emptyLiveTurn,
+  liveTurnToChatMessage,
+  mergeAssistantTurn,
+  transcriptToChatMessages,
+  upsertLiveTool,
+  type LiveTurn,
+} from "../omp/transcript";
 import type {
   OmpArchivedSession,
   OmpBridgeStatus,
@@ -102,14 +111,6 @@ function clockNow(): string {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function upsertLiveTool(tools: OmpToolExecution[], next: OmpToolExecution): OmpToolExecution[] {
-  const index = tools.findIndex((tool) => tool.toolCallId === next.toolCallId);
-  if (index < 0) return [...tools, next];
-  const copy = [...tools];
-  copy[index] = { ...copy[index], ...next };
-  return copy;
-}
-
 /** Streaming deltas arrive per token; repaint the transcript at most this often. */
 const LIVE_FLUSH_MS = 60;
 
@@ -131,7 +132,7 @@ export function useOmpSession(): OmpSessionApi {
   const publishLive = useCallback(() => {
     liveDirty.current = false;
     const turn = liveRef.current;
-    setLive(turn ? { ...turn, tools: [...turn.tools] } : null);
+    setLive(turn ? { ...turn, blocks: [...turn.blocks] } : null);
   }, []);
 
   /** Mutate the in-flight turn; coalesce rapid deltas into one repaint per {@link LIVE_FLUSH_MS}. */
@@ -272,22 +273,18 @@ export function useOmpSession(): OmpSessionApi {
           if (!event) break;
           const kind = String(event.type ?? "");
           mutateLive((turn) => {
-            if (kind === "text_delta") return { ...turn, text: turn.text + String(event.delta ?? "") };
-            if (kind === "thinking_delta") return { ...turn, thinking: turn.thinking + String(event.delta ?? "") };
+            if (kind === "text_delta") return appendLiveText(turn, String(event.delta ?? ""));
+            if (kind === "thinking_delta") return appendLiveThinking(turn, String(event.delta ?? ""));
             if (kind === "toolcall_end") {
               const call = event.toolCall as Record<string, unknown> | undefined;
               if (!call) return turn;
-              const id = String(call.id ?? "");
-              return {
-                ...turn,
-                tools: upsertLiveTool(turn.tools, {
-                  toolCallId: id,
-                  toolName: String(call.name ?? "tool"),
-                  args: (call.arguments as Record<string, unknown>) ?? {},
-                  intent: typeof call.intent === "string" ? call.intent : undefined,
-                  done: false,
-                }),
-              };
+              return upsertLiveTool(turn, {
+                toolCallId: String(call.id ?? ""),
+                toolName: String(call.name ?? "tool"),
+                args: (call.arguments as Record<string, unknown>) ?? {},
+                intent: typeof call.intent === "string" ? call.intent : undefined,
+                done: false,
+              });
             }
             return turn;
           });
@@ -300,35 +297,41 @@ export function useOmpSession(): OmpSessionApi {
           setMessages((prev) => {
             const known = new Set(prev.map((entry) => entry.id));
             const fresh = appended.filter((entry) => !known.has(entry.id));
-            return fresh.length > 0 ? [...prev, ...fresh] : prev;
+            if (fresh.length === 0) return prev;
+            // omp finishes one message per assistant step; they belong to the same
+            // turn (a user message would have been appended in between), so fold
+            // them into its single bubble instead of adding one bubble per step.
+            const last = prev[prev.length - 1];
+            if (last?.role === "assistant" && fresh[0].role === "assistant") {
+              return [...prev.slice(0, -1), mergeAssistantTurn(last, fresh[0]), ...fresh.slice(1)];
+            }
+            return [...prev, ...fresh];
           });
           if (message.role !== "user") clearLive();
           break;
         }
         case "tool_execution_start": {
-          mutateLive((turn) => ({
-            ...turn,
-            tools: upsertLiveTool(turn.tools, {
+          mutateLive((turn) =>
+            upsertLiveTool(turn, {
               toolCallId: String(frame.toolCallId ?? ""),
               toolName: String(frame.toolName ?? "tool"),
               args: (frame.args as Record<string, unknown>) ?? {},
               intent: typeof frame.intent === "string" ? frame.intent : undefined,
               done: false,
-            }),
-          }));
+            })
+          );
           break;
         }
         case "tool_execution_end": {
-          mutateLive((turn) => ({
-            ...turn,
-            tools: upsertLiveTool(turn.tools, {
+          mutateLive((turn) =>
+            upsertLiveTool(turn, {
               toolCallId: String(frame.toolCallId ?? ""),
               toolName: String(frame.toolName ?? "tool"),
               result: frame.result as OmpToolExecution["result"],
               isError: Boolean(frame.isError),
               done: true,
-            }),
-          }));
+            })
+          );
           break;
         }
         case "turn_end": {

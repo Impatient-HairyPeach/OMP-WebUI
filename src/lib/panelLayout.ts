@@ -43,6 +43,27 @@ export const COMPOSER_BOX: PanelSizeConfig & { storageKey: string } = {
   defaultSize: 88,
 };
 
+/** Bottom terminal / event-stream panel height while expanded. */
+export const TERMINAL_BOX: PanelSizeConfig & { storageKey: string } = {
+  storageKey: 'omp-studio:terminal-height',
+  min: 96,
+  max: 760,
+  defaultSize: 240,
+};
+
+/** Show reasoning blocks by default (a single fold per thinking run). */
+export const THINKING_VISIBLE_KEY = 'omp-studio:show-thinking';
+
+export function loadThinkingVisible(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(THINKING_VISIBLE_KEY) === 'true';
+}
+
+export function saveThinkingVisible(visible: boolean): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(THINKING_VISIBLE_KEY, String(visible));
+}
+
 /** Project folders expanded in the session list (JSON array of directory paths). */
 export const EXPANDED_PROJECTS_KEY = 'omp-studio:expanded-projects';
 

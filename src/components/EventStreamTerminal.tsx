@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
+import { useResizablePanel } from '../hooks/useResizablePanel';
+import { TERMINAL_BOX } from '../lib/panelLayout';
 
 export type TerminalType = 'mcp' | 'bash' | 'pwsh' | 'debugger';
 
@@ -44,11 +46,19 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
 }) => {
   const { theme, accentColor, editorFont } = useTheme();
   const { t, language } = useI18n();
+  const zh = language === 'zh-CN';
 
   // Terminal state
   const [terminalType, setTerminalType] = useState<TerminalType>('mcp');
   const [isExpanded, setIsExpanded] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
+  /** Expanded height, dragged by the handle on the panel's top edge. */
+  const terminalBox = useResizablePanel({
+    ...TERMINAL_BOX,
+    axis: 'y',
+    edge: 'start',
+    disabled: !isExpanded || isMaximized,
+  });
   const [isStreaming, setIsStreaming] = useState(true);
   const [copied, setCopied] = useState(false);
   /** Result of the last real bridge round-trip (Zap button). */
@@ -248,21 +258,41 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
     onAddLog('CALL', `powershell: executed cmdlet: "${cmd}"`);
   };
 
+  const resizable = isExpanded && !isMaximized;
+
   return (
     <div
-      className={`border-t bg-[#09090b] transition-all duration-200 select-none ${
-        isMaximized
-          ? 'fixed inset-x-0 bottom-0 top-12 z-40 flex flex-col'
-          : 'sticky bottom-0 z-20'
+      ref={(element) => {
+        terminalBox.elementRef.current = element;
+      }}
+      className={`border-t bg-[#09090b] select-none flex flex-col shrink-0 ${
+        isMaximized ? 'fixed inset-x-0 bottom-0 top-12 z-40' : 'sticky bottom-0 z-20'
       }`}
       style={{
         backgroundColor: theme.cardBg,
         borderColor: theme.border,
+        height: resizable ? terminalBox.size : undefined,
+        transition: terminalBox.dragging ? 'none' : 'height 150ms ease-out',
       }}
     >
+      {/* Drag the top edge to set the expanded height (double-click resets) */}
+      {resizable && (
+        <div
+          {...terminalBox.handleProps}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={zh ? '调整终端高度' : 'Resize terminal height'}
+          tabIndex={0}
+          title={zh ? '拖动调整高度（双击复位）' : 'Drag to resize (double-click resets)'}
+          className={`h-1.5 w-full shrink-0 cursor-row-resize outline-none transition-colors ${
+            terminalBox.dragging ? 'bg-[#a78bfa]/60' : 'bg-transparent hover:bg-[#a78bfa]/40'
+          }`}
+        />
+      )}
+
       {/* Terminal Title Bar & Type Tabs */}
       <div
-        className="h-8 px-3 border-b flex items-center justify-between text-xs"
+        className="h-8 px-3 border-b flex items-center justify-between text-xs shrink-0"
         style={{
           backgroundColor: theme.mode === 'light' ? '#f1f5f9' : '#0c0c0e',
           borderColor: theme.border,
@@ -473,9 +503,7 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
       {/* Terminal Viewport */}
       {isExpanded && (
         <div
-          className={`overflow-y-auto p-3 font-mono text-[11px] leading-relaxed transition-all ${
-            isMaximized ? 'flex-1 h-full' : 'h-44'
-          }`}
+          className="flex-1 min-h-0 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed"
           style={{
             backgroundColor: theme.mode === 'light' ? '#f8fafc' : '#070709',
             fontFamily: editorFont,

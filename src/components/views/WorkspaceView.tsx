@@ -31,7 +31,6 @@ import {
   RotateCcw,
   Square,
   ChevronsDown,
-  Eye,
   EyeOff,
   Brain,
   Gauge,
@@ -43,7 +42,6 @@ import {
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
 import { DiffViewer } from '../DiffViewer';
-import { MessageActivity } from '../MessageActivity';
 import { ExtensionRequest } from '../ExtensionRequest';
 import { TaskHud } from '../TaskHud';
 import { PanelResizeHandle } from '../PanelResizeHandle';
@@ -60,9 +58,13 @@ import {
   comparableDirKey,
   loadExpandedProjects,
   loadHiddenProjects,
+  loadThinkingVisible,
+  saveThinkingVisible,
   saveExpandedProjects,
   saveHiddenProjects,
 } from '../../lib/panelLayout';
+import { renderMarkdown } from '../../lib/miniMarkdown';
+import { AssistantBlocks } from '../AssistantBlocks';
 import {
   SLASH_CATEGORY_LABEL,
   SLASH_CATEGORY_ORDER,
@@ -122,7 +124,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set(loadExpandedProjects()));
   /** Project folders removed from the list (the sessions stay on disk). */
   const [hiddenProjects, setHiddenProjects] = useState<Set<string>>(() => new Set(loadHiddenProjects()));
-  const [hiddenExpanded, setHiddenExpanded] = useState(false);
 
   // Resizable surfaces: session list (x), composer textarea (y).
   const sessionPanel = useResizablePanel({
@@ -153,6 +154,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [activeMsgId, setActiveMsgId] = useState<string | null>(null);
+  /** Global default for reasoning visibility; each block can still toggle itself. */
+  const [showThinking, setShowThinking] = useState<boolean>(() => loadThinkingVisible());
+  /** Hovered tick in the message rail → a floating preview of that turn. */
+  const [railPreview, setRailPreview] = useState<{ id: string; top: number; right: number } | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   /** Running subagents reported by omp's `get_subagents` command. */
   const [subagents, setSubagents] = useState<SubagentRow[]>([]);
@@ -225,14 +230,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     onDispatchLog('INFO', `sessions: hid project folder from the list (sessions kept on disk)`);
   };
 
-  const unhideProject = (key: string) => {
-    setHiddenProjects((prev) => {
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
-  };
-
   const toggleProjectExpanded = (key: string) => {
     setExpandedProjects((prev) => {
       const next = new Set(prev);
@@ -250,6 +247,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
    */
   const isSessionRunning = (session: OmpSessionSummary): boolean =>
     session.current ? omp.isStreaming : Boolean(session.live);
+
+  useEffect(() => {
+    saveThinkingVisible(showThinking);
+  }, [showThinking]);
 
   // The right panel's file tree inserts @ references through this event.
   useEffect(() => {
@@ -354,6 +355,22 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     }
     return [...groups.entries()].filter(([cwd]) => !hiddenProjects.has(comparableDirKey(cwd || '(unknown)')));
   }, [omp.sessions, searchHistory, contentHits, hiddenProjects]);
+
+  /** Newest sessions across every project — the flat "Recent" column. */
+  const recentSessions = useMemo(() => {
+    const query = searchHistory.toLowerCase().trim();
+    return omp.sessions
+      .filter(
+        (session) =>
+          !query ||
+          session.title.toLowerCase().includes(query) ||
+          session.cwd.toLowerCase().includes(query) ||
+          Boolean(contentHits[session.path])
+      )
+      .slice()
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, 8);
+  }, [omp.sessions, searchHistory, contentHits]);
 
   const modelGroups = useMemo(() => {
     const groups = new Map<string, OmpModelOption[]>();
@@ -822,10 +839,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
               <span className="truncate">{omp.workspace || '…'}</span>
             </button>
 
-            {/* 2. History: real omp sessions grouped by workspace */}
+            {/* 2. Projects: real omp sessions grouped by workspace */}
             <div className="text-[10px] font-mono uppercase text-[#71717a] mb-1.5 flex items-center justify-between">
-              <span>{t.recentConversations}</span>
-              <span className="text-[#52525b]">{omp.sessions.length}</span>
+              <span>{language === 'zh-CN' ? '项目' : 'Projects'}</span>
+              <span className="text-[#52525b]">{sessionGroups.length}</span>
             </div>
 
             <div className="relative mb-1">
@@ -888,10 +905,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                         onClick={() => hideProject(groupKey)}
                         title={
                           language === 'zh-CN'
-                            ? '从列表中移除该项目（只隐藏，会话文件保留在磁盘上）'
+                            ? '从「项目」中移除（会话文件保留在磁盘，仍列在「最近」里）'
                             : 'Remove this project from the list (hidden only — session files stay on disk)'
                         }
-                        aria-label={language === 'zh-CN' ? '从列表中移除项目' : 'Remove project from list'}
+                        aria-label={language === 'zh-CN' ? '从「项目」中移除' : 'Remove project from the list'}
                         className="p-1 rounded text-[#52525b] opacity-0 group-hover/project:opacity-100 hover:text-[#fafafa] hover:bg-[#18181b] transition-opacity cursor-pointer shrink-0"
                       >
                         <EyeOff className="w-3 h-3" />
@@ -992,41 +1009,54 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                 })
               )}
 
-              {/* Project folders removed from the list */}
-              {hiddenProjects.size > 0 && (
-                <div className="space-y-0.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setHiddenExpanded((prev) => !prev)}
-                    className="flex w-full items-center gap-1.5 px-1 py-1 text-[10px] font-mono uppercase text-[#71717a] hover:text-[#a1a1aa] cursor-pointer"
-                  >
-                    <EyeOff className="w-3 h-3 shrink-0" />
-                    <span>{language === 'zh-CN' ? '已移除的项目' : 'Removed projects'}</span>
-                    <span className="ml-auto text-[#52525b]">{hiddenProjects.size}</span>
-                    {hiddenExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                  </button>
-
-                  {hiddenExpanded &&
-                    [...hiddenProjects].map((key) => (
-                      <div
-                        key={key}
-                        className="group flex items-center justify-between p-2 rounded text-[#71717a] hover:text-[#a1a1aa] hover:bg-[#121215] transition-colors text-xs"
-                      >
-                        <span className="truncate text-[11px] font-mono" title={key}>
-                          {basename(key)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => unhideProject(key)}
-                          title={language === 'zh-CN' ? '放回列表' : 'Put it back in the list'}
-                          className="p-0.5 rounded text-[#71717a] hover:text-[#34d399] cursor-pointer shrink-0"
-                        >
-                          <Eye className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
+              {/* Recent: the same sessions across projects, newest first */}
+              <div className="pt-1">
+                <div className="text-[10px] font-mono uppercase text-[#71717a] mb-1.5 flex items-center justify-between">
+                  <span>{language === 'zh-CN' ? '最近' : 'Recent'}</span>
+                  <span className="text-[#52525b]">{recentSessions.length}</span>
                 </div>
-              )}
+                <div className="space-y-0.5">
+                  {recentSessions.length === 0 && (
+                    <div className="px-1 py-1 text-[10px] text-[#52525b]">
+                      {language === 'zh-CN' ? '没有匹配的会话' : 'no matching session'}
+                    </div>
+                  )}
+                  {recentSessions.map((session) => {
+                    const isSelected = session.path === omp.resumePath;
+                    return (
+                      <div
+                        key={session.path}
+                        onClick={() => {
+                          setSessionViewMode('chat');
+                          void omp.openSession(session.path);
+                        }}
+                        title={session.path}
+                        className={`flex items-center gap-2 px-2 py-1 rounded transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#18181b] text-[#fafafa] border border-[#27272a]'
+                            : 'text-[#a1a1aa] hover:text-[#fafafa] hover:bg-[#121215] border border-transparent'
+                        }`}
+                        style={{ borderLeft: isSelected ? `2px solid ${accentColor}` : undefined }}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[11px]">
+                            {session.title || (language === 'zh-CN' ? '未命名会话' : 'untitled session')}
+                          </span>
+                          <span className="block truncate text-[9px] font-mono text-[#52525b]">
+                            {basename(session.cwd || '(unknown)')} · {relativeTime(session.updatedAt)}
+                          </span>
+                        </span>
+                        {isSessionRunning(session) && (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
+                            style={{ backgroundColor: session.current ? accentColor : '#34d399' }}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
               {/* Archived sessions (omp gc archive: gzipped logs, restorable) */}
               {omp.archived.length > 0 && (
@@ -1417,9 +1447,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                             : 'Agent is running — stop or wait for the turn to settle'
                           : undefined
                         : anchorTitle;
-                      const steps = msg.processSteps ?? [];
-                      const tools = msg.toolCalls ?? [];
-
                       return (
                         <div
                           key={msg.id}
@@ -1447,27 +1474,29 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                           <div
                             className={`text-[13.5px] leading-[1.7] ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
                           >
-                            {/* Agent execution stream: one collapsed fold per turn */}
-                            {!isUser && (msg.currentCommand || steps.length > 0 || tools.length > 0) && (
-                              <MessageActivity
-                                steps={steps}
-                                tools={tools}
-                                currentCommand={msg.currentCommand}
-                                streaming={Boolean(msg.streaming)}
+                            {isUser ? (
+                              /* Whatever was typed goes out verbatim. */
+                              <p className="whitespace-pre-wrap">{msg.content}</p>
+                            ) : (msg.blocks ?? []).length > 0 ? (
+                              /* pi-web's model: thinking / text / tool blocks in the
+                                 order omp produced them. Copy stays markdown source. */
+                              <AssistantBlocks
+                                blocks={msg.blocks ?? []}
+                                streaming={msg.streaming}
                                 zh={language === 'zh-CN'}
+                                showThinking={showThinking}
                                 onInsertCommand={(command) => {
                                   setInputPrompt(command);
                                   textareaRef.current?.focus();
                                 }}
                               />
-                            )}
-
-                            {msg.content === '_(no text output)_' ? (
+                            ) : msg.content === '_(no text output)_' ? (
                               <p className="text-[#52525b] italic">
                                 {language === 'zh-CN' ? '（该轮未返回文本）' : '(no text returned this turn)'}
                               </p>
                             ) : (
-                              <p className="whitespace-pre-wrap">{msg.content}</p>
+                              /* Messages without blocks (imported/mock turns) still render markdown. */
+                              <div className="markdown-body min-w-0">{renderMarkdown(msg.content)}</div>
                             )}
 
                             {/* Turn actions — the omp transcript is append-only, so no delete */}
@@ -1476,7 +1505,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                                 <button
                                   type="button"
                                   onClick={() => handleCopyMessage(msg.id, msg.content)}
-                                  title={language === 'zh-CN' ? '复制为纯文本' : 'Copy as plain text'}
+                                  title={language === 'zh-CN' ? '复制 Markdown 源码' : 'Copy the markdown source'}
                                   className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
                                 >
                                   {copiedMessageId === msg.id ? (
@@ -1601,6 +1630,24 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                     key={msg.id}
                     type="button"
                     onClick={() => jumpToMessage(msg.id)}
+                    onMouseEnter={(event) => {
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      setRailPreview({
+                        id: msg.id,
+                        top: Math.max(8, Math.min(rect.top - 28, window.innerHeight - 340)),
+                        right: Math.max(8, window.innerWidth - rect.left + 10),
+                      });
+                    }}
+                    onFocus={(event) => {
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      setRailPreview({
+                        id: msg.id,
+                        top: Math.max(8, Math.min(rect.top - 28, window.innerHeight - 340)),
+                        right: Math.max(8, window.innerWidth - rect.left + 10),
+                      });
+                    }}
+                    onMouseLeave={() => setRailPreview((prev) => (prev?.id === msg.id ? null : prev))}
+                    onBlur={() => setRailPreview((prev) => (prev?.id === msg.id ? null : prev))}
                     title={`${msg.role === 'user' ? (language === 'zh-CN' ? '你' : 'You') : 'Agent'} · ${
                       msg.timestamp
                     } — ${msg.content.replace(/\s+/g, ' ').slice(0, 90)}`}
@@ -1619,6 +1666,44 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                   </button>
                 ))}
               </div>
+
+              {railPreview && (() => {
+                const msg = transcript.find((entry) => entry.id === railPreview.id);
+                if (!msg) return null;
+                const blocks = msg.blocks ?? [];
+                const stepCount = blocks.length;
+                const toolCount = blocks.filter((block) => block.kind === 'tool').length;
+                const text = msg.content.replace(/\s+/g, ' ').trim();
+                return (
+                  <div
+                    className="fixed z-50 w-[420px] rounded-lg border border-[#27272a] bg-[#0c0c0e] shadow-2xl overflow-hidden font-mono"
+                    style={{ top: railPreview.top, right: railPreview.right }}
+                  >
+                    <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-[#1e1e24] bg-[#121215] text-[10px]">
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className="px-1.5 py-px rounded shrink-0"
+                          style={{
+                            backgroundColor: `${msg.role === 'user' ? '#7ca8ff' : accentColor}1f`,
+                            color: msg.role === 'user' ? '#7ca8ff' : accentColor,
+                          }}
+                        >
+                          {msg.role === 'user' ? (language === 'zh-CN' ? '你' : 'You') : 'Agent'}
+                        </span>
+                        <span className="text-[#71717a] truncate">{msg.timestamp}</span>
+                      </span>
+                      <span className="text-[#52525b] shrink-0">
+                        {stepCount > 0 ? `${stepCount} ${language === 'zh-CN' ? '步' : 'steps'} · ` : ''}
+                        {toolCount > 0 ? `${toolCount} ${language === 'zh-CN' ? '次工具' : 'tools'}` : ''}
+                        {stepCount === 0 && toolCount === 0 ? `${msg.content.length} ${language === 'zh-CN' ? '字符' : 'chars'}` : ''}
+                      </span>
+                    </div>
+                    <div className="px-2.5 py-2 text-[11px] leading-[1.6] text-[#d4d4d8] max-h-[280px] overflow-y-auto whitespace-pre-wrap break-words">
+                      {text || (language === 'zh-CN' ? '（该轮没有文本内容）' : '(no text in this turn)')}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {!atBottom && (
                 <button
@@ -1685,7 +1770,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
             )}
 
             {/* Prompt input box wrapper */}
-            <div className="border border-[#27272a] focus-within:border-[#a78bfa] rounded-lg bg-[#121215] transition-colors relative">
+            <div className="border border-[#27272a] rounded-lg bg-[#121215] relative">
               {/* Drag the top edge to resize the composer; double-click restores the default */}
               <div
                 {...composerBox.handleProps}
@@ -1868,7 +1953,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                     ? '让 omp 编写代码、调用工具 (Enter 发送，Shift+Enter 换行)...'
                     : 'Ask omp to write code or call tools (Enter to send, Shift+Enter for newline)...'
                 }
-                className="w-full p-3 bg-transparent text-xs text-[#fafafa] placeholder-[#52525b] focus:outline-none font-mono resize-none overflow-y-auto rounded-t-lg"
+                className="w-full p-3 bg-transparent text-[13.5px] leading-[1.65] text-[#fafafa] placeholder-[#52525b] focus:outline-none font-mono resize-none overflow-y-auto rounded-t-lg"
               />
 
               {/* Toolbar Controls */}
@@ -2031,6 +2116,28 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                       )}
                     </button>
                   )}
+
+                  {/* Global default for reasoning blocks (each block can still override) */}
+                  <button
+                    type="button"
+                    onClick={() => setShowThinking((prev) => !prev)}
+                    title={
+                      showThinking
+                        ? language === 'zh-CN'
+                          ? '默认展开思考块（点击改为默认折叠）'
+                          : 'Thinking blocks open by default (click to fold them)'
+                        : language === 'zh-CN'
+                        ? '默认折叠思考块（点击展开）'
+                        : 'Thinking blocks folded by default (click to expand)'
+                    }
+                    className={`p-1.5 rounded border transition-colors cursor-pointer ${
+                      showThinking
+                        ? 'bg-[#18181b] border-[#a78bfa]/60 text-[#a78bfa]'
+                        : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46]'
+                    }`}
+                  >
+                    <Brain className="w-3.5 h-3.5" />
+                  </button>
 
                   {/* Read replies aloud with omp's local TTS engine */}
                   <button

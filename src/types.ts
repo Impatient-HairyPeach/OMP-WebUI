@@ -88,25 +88,37 @@ export interface ProjectScope {
   description: string;
 }
 
-export interface ProcessStep {
+/**
+ * One ordered content block of an assistant turn. Mirrors omp's own
+ * `message.content` order (thinking → text → toolCall → thinking …), so the
+ * transcript never reorders reasoning against the answers it produced.
+ */
+export interface ThinkingBlockItem {
+  kind: 'thinking';
   id: string;
-  type: 'thought' | 'command' | 'tool' | 'diff' | 'status';
-  title: string;
-  command?: string;
-  detail?: string;
-  status: 'running' | 'success' | 'failed';
-  timestamp?: string;
+  text: string;
+  /** Provider returned reasoning without readable text (signature only). */
+  redacted?: boolean;
 }
 
-export interface ToolCallItem {
-  id?: string;
-  tool: string;
-  server: string;
-  status: 'calling' | 'success' | 'failed' | 'awaiting_approval' | 'denied';
-  input?: any;
-  output?: any;
-  requiresApproval?: boolean;
+export interface TextBlockItem {
+  kind: 'text';
+  id: string;
+  text: string;
 }
+
+export interface ToolBlockItem {
+  kind: 'tool';
+  id: string;
+  tool: string;
+  intent?: string;
+  command?: string;
+  input?: unknown;
+  output?: string;
+  status: 'running' | 'success' | 'failed';
+}
+
+export type MessageBlock = ThinkingBlockItem | TextBlockItem | ToolBlockItem;
 
 export interface FileDiffItem {
   path: string;
@@ -154,8 +166,8 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   currentCommand?: string;
-  processSteps?: ProcessStep[];
-  toolCalls?: ToolCallItem[];
+  /** Assistant turns only: the turn's content blocks in their original order. */
+  blocks?: MessageBlock[];
   diffs?: FileDiffItem[];
   /** omp session-log entry id: the anchor used for branch / fork / edit-from-here. */
   entryId?: string;

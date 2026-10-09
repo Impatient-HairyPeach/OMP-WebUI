@@ -59,8 +59,11 @@ export function parseTodoText(text: string): TodoGroup[] {
 /** The newest todo list in the transcript, or null when the agent never wrote one. */
 export function todosFromTranscript(messages: ChatMessage[]): TodoGroup[] | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    for (const call of [...(messages[index].toolCalls ?? [])].reverse()) {
-      if (!/todo/i.test(call.tool)) continue;
+    const tools = (messages[index].blocks ?? [])
+      .filter((block) => block.kind === 'tool')
+      .reverse();
+    for (const call of tools) {
+      if (call.kind !== 'tool' || !/todo/i.test(call.tool)) continue;
       const output = typeof call.output === 'string' ? call.output : '';
       if (!output) continue;
       const groups = parseTodoText(output);
