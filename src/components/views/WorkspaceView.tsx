@@ -1064,6 +1064,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                               <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
+
                         </div>
                       );
                     })}
@@ -1624,52 +1625,54 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                               </div>
                             )}
 
-                            {isUser && (
-                              <div className="mt-2.5 pt-2 border-t border-[#1e1e24] flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyMessage(msg.id, msg.content)}
-                                  title={language === 'zh-CN' ? '复制该指令' : 'Copy prompt'}
-                                  className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
-                                >
-                                  {copiedMessageId === msg.id ? (
-                                    <Check className="w-3.5 h-3.5 text-[#34d399]" />
-                                  ) : (
-                                    <Copy className="w-3.5 h-3.5" />
-                                  )}
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleStartEdit(msg)}
-                                  disabled={!anchored}
-                                  title={anchorTitle ?? (language === 'zh-CN' ? '编辑并从此处分支重发' : 'Edit & resend from here')}
-                                  className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
-                                >
-                                  <Pencil className="w-3.5 h-3.5 text-[#a78bfa]" />
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleRetryFrom(origin)}
-                                  disabled={!canRetry}
-                                  title={retryTitle ?? (language === 'zh-CN' ? '重新发送该指令' : 'Send this prompt again')}
-                                  className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5 text-[#38bdf8]" />
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuoteMessage(msg.content)}
-                                  title={language === 'zh-CN' ? '引用自己这条指令并追问' : 'Quote this prompt and ask about it'}
-                                  className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
-                                >
-                                  <Quote className="w-3.5 h-3.5 text-[#38bdf8]" />
-                                </button>
-                              </div>
-                            )}
                           </div>
+
+                        {/* Your own message: actions sit under the bubble, not inside it */}
+                        {isUser && (
+                          <div className="mt-1 flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyMessage(msg.id, msg.content)}
+                              title={language === 'zh-CN' ? '复制该指令' : 'Copy prompt'}
+                              className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+                            >
+                              {copiedMessageId === msg.id ? (
+                                <Check className="w-3.5 h-3.5 text-[#34d399]" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(msg)}
+                              disabled={!anchored}
+                              title={anchorTitle ?? (language === 'zh-CN' ? '编辑并从此处分支重发' : 'Edit & resend from here')}
+                              className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
+                            >
+                              <Pencil className="w-3.5 h-3.5 text-[#a78bfa]" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRetryFrom(origin)}
+                              disabled={!canRetry}
+                              title={retryTitle ?? (language === 'zh-CN' ? '重新发送该指令' : 'Send this prompt again')}
+                              className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 text-[#38bdf8]" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleQuoteMessage(msg.content)}
+                              title={language === 'zh-CN' ? '引用自己这条指令并追问' : 'Quote this prompt and ask about it'}
+                              className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+                            >
+                              <Quote className="w-3.5 h-3.5 text-[#38bdf8]" />
+                            </button>
+                          </div>
+                        )}
                         </div>
                       );
                     })}

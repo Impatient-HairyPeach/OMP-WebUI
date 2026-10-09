@@ -3,6 +3,12 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.11
+
+- Your own message's actions (copy · edit-from-here · resend · quote) sit under
+  the bubble instead of inside it, so the bubble keeps a clean edge — same
+  buttons, same hover reveal, just outside the box.
+
 ## 0.3.10
 
 - Tasks and subagents are visible in both places now, and both fold:
