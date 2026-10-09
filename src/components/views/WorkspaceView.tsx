@@ -601,7 +601,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       }));
     }
     if (items.length === 0) {
-      closeCompletion();
+      // Never vanish silently: an empty list still shows why (no match for this
+      // query, or a command catalog omp has not sent this session yet).
+      setCompletion({ kind, query, start, end: caret, index: 0, items: [], groups: [] });
       return;
     }
     const groups = SLASH_CATEGORY_ORDER.map((category) => ({
@@ -1958,11 +1960,37 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                       </span>
                     </span>
                     <span className="shrink-0">
-                      {completion.index + 1}/{completion.items.length} · Tab ⇥
+                      {completion.items.length > 0 ? `${completion.index + 1}/${completion.items.length} · Tab ⇥` : '—'}
                     </span>
                   </div>
 
                   <div className="overflow-y-auto p-2.5 space-y-3">
+                    {completion.items.length === 0 && (
+                      <div className="px-2 py-3 text-[11px] text-[#71717a] space-y-1">
+                        {completion.kind === 'slash' ? (
+                          omp.slashCommands.length === 0 ? (
+                            <div>
+                              {language === 'zh-CN'
+                                ? '这个会话还没从 omp 收到命令目录（omp 尚未推送 available_commands）。'
+                                : 'omp has not sent this session its command catalog yet (no available_commands frame).'}
+                            </div>
+                          ) : (
+                            <div>
+                              {language === 'zh-CN'
+                                ? `没有匹配「/${completion.query}」的命令。输入 / 查看全部 ${omp.slashCommands.length} 条。`
+                                : `No command matches "/${completion.query}". Type / to list all ${omp.slashCommands.length}.`}
+                            </div>
+                          )
+                        ) : (
+                          <div>
+                            {language === 'zh-CN'
+                              ? `没有匹配「${completion.query}」的工作区文件。`
+                              : `No workspace file matches "${completion.query}".`}
+                          </div>
+                        )}
+                        <div className="text-[10px] text-[#52525b]">{language === 'zh-CN' ? 'Esc 关闭' : 'Esc to close'}</div>
+                      </div>
+                    )}
                     {completion.groups.map((group) => {
                       const groupItems = completion.items.filter((item) => item.category === group.category);
                       const firstIndex = completion.items.indexOf(groupItems[0]);

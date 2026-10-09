@@ -3,6 +3,20 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.12
+
+- Slash completion works mid-conversation again. Root cause: the app only knew
+  omp's command catalog from the `available_commands_update` frame omp *pushes*,
+  and after a bridge restart / session resume omp never re-sent it, so the
+  catalog was empty (measured: `slashCommands: 0`) and `/` completion closed the
+  popup silently — exactly "typing a slash command shows no candidates". The
+  workspace now also asks omp directly (`get_available_commands`, the same rpc
+  behind omp's own `getAvailableCommands()`) whenever it refreshes models and
+  thinking levels, so the popup has the catalog from the first keystroke.
+- An empty completion list is no longer silent: a query with no match, or a
+  catalog omp has not sent yet, keeps the popup open and says which it is
+  (`没有匹配「/co」的命令。输入 / 查看全部 71 条。`).
+
 ## 0.3.11
 
 - Your own message's actions (copy · edit-from-here · resend · quote) sit under

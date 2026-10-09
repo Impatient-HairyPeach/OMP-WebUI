@@ -230,14 +230,19 @@ export function useOmpSession(): OmpSessionApi {
   const refreshCatalog = useCallback(async () => {
     const bridge = bridgeRef.current;
     if (!bridge) return;
-    const [modelResponse, levelResponse] = await Promise.all([
+    const [modelResponse, levelResponse, commandResponse] = await Promise.all([
       bridge.command({ type: "get_available_models" }),
       bridge.command({ type: "get_available_thinking_levels" }),
+      // omp only *pushes* available_commands_update, and it may not re-send it on
+      // a resumed session — ask for the catalog so `/` completion always has it.
+      bridge.command({ type: "get_available_commands" }),
     ]);
     const modelData = modelResponse.data as { models?: OmpModelOption[] } | undefined;
     const levelData = levelResponse.data as { levels?: string[] } | undefined;
+    const commandData = commandResponse.data as { commands?: OmpSlashCommand[] } | undefined;
     if (modelData?.models) setModels(modelData.models);
     if (levelData?.levels) setThinkingLevels(withAuto(levelData.levels));
+    if (commandData?.commands && commandData.commands.length > 0) setSlashCommands(commandData.commands);
   }, []);
 
   /** omp reports the levels the *active model* supports; `auto` is always valid. */
