@@ -3,6 +3,20 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.24
+
+- Tool approval in the composer. The shield sits with the other action icons
+  (right of read-aloud, next to Send) and opens omp's own modes — `每次询问 /
+  always-ask`, `允许写入 / write`, `全权 (YOLO) / yolo` — with a hint per mode, the
+  current one ticked, and a warning colour for full access. The choice is written
+  to omp's setting (`omp config set tools.approvalMode <mode>`) and the session is
+  restarted so the running agent picks it up; verified end-to-end (UI → config →
+  read back → `omp config list` shows the new value, then restored).
+  The active mode is also appended to the session status strip (`ready · 全权 (YOLO)`)
+  the way omp's TUI and Codex show it in their status line.
+- The session status strip shows how long the current turn has been working
+  (`· 工作 1m23s`, omp-terminal style), ticking once a second while a turn runs.
+
 ## 0.3.23
 
 - `npm i -g .` now installs a real command. `bin/omp-studio.mjs` runs the bridge in

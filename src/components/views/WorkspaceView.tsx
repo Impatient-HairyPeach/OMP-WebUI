@@ -33,6 +33,7 @@ import {
   RotateCcw,
   Search,
   Send,
+  ShieldCheck,
   Sparkles,
   Square,
   Terminal,
@@ -66,6 +67,7 @@ import {
 } from '../../lib/panelLayout';
 import { renderMarkdown } from '../../lib/miniMarkdown';
 import { AssistantBlocks } from '../AssistantBlocks';
+import { fetchApproval, setApproval } from '../../omp/cli';
 import {
   SLASH_CATEGORY_LABEL,
   SLASH_CATEGORY_ORDER,
@@ -87,6 +89,27 @@ interface AttachedFile {
 
 const basename = (value: string): string =>
   value.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || value;
+
+/** omp-terminal style elapsed time: 12s / 1m23s / 1h02m. */
+const formatElapsed = (seconds: number): string => {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, '0')}s`;
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`;
+};
+
+/** omp's approval modes, worded the way the agent behaves. */
+const APPROVAL_LABEL: Record<string, { zh: string; en: string }> = {
+  'always-ask': { zh: '每次询问', en: 'Always ask' },
+  write: { zh: '允许写入', en: 'Allow writes' },
+  yolo: { zh: '全权 (YOLO)', en: 'Full access (YOLO)' },
+};
+
+const APPROVAL_HINT: Record<string, { zh: string; en: string }> = {
+  'always-ask': { zh: '每个工具调用都要批准，最安全', en: 'approve every tool call — safest' },
+  write: { zh: '写文件免批准，其余仍然询问', en: 'writes run unattended, the rest still asks' },
+  yolo: { zh: '所有工具自动执行，不再询问', en: 'every tool runs unattended' },
+};
 
 const relativeTime = (iso: string): string => {
   const then = new Date(iso).getTime();
@@ -146,6 +169,36 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [modelSwitching, setModelSwitching] = useState<string | null>(null);
   const [compactMenuOpen, setCompactMenuOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
+  /** Tool approval mode as omp itself stores it (`tools.approvalMode`). */
+  const [approval, setApprovalState] = useState<{ mode: string | null; modes: string[] }>({ mode: null, modes: [] });
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchApproval()
+      .then((state) => {
+        if (!cancelled) setApprovalState({ mode: state.mode, modes: state.modes });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const applyApproval = async (mode: string) => {
+    setApprovalOpen(false);
+    setApprovalBusy(true);
+    try {
+      const next = await setApproval(mode);
+      setApprovalState((prev) => ({ ...prev, mode: next.mode }));
+      onDispatchLog('INFO', `tools.approvalMode: ${next.mode} (omp session restarted)`);
+    } catch (error) {
+      onDispatchLog('INFO', `approval mode failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setApprovalBusy(false);
+    }
+  };
   const [sessionViewMode, setSessionViewMode] = useState<'chat' | 'diffs'>('chat');
   const [sessionDiffs, setSessionDiffs] = useState<FileDiffItem[]>([]);
   const [sessionDiffError, setSessionDiffError] = useState<string | null>(null);
@@ -847,6 +900,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
    * elements on every keystroke and streaming flush was the bulk of the typing
    * cost; identical elements let React skip the subtree entirely.
    */
+  /** How long the current turn has been running (omp shows the same in its TUI). */
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const turnStartedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (omp.isStreaming) {
+      turnStartedAt.current = turnStartedAt.current ?? Date.now();
+      const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+      return () => window.clearInterval(timer);
+    }
+    turnStartedAt.current = null;
+  }, [omp.isStreaming]);
+  const workingSeconds = turnStartedAt.current
+    ? Math.max(0, Math.round((nowTick - turnStartedAt.current) / 1000))
+    : 0;
+
   const transcriptRows = useMemo(
     () =>
       transcript.map((msg) => {
@@ -1627,6 +1695,20 @@ return (
             <span className="text-[11px] flex items-center gap-1 shrink-0" style={{ color: statusColor }}>
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
               {omp.status}
+              {omp.isStreaming && (
+                <span className="text-[#71717a] font-mono" title={language === 'zh-CN' ? '本轮已用时' : 'working for'}>
+                  · {language === 'zh-CN' ? '工作' : 'working'} {formatElapsed(workingSeconds)}
+                </span>
+              )}
+              {approval.mode && (
+                <span
+                  className="font-mono"
+                  style={{ color: approval.mode === 'yolo' ? '#f59e0b' : approval.mode === 'always-ask' ? '#34d399' : '#71717a' }}
+                  title={`omp tools.approvalMode: ${approval.mode}`}
+                >
+                  · {APPROVAL_LABEL[approval.mode]?.[language === 'zh-CN' ? 'zh' : 'en'] ?? approval.mode}
+                </span>
+              )}
             </span>
           </div>
         </div>
@@ -2277,6 +2359,7 @@ return (
                     </button>
 
 
+
                     {thinkingDropdownOpen && (
                       <>
                         <div className="fixed inset-0 z-40" onClick={() => setThinkingDropdownOpen(false)} />
@@ -2369,6 +2452,65 @@ return (
                     <Volume2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
+                    {/* Tool approval: omp's own tools.approvalMode (icon like its neighbours) */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setApprovalOpen((prev) => !prev)}
+                        disabled={approvalBusy || approval.modes.length === 0}
+                        title={`${
+                          language === 'zh-CN' ? '工具权限' : 'Tool approval'
+                        }: ${APPROVAL_LABEL[approval.mode ?? '']?.[language === 'zh-CN' ? 'zh' : 'en'] ?? approval.mode ?? '…'} (${approval.mode ?? 'unset'})`}
+                        className={`p-1.5 rounded border transition-colors cursor-pointer disabled:opacity-50 ${
+                          approval.mode === 'yolo'
+                            ? 'bg-[#f59e0b]/10 border-[#f59e0b]/50 text-[#f59e0b] hover:border-[#f59e0b]'
+                            : approval.mode === 'always-ask'
+                            ? 'bg-[#18181b] border-[#34d399]/50 text-[#34d399] hover:border-[#34d399]'
+                            : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46]'
+                        }`}
+                      >
+                        {approvalBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                      </button>
+
+                      {approvalOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setApprovalOpen(false)} />
+                          <div className="absolute right-0 bottom-full mb-1.5 w-72 rounded-lg bg-[#18181b] border border-[#27272a] shadow-2xl py-1.5 z-50 text-xs font-mono">
+                            <div className="px-3 py-1 text-[10px] text-[#71717a] uppercase border-b border-[#27272a] mb-1">
+                              {language === 'zh-CN' ? '工具权限（写入 omp 设置）' : 'Tool approval (writes omp settings)'}
+                            </div>
+                            {approval.modes.map((mode) => {
+                              const label = APPROVAL_LABEL[mode]?.[language === 'zh-CN' ? 'zh' : 'en'] ?? mode;
+                              const hint = APPROVAL_HINT[mode]?.[language === 'zh-CN' ? 'zh' : 'en'] ?? '';
+                              const isCurrent = approval.mode === mode;
+                              return (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  onClick={() => void applyApproval(mode)}
+                                  className={`w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer transition-colors ${
+                                    isCurrent ? 'bg-[#27272a]/60' : ''
+                                  }`}
+                                >
+                                  <span className="flex items-center justify-between gap-2">
+                                    <span style={{ color: mode === 'yolo' ? '#f59e0b' : '#fafafa' }}>{label}</span>
+                                    {isCurrent && <Check className="w-3 h-3 text-[#34d399]" />}
+                                  </span>
+                                  <span className="block text-[10px] text-[#71717a] mt-0.5">
+                                    <span className="text-[#52525b]">{mode}</span> · {hint}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                            <div className="px-3 py-1 text-[9px] text-[#52525b] border-t border-[#27272a] mt-1">
+                              {language === 'zh-CN' ? '切换后 omp 会话会自动重启' : 'switching restarts the omp session'}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+
 
                 {/* Right Action: Send OR Steer / Queue */}
                 <div className="flex items-center gap-1.5">
@@ -2478,6 +2620,7 @@ return (
                     </button>
                   )}
                 </div>
+
               </div>
             </div>
           </div>

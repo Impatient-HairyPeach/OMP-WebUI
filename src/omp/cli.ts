@@ -242,6 +242,17 @@ export interface GitDiffFile {
 
 export const fetchGitSnapshot = () => getJson<GitSnapshot>("/api/git/branches");
 
+/** omp's tool approval mode (`tools.approvalMode`), read and written by the bridge. */
+export interface ApprovalState {
+  mode: string | null;
+  modes: string[];
+  autoApprove: boolean;
+}
+
+export const fetchApproval = () => getJson<ApprovalState>("/api/omp/approval");
+export const setApproval = (mode: string) =>
+  postJson<{ ok: boolean; mode: string; restarted: boolean }>("/api/omp/approval", { mode });
+
 /** Rebuild the omp header of a log that was written without one. */
 export const repairSession = (path: string) =>
   postJson<{ path: string; header: { id?: string }; backup: string }>("/api/session/repair", { path });

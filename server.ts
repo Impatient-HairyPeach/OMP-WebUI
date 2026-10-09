@@ -496,6 +496,26 @@ async function readOmpScope(): Promise<OmpScope> {
   };
 }
 
+/**
+ * Tool approval: omp owns the setting (`tools.approvalMode`), the same values its
+ * `--approval-mode` flag accepts. The web UI just reads and writes it, then
+ * restarts the session so the running agent picks it up.
+ */
+const APPROVAL_MODES = ["always-ask", "write", "yolo"] as const;
+type ApprovalMode = (typeof APPROVAL_MODES)[number];
+
+const isApprovalMode = (value: unknown): value is ApprovalMode =>
+  typeof value === "string" && (APPROVAL_MODES as readonly string[]).includes(value);
+
+/** One omp config value (`omp config list --json`). */
+async function readOmpConfigValue(key: string): Promise<unknown> {
+  const parsed = JSON.parse(await runOmpCli(["config", "list", "--json"], { timeoutMs: 30_000 })) as Record<
+    string,
+    { value?: unknown }
+  >;
+  return parsed[key]?.value;
+}
+
 /** `omp config set <key> <json-array>`; an empty list resets the key to omp's default. */
 async function writeOmpArray(key: string, values: string[]): Promise<void> {
   if (values.length === 0) await runOmpCli(["config", "reset", key], { timeoutMs: 30_000 });
@@ -1888,6 +1908,38 @@ app.post("/api/extensions/scope", async (req, res) => {
 
 /** Model scope: every provider/model in omp's catalog plus omp's own enabledModels /
  *  disabledProviders settings, so Settings can toggle them per project-independent scope. */
+app.get("/api/omp/approval", async (_req, res) => {
+  try {
+    const mode = await readOmpConfigValue("tools.approvalMode");
+    res.json({
+      mode: isApprovalMode(mode) ? mode : null,
+      modes: APPROVAL_MODES,
+      // The launch flag wins for this session and is what the security page shows.
+      autoApprove: process.argv.includes("--auto-approve") || OMP_ARGS.includes("--auto-approve"),
+    });
+  } catch (error) {
+    res.status(502).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
+  }
+});
+
+app.post("/api/omp/approval", async (req, res) => {
+  const mode = (req.body ?? {}).mode;
+  if (!isApprovalMode(mode)) {
+    res.status(400).json({ error: `expected mode ${APPROVAL_MODES.join(" | ")}` });
+    return;
+  }
+  try {
+    await runOmpCli(["config", "set", "tools.approvalMode", mode], { timeoutMs: 30_000 });
+    const applied = await readOmpConfigValue("tools.approvalMode");
+    // omp reads its settings at startup.
+    await enqueue(() => restartChild({}));
+    emit("log", { level: "info", message: `tools.approvalMode: ${mode} (session restarted)` });
+    res.json({ ok: true, mode: isApprovalMode(applied) ? applied : mode, restarted: true });
+  } catch (error) {
+    res.status(400).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
+  }
+});
+
 app.get("/api/omp/models/scope", async (_req, res) => {
   try {
     const [scope, models] = await Promise.all([readOmpScope(), loadModelCatalog()]);
