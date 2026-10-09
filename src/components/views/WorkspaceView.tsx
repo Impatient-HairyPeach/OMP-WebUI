@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatMessage } from '../../types';
 import type { FileDiffItem } from '../../types';
 import type { OmpLogLine, OmpModelOption, OmpSessionSummary } from '../../omp/protocol';
@@ -61,6 +61,7 @@ import {
   loadHiddenProjects,
   loadSectionOpen,
   loadThinkingVisible,
+  saveThinkingVisible,
   saveSectionOpen,
   saveExpandedProjects,
   saveHiddenProjects,
@@ -157,7 +158,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [activeMsgId, setActiveMsgId] = useState<string | null>(null);
   /** Default for reasoning visibility (a stored preference); each block toggles itself. */
-  const [showThinking] = useState<boolean>(() => loadThinkingVisible());
+  const [showThinking, setShowThinking] = useState<boolean>(() => loadThinkingVisible());
   /** Left panel sections: both collapse independently and remember it. */
   const [projectsOpen, setProjectsOpen] = useState(() => loadSectionOpen('projects'));
   const [recentOpen, setRecentOpen] = useState(() => loadSectionOpen('recent'));
@@ -257,6 +258,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     session.current ? omp.isStreaming : Boolean(session.live);
 
   useEffect(() => {
+    saveThinkingVisible(showThinking);
+  }, [showThinking]);
+
+  useEffect(() => {
     saveSectionOpen('projects', projectsOpen);
   }, [projectsOpen]);
 
@@ -329,7 +334,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     omp.sessionTitle ??
     (omp.resumePath ? basename(omp.resumePath) : null) ??
     (language === 'zh-CN' ? '新会话' : 'new session');
-  const transcript: ChatMessage[] = omp.liveMessage ? [...omp.messages, omp.liveMessage] : omp.messages;
+  // Stable identity: a fresh array every render invalidated the memos below and
+  // forced the whole transcript to reconcile on each keystroke.
+  const transcript: ChatMessage[] = useMemo(
+    () => (omp.liveMessage ? [...omp.messages, omp.liveMessage] : omp.messages),
+    [omp.messages, omp.liveMessage]
+  );
 
   // Publish the turn's work state so the right panel's task tab can show it.
   // Derived from the rendered transcript (settled turns + the live one) and
@@ -418,13 +428,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const currentModel = omp.state?.model ?? null;
 
   /** "Model (provider)" — the same label the top-right chip shows, per turn. */
-  const modelLabelFor = (msg: ChatMessage): string => {
+  const modelLabelFor = useCallback((msg: ChatMessage): string => {
     const name = msg.model ?? currentModel?.name ?? currentModel?.id ?? omp.modelLabel ?? 'omp';
     const known = omp.models.find((model) => (model.name ?? model.id) === name || model.id === name);
     const provider =
       known?.provider ?? (msg.model && msg.model === currentModel?.name ? currentModel?.provider : undefined);
     return provider ? `${name} (${provider})` : name;
-  };
+  }, [currentModel, omp.modelLabel, omp.models]);
 
   /** For each assistant turn, the user turn it answered — the anchor used by regenerate/retry. */
   const retryOriginByMsgId = useMemo(() => {
@@ -488,6 +498,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     textareaRef.current?.focus();
     onDispatchLog('INFO', `queue: withdrew a ${queue} message back into the composer`);
   };
+
+  /** Stable handler: an inline arrow here rebuilt every block on every render. */
+  const insertCommandIntoComposer = useCallback((command: string) => {
+    setInputPrompt(command);
+    textareaRef.current?.focus();
+  }, []);
 
   const handleQuoteMessage = (content: string) => {
     const quoteSnippet = content.length > 80 ? content.slice(0, 80) + '...' : content;
@@ -833,6 +849,202 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     await omp.newSession(target);
   };
 
+  /**
+   * The transcript rows are built once per transcript change. Rebuilding these
+   * elements on every keystroke and streaming flush was the bulk of the typing
+   * cost; identical elements let React skip the subtree entirely.
+   */
+  const transcriptRows = useMemo(
+    () =>
+      transcript.map((msg) => {
+const isUser = msg.role === 'user';
+const anchored = Boolean(msg.entryId);
+const anchorTitle = anchored
+  ? undefined
+  : language === 'zh-CN'
+  ? '该消息没有 omp 日志锚点'
+  : 'This message has no omp log anchor';
+const origin = isUser ? msg : retryOriginByMsgId[msg.id];
+const canRetry = Boolean(origin?.entryId) && !omp.isStreaming;
+const retryTitle = origin?.entryId
+  ? omp.isStreaming
+    ? language === 'zh-CN'
+      ? '智能体运行中，请先停止或等待结束'
+      : 'Agent is running — stop or wait for the turn to settle'
+    : undefined
+  : anchorTitle;
+return (
+  <div
+    key={msg.id}
+    ref={(el) => {
+      msgRefs.current[msg.id] = el;
+    }}
+    className={`group flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+  >
+    <div className="flex items-center gap-2 mb-1 text-[10px] font-mono text-[#71717a]">
+      <span>
+        {isUser
+          ? language === 'zh-CN'
+            ? '你 (You)'
+            : 'You'
+          : modelLabelFor(msg)}
+      </span>
+      <span>{msg.timestamp}</span>
+      {msg.streaming && (
+        <span className="text-[#a78bfa] animate-pulse">
+          {language === 'zh-CN' ? '生成中…' : 'streaming…'}
+        </span>
+      )}
+    </div>
+
+    <div
+      className={`select-text text-[13.5px] leading-[1.7] ${msg.pending ? 'opacity-70' : ''} ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
+    >
+      {isUser ? (
+        /* Whatever was typed goes out verbatim. */
+        <p className="whitespace-pre-wrap">{msg.content}</p>
+      ) : (msg.blocks ?? []).length > 0 ? (
+        /* pi-web's model: thinking / text / tool blocks in the
+           order omp produced them. Copy stays markdown source. */
+        <AssistantBlocks
+          blocks={msg.blocks ?? []}
+          streaming={msg.streaming}
+          zh={language === 'zh-CN'}
+          showThinking={showThinking}
+          metrics={
+            msg.streaming
+              ? {
+                  // Live rolling rate while streaming; omp's own
+                  // per-turn figure is the fallback.
+                  rate: omp.liveTokensPerSecond ?? omp.state?.tokensPerSecond,
+                  rateIsEstimate: omp.liveTokensPerSecond !== null,
+                  outputTokens: omp.usage?.completionTokens,
+                }
+              : null
+          }
+          onInsertCommand={insertCommandIntoComposer}
+        />
+      ) : msg.content === '_(no text output)_' ? (
+        <p className="text-[#52525b] italic">
+          {language === 'zh-CN' ? '（该轮未返回文本）' : '(no text returned this turn)'}
+        </p>
+      ) : (
+        /* Messages without blocks (imported/mock turns) still render markdown. */
+        <div className="markdown-body min-w-0">{renderMarkdown(msg.content)}</div>
+      )}
+
+      {/* Turn actions — the omp transcript is append-only, so no delete */}
+      {!isUser && (
+        <div className="mt-2.5 pt-2 border-t border-[#1e1e24] flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={() => handleCopyMessage(msg.id, msg.content)}
+            title={language === 'zh-CN' ? '复制 Markdown 源码' : 'Copy the markdown source'}
+            className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+          >
+            {copiedMessageId === msg.id ? (
+              <Check className="w-3.5 h-3.5 text-[#34d399]" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleRetryFrom(origin)}
+            disabled={!canRetry}
+            title={retryTitle ?? (language === 'zh-CN' ? '重新生成该回复' : 'Regenerate this reply')}
+            className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-[#a78bfa]" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleForkAt(msg)}
+            disabled={!anchored}
+            title={anchorTitle ?? (language === 'zh-CN' ? '在此处快照为新会话文件' : 'Fork the session into a new file here')}
+            className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
+          >
+            <GitBranch className="w-3.5 h-3.5 text-[#a78bfa]" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuoteMessage(msg.content)}
+            title={language === 'zh-CN' ? '引用此条回复并追问' : 'Ask about this message'}
+            className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+          >
+            <Quote className="w-3.5 h-3.5 text-[#38bdf8]" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void speakText(msg.content)}
+            title={language === 'zh-CN' ? '朗读该回复（omp say 本地 TTS）' : 'Read this reply aloud (omp say local TTS)'}
+            className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+          >
+            <Volume2 className="w-3.5 h-3.5 text-[#34d399]" />
+          </button>
+        </div>
+      )}
+
+    </div>
+
+  {/* Your own message: actions sit under the bubble, not inside it */}
+  {isUser && !msg.pending && (
+    <div className="mt-1 flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+      <button
+        type="button"
+        onClick={() => handleCopyMessage(msg.id, msg.content)}
+        title={language === 'zh-CN' ? '复制该指令' : 'Copy prompt'}
+        className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+      >
+        {copiedMessageId === msg.id ? (
+          <Check className="w-3.5 h-3.5 text-[#34d399]" />
+        ) : (
+          <Copy className="w-3.5 h-3.5" />
+        )}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => handleStartEdit(msg)}
+        disabled={!anchored}
+        title={anchorTitle ?? (language === 'zh-CN' ? '编辑并从此处分支重发' : 'Edit & resend from here')}
+        className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
+      >
+        <Pencil className="w-3.5 h-3.5 text-[#a78bfa]" />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => handleRetryFrom(origin)}
+        disabled={!canRetry}
+        title={retryTitle ?? (language === 'zh-CN' ? '重新发送该指令' : 'Send this prompt again')}
+        className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
+      >
+        <RotateCcw className="w-3.5 h-3.5 text-[#38bdf8]" />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => handleQuoteMessage(msg.content)}
+        title={language === 'zh-CN' ? '引用自己这条指令并追问' : 'Quote this prompt and ask about it'}
+        className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+      >
+        <Quote className="w-3.5 h-3.5 text-[#38bdf8]" />
+      </button>
+    </div>
+  )}
+  </div>
+);
+      }),
+    [transcript, retryOriginByMsgId, editingEntryId, copiedMessageId, language, showThinking, theme, accentColor,
+     omp.isStreaming, omp.liveTokensPerSecond, omp.usage, omp.state, omp.slashCommands, modelLabelFor,
+     handleRetryFrom, handleQuoteMessage, handleCopyMessage, speakText, handleStartEdit, handleForkAt,
+     insertCommandIntoComposer, msgRefs]
+  );
   return (
     <div className="flex-1 flex w-full h-full min-h-0 min-w-0 overflow-hidden">
       {/* ======================================================== */}
@@ -1522,193 +1734,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                   </div>
                 ) : (
                   <>
-                    {transcript.map((msg) => {
-                      const isUser = msg.role === 'user';
-                      const anchored = Boolean(msg.entryId);
-                      const anchorTitle = anchored
-                        ? undefined
-                        : language === 'zh-CN'
-                        ? '该消息没有 omp 日志锚点'
-                        : 'This message has no omp log anchor';
-                      const origin = isUser ? msg : retryOriginByMsgId[msg.id];
-                      const canRetry = Boolean(origin?.entryId) && !omp.isStreaming;
-                      const retryTitle = origin?.entryId
-                        ? omp.isStreaming
-                          ? language === 'zh-CN'
-                            ? '智能体运行中，请先停止或等待结束'
-                            : 'Agent is running — stop or wait for the turn to settle'
-                          : undefined
-                        : anchorTitle;
-                      return (
-                        <div
-                          key={msg.id}
-                          ref={(el) => {
-                            msgRefs.current[msg.id] = el;
-                          }}
-                          className={`group flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
-                        >
-                          <div className="flex items-center gap-2 mb-1 text-[10px] font-mono text-[#71717a]">
-                            <span>
-                              {isUser
-                                ? language === 'zh-CN'
-                                  ? '你 (You)'
-                                  : 'You'
-                                : modelLabelFor(msg)}
-                            </span>
-                            <span>{msg.timestamp}</span>
-                            {msg.streaming && (
-                              <span className="text-[#a78bfa] animate-pulse">
-                                {language === 'zh-CN' ? '生成中…' : 'streaming…'}
-                              </span>
-                            )}
-                          </div>
-
-                          <div
-                            className={`select-text text-[13.5px] leading-[1.7] ${msg.pending ? 'opacity-70' : ''} ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
-                          >
-                            {isUser ? (
-                              /* Whatever was typed goes out verbatim. */
-                              <p className="whitespace-pre-wrap">{msg.content}</p>
-                            ) : (msg.blocks ?? []).length > 0 ? (
-                              /* pi-web's model: thinking / text / tool blocks in the
-                                 order omp produced them. Copy stays markdown source. */
-                              <AssistantBlocks
-                                blocks={msg.blocks ?? []}
-                                streaming={msg.streaming}
-                                zh={language === 'zh-CN'}
-                                showThinking={showThinking}
-                                metrics={
-                                  msg.streaming
-                                    ? {
-                                        // Live rolling rate while streaming; omp's own
-                                        // per-turn figure is the fallback.
-                                        rate: omp.liveTokensPerSecond ?? omp.state?.tokensPerSecond,
-                                        rateIsEstimate: omp.liveTokensPerSecond !== null,
-                                        outputTokens: omp.usage?.completionTokens,
-                                      }
-                                    : null
-                                }
-                                onInsertCommand={(command) => {
-                                  setInputPrompt(command);
-                                  textareaRef.current?.focus();
-                                }}
-                              />
-                            ) : msg.content === '_(no text output)_' ? (
-                              <p className="text-[#52525b] italic">
-                                {language === 'zh-CN' ? '（该轮未返回文本）' : '(no text returned this turn)'}
-                              </p>
-                            ) : (
-                              /* Messages without blocks (imported/mock turns) still render markdown. */
-                              <div className="markdown-body min-w-0">{renderMarkdown(msg.content)}</div>
-                            )}
-
-                            {/* Turn actions — the omp transcript is append-only, so no delete */}
-                            {!isUser && (
-                              <div className="mt-2.5 pt-2 border-t border-[#1e1e24] flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyMessage(msg.id, msg.content)}
-                                  title={language === 'zh-CN' ? '复制 Markdown 源码' : 'Copy the markdown source'}
-                                  className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
-                                >
-                                  {copiedMessageId === msg.id ? (
-                                    <Check className="w-3.5 h-3.5 text-[#34d399]" />
-                                  ) : (
-                                    <Copy className="w-3.5 h-3.5" />
-                                  )}
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleRetryFrom(origin)}
-                                  disabled={!canRetry}
-                                  title={retryTitle ?? (language === 'zh-CN' ? '重新生成该回复' : 'Regenerate this reply')}
-                                  className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5 text-[#a78bfa]" />
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleForkAt(msg)}
-                                  disabled={!anchored}
-                                  title={anchorTitle ?? (language === 'zh-CN' ? '在此处快照为新会话文件' : 'Fork the session into a new file here')}
-                                  className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
-                                >
-                                  <GitBranch className="w-3.5 h-3.5 text-[#a78bfa]" />
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuoteMessage(msg.content)}
-                                  title={language === 'zh-CN' ? '引用此条回复并追问' : 'Ask about this message'}
-                                  className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
-                                >
-                                  <Quote className="w-3.5 h-3.5 text-[#38bdf8]" />
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => void speakText(msg.content)}
-                                  title={language === 'zh-CN' ? '朗读该回复（omp say 本地 TTS）' : 'Read this reply aloud (omp say local TTS)'}
-                                  className="p-1.5 rounded bg-[#18181b] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
-                                >
-                                  <Volume2 className="w-3.5 h-3.5 text-[#34d399]" />
-                                </button>
-                              </div>
-                            )}
-
-                          </div>
-
-                        {/* Your own message: actions sit under the bubble, not inside it */}
-                        {isUser && !msg.pending && (
-                          <div className="mt-1 flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                            <button
-                              type="button"
-                              onClick={() => handleCopyMessage(msg.id, msg.content)}
-                              title={language === 'zh-CN' ? '复制该指令' : 'Copy prompt'}
-                              className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
-                            >
-                              {copiedMessageId === msg.id ? (
-                                <Check className="w-3.5 h-3.5 text-[#34d399]" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleStartEdit(msg)}
-                              disabled={!anchored}
-                              title={anchorTitle ?? (language === 'zh-CN' ? '编辑并从此处分支重发' : 'Edit & resend from here')}
-                              className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
-                            >
-                              <Pencil className="w-3.5 h-3.5 text-[#a78bfa]" />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleRetryFrom(origin)}
-                              disabled={!canRetry}
-                              title={retryTitle ?? (language === 'zh-CN' ? '重新发送该指令' : 'Send this prompt again')}
-                              className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5 text-[#38bdf8]" />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleQuoteMessage(msg.content)}
-                              title={language === 'zh-CN' ? '引用自己这条指令并追问' : 'Quote this prompt and ask about it'}
-                              className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
-                            >
-                              <Quote className="w-3.5 h-3.5 text-[#38bdf8]" />
-                            </button>
-                          </div>
-                        )}
-                        </div>
-                      );
-                    })}
+                    {transcriptRows}
 
                     {omp.isStreaming && (
                       <div className="flex items-center gap-2 text-xs font-mono text-[#a78bfa] animate-pulse">
@@ -2256,6 +2282,28 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                         {omp.thinkingLevel ?? (language === 'zh-CN' ? '思考' : 'think')}
                       </span>
                       <ChevronDown className="w-3 h-3 text-[#71717a]" />
+                    </button>
+
+                    {/* Global default for reasoning blocks (each block still overrides) */}
+                    <button
+                      type="button"
+                      onClick={() => setShowThinking((prev) => !prev)}
+                      title={
+                        showThinking
+                          ? language === 'zh-CN'
+                            ? '思考块默认展开（点击改为默认折叠）'
+                            : 'Thinking blocks open by default (click to fold them)'
+                          : language === 'zh-CN'
+                          ? '思考块默认折叠（点击展开）'
+                          : 'Thinking blocks folded by default (click to expand)'
+                      }
+                      className={`flex items-center gap-1 px-2 py-1 rounded border text-[11px] font-mono cursor-pointer transition-colors ${
+                        showThinking
+                          ? 'bg-[#18181b] border-[#38bdf8]/60 text-[#38bdf8]'
+                          : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46]'
+                      }`}
+                    >
+                      <Brain className="w-3 h-3" />
                     </button>
 
                     {thinkingDropdownOpen && (

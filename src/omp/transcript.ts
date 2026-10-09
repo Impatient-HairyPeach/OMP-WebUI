@@ -6,7 +6,7 @@
  * the answers and tool calls it produced.
  */
 import type { ChatMessage, MessageBlock } from "../types";
-import type { OmpContentBlock, OmpMessage, OmpSessionEntry, OmpToolExecution, OmpUsage } from "./protocol";
+import type { OmpContentBlock, OmpMessage, OmpSessionEntry, OmpToolExecution } from "./protocol";
 
 const TOOL_OUTPUT_LIMIT = 4000;
 
@@ -346,8 +346,4 @@ export function liveTurnToChatMessage(turn: LiveTurn, model?: string): ChatMessa
     streaming: true,
     model,
   };
-}
-
-export function usageSummary(usage?: OmpUsage): { tokens: number; cost: number } {
-  return { tokens: usage?.totalTokens ?? 0, cost: usage?.cost?.total ?? 0 };
 }

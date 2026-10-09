@@ -3,6 +3,24 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.22
+
+- Typing no longer re-renders the whole transcript. The turn rows are built once
+  per transcript change (stable `transcript` identity, memoized rows, memoized
+  `AssistantBlocks` with primitive props, markdown parsed once per text block,
+  stable handlers). Measured on a 64-turn session with 251 reasoning folds:
+  dev build 78 ms → 35 ms per keystroke, **production build 4.5 ms** (was 7 ms
+  before, 30+ ms with everything expanded). For daily use prefer
+  `bun run build && bun run start`; the dev server's JSX runtime is most of the
+  remaining cost.
+- Fixed a regression that removed the global reasoning-visibility toggle: the
+  composer toolbar has its brain button back (next to the thinking level) and the
+  preference persists again (`omp-studio:show-thinking`).
+- Removed dead weight: `DeployModal.tsx` (160 lines, imported nowhere),
+  `usageSummary`, `hasModifier`, and eight unused type aliases
+  (`ChatSession`, `WorktreeItem`, `PluginItem`, `SkillCategory`, `LLMProvider`,
+  `OmpModelRole`).
+
 ## 0.3.21
 
 - Your prompt appears the moment you send it. omp only reports the user message

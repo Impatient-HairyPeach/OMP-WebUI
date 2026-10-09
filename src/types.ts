@@ -22,28 +22,6 @@ export interface McpServer {
   iconType: 'filesystem' | 'docker' | 'postgres' | 'github' | 'custom';
 }
 
-export interface PluginItem {
-  id: string;
-  name: string;
-  version: string;
-  author: string;
-  description: string;
-  tags: string[];
-  enabled: boolean;
-  statusLabel: string;
-  configLinkText?: string;
-  warningBadge?: string;
-  iconType: 'git' | 'k8s' | 'linear' | 'security';
-  configSettings?: {
-    autoApprovalRate?: number;
-    targetBranch?: string;
-    syncIntervalMinutes?: number;
-    sandboxLevel?: string;
-  };
-}
-
-export type SkillCategory = 'All' | 'Auditing' | 'Code Generation' | 'DevOps';
-
 export interface SkillItem {
   id: string;
   command: string;
@@ -139,27 +117,6 @@ export interface SessionTokenUsage {
 
 export type ModelRoleType = 'fast' | 'planner' | 'coder' | 'reviewer';
 
-export interface OmpModelRole {
-  role: ModelRoleType;
-  label: string;
-  description: string;
-  modelName: string;
-  provider: string;
-  icon: string;
-}
-
-export interface WorktreeItem {
-  id: string;
-  name: string;
-  path: string;
-  branch: string;
-  commitHash: string;
-  agentStatus: 'active' | 'idle' | 'running_tests' | 'uncommitted';
-  modifiedFilesCount: number;
-  createdTime: string;
-  isMainWorktree?: boolean;
-}
-
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -179,24 +136,6 @@ export interface ChatMessage {
   model?: string;
 }
 
-export interface ChatSession {
-  id: string;
-  title: string;
-  projectId: string;
-  updatedAt: string;
-  category: 'today' | 'yesterday' | 'previous';
-  messages: ChatMessage[];
-  parentId?: string;
-  forkedFromStep?: {
-    stepId?: string;
-    stepIndex?: number;
-    stepTitle: string;
-  };
-  tokenUsage?: SessionTokenUsage;
-  changedFiles?: FileDiffItem[];
-  worktreePath?: string;
-}
-
 export interface ThemeOption {
   id: string;
   name: string;
@@ -213,18 +152,3 @@ export interface ThemeOption {
   textMuted?: string;
 }
 
-export interface LLMProvider {
-  id: string;
-  name: string;
-  vendor: string;
-  endpoint: string;
-  apiKeyMasked: string;
-  status: 'Active' | 'Connected' | 'Standby' | 'Rate Limited';
-  latency: string;
-  models: string[];
-  billsThisMonth: number;
-  balanceRemaining: number | 'Unlimited';
-  currency: string;
-  billingType: 'Postpaid Monthly' | 'Prepaid Credits' | 'Internal Self-Hosted' | 'Pay-As-You-Go';
-  monthlyQuota?: number;
-}

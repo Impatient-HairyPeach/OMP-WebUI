@@ -12,7 +12,7 @@
  * Visibility is `perBlockOverride ?? showThinking`, and collapsing only affects
  * the DOM: the model's reasoning is untouched in the session log.
  */
-import React, { useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { Brain, ChevronDown, ChevronRight, CircleAlert, Loader2, Terminal } from 'lucide-react';
 import type { MessageBlock, TextBlockItem, ToolBlockItem } from '../types';
 import { renderMarkdown } from '../lib/miniMarkdown';
@@ -27,6 +27,12 @@ interface AssistantBlocksProps {
   metrics?: { rate?: number | null; rateIsEstimate?: boolean; outputTokens?: number | null } | null;
   onInsertCommand?: (command: string) => void;
 }
+
+/** Markdown is parsed once per text, not once per render of the transcript. */
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
+  const nodes = useMemo(() => renderMarkdown(text), [text]);
+  return <div className="markdown-body min-w-0">{nodes}</div>;
+});
 
 function compactTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
@@ -213,7 +219,7 @@ function ToolBlock({ block, zh, onInsertCommand }: { block: ToolBlockItem; zh: b
   );
 }
 
-export const AssistantBlocks: React.FC<AssistantBlocksProps> = ({
+const AssistantBlocksView: React.FC<AssistantBlocksProps> = ({
   blocks,
   streaming,
   zh,
@@ -221,7 +227,7 @@ export const AssistantBlocks: React.FC<AssistantBlocksProps> = ({
   metrics,
   onInsertCommand,
 }) => {
-  const groups = groupBlocks(blocks);
+  const groups = useMemo(() => groupBlocks(blocks), [blocks]);
   if (groups.length === 0) return null;
   const rate = typeof metrics?.rate === 'number' ? metrics.rate : null;
   const tokens = typeof metrics?.outputTokens === 'number' ? metrics.outputTokens : null;
@@ -249,12 +255,15 @@ export const AssistantBlocks: React.FC<AssistantBlocksProps> = ({
           return <ToolBlock key={`tool-${group.block.id}`} block={group.block} zh={zh} onInsertCommand={onInsertCommand} />;
         }
         // Markdown only for what is actually on screen.
-        return (
-          <div key={`text-${group.block.id}`} className="markdown-body min-w-0">
-            {renderMarkdown(group.block.text)}
-          </div>
-        );
+        return <MarkdownBlock key={`text-${group.block.id}`} text={group.block.text} />;
       })}
     </div>
   );
 };
+
+/**
+ * Memoized: the transcript re-renders on every keystroke and every streaming
+ * flush, and a long session holds hundreds of these. Props are primitives (or a
+ * stable block array), so an unchanged turn costs nothing.
+ */
+export const AssistantBlocks = memo(AssistantBlocksView);

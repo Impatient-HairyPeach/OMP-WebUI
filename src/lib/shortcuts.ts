@@ -68,8 +68,6 @@ export function saveShortcuts(map: ShortcutMap): void {
   window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(map));
 }
 
-const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift'] as const;
-
 /** Canonical `Ctrl+Alt+B` form of a key event, or null for modifier-only presses. */
 export function bindingOf(event: KeyboardEvent): string | null {
   const key = event.key;
@@ -117,10 +115,6 @@ export function matchesBinding(binding: string, event: KeyboardEvent): boolean {
   if (!wanted) return false;
   const actual = bindingOf(event);
   return actual === wanted;
-}
-
-export function hasModifier(binding: string): boolean {
-  return MODIFIER_ORDER.some((name) => binding.toLowerCase().includes(name.toLowerCase()));
 }
 
 /** Platform-aware label: ⌘ on macOS, Ctrl elsewhere. */
