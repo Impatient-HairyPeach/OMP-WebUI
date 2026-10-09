@@ -3,6 +3,11 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.16
+
+- The task list above the composer drops its progress bar; the count stays
+  (`任务列表 9/9`).
+
 ## 0.3.15
 
 - Extension status chips are no longer cut off mid-number. The row used to join

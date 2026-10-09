@@ -61,12 +61,6 @@ export const TaskHud: React.FC<TaskHudProps> = ({ todos, subagents, zh, accentCo
               {zh ? `子代理 ${subagents.length}` : `Subagents ${subagents.length}`}
             </span>
           )}
-          <span className="h-1 w-16 rounded-full bg-[#27272a] overflow-hidden shrink-0">
-            <span
-              className="block h-full rounded-full"
-              style={{ width: `${tasks.length ? (done / tasks.length) * 100 : 0}%`, backgroundColor: accentColor }}
-            />
-          </span>
         </button>
         {onOpenDetails && (
           <button
