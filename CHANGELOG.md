@@ -3,6 +3,17 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.21
+
+- Your prompt appears the moment you send it. omp only reports the user message
+  once the turn starts, so the reply (and the "generating…" placeholder) used to
+  show up first and your own words landed above it a beat later. The prompt is now
+  echoed locally (`pending`, slightly dimmed, no actions), and omp's own copy of
+  it replaces the echo when it arrives (matched by text). A rejected command takes
+  the echo back instead of leaving a message that was never sent.
+  Verified: 0.7 s after Enter the bubble is on screen with the turn not yet
+  started, and the settled transcript reads `you → agent` with no duplicates.
+
 ## 0.3.20
 
 - The task list (composer HUD and the right panel's 任务 tab) updates live again.

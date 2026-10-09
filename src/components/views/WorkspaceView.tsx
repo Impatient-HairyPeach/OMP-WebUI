@@ -1564,7 +1564,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                           </div>
 
                           <div
-                            className={`select-text text-[13.5px] leading-[1.7] ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
+                            className={`select-text text-[13.5px] leading-[1.7] ${msg.pending ? 'opacity-70' : ''} ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
                           >
                             {isUser ? (
                               /* Whatever was typed goes out verbatim. */
@@ -1661,7 +1661,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                           </div>
 
                         {/* Your own message: actions sit under the bubble, not inside it */}
-                        {isUser && (
+                        {isUser && !msg.pending && (
                           <div className="mt-1 flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                             <button
                               type="button"

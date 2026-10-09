@@ -364,6 +364,16 @@ export function useOmpSession(): OmpSessionApi {
         case "message_end": {
           const message = frame.message as OmpMessage | undefined;
           if (!message) break;
+          if (message.role === "user") {
+            // omp's copy of the prompt replaces the local echo (matched by text).
+            setMessages((prev) => {
+              const text = blockText(message.content, "text").trim();
+              const withoutEcho = prev.filter(
+                (entry) => !(entry.pending && (!text || entry.content.trim() === text))
+              );
+              return withoutEcho.length === prev.length ? prev : withoutEcho;
+            });
+          }
           if (message.role === "toolResult") {
             // Results arrive as their own message: fold them into the call block
             // (and into the streaming turn) so outputs show up immediately.
@@ -658,8 +668,27 @@ export function useOmpSession(): OmpSessionApi {
             ? { type: "follow_up", message: text }
             : { type: "prompt", message: text };
       if (!behavior) setTurnActive(true);
-      const response = await bridge.command(command);
+      // Echo the prompt straight away: omp only reports the user message once the
+      // turn starts, which used to make the reply appear above your own words.
+      const pendingId = `pending-user-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: pendingId,
+          role: "user",
+          content: text,
+          timestamp: clockNow(),
+          pending: true,
+        },
+      ]);
+      const response = await bridge.command(command).catch((error: unknown) => {
+        const detail = error instanceof Error ? error.message : String(error);
+        pushLog("error", `command failed: ${detail}`);
+        return { success: false, error: detail } as const;
+      });
       if (response.success === false) {
+        // The prompt never left: take the echo back instead of lying about it.
+        setMessages((prev) => prev.filter((entry) => entry.id !== pendingId));
         if (!behavior) setTurnActive(false);
         pushLog("error", response.error ?? "command rejected by omp");
       }

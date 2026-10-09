@@ -173,6 +173,8 @@ export interface ChatMessage {
   entryId?: string;
   /** True while this message is still being streamed by the agent. */
   streaming?: boolean;
+  /** Locally echoed prompt: shown immediately, replaced by omp's own entry. */
+  pending?: boolean;
   /** Model that produced the turn, as reported by omp. */
   model?: string;
 }
