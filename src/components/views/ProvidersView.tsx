@@ -11,6 +11,7 @@ import {
   Layers,
   Loader2,
   Receipt,
+  RefreshCw,
   Search,
   Server,
 } from 'lucide-react';
@@ -94,6 +95,27 @@ export const ProvidersView: React.FC = () => {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [scopeMessage, setScopeMessage] = useState<string | null>(null);
   const [modelQuery, setModelQuery] = useState('');
+  /** Both refresh buttons re-read omp's usage (billing) and quota reports. */
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
+
+  const refreshUsage = async () => {
+    setRefreshing(true);
+    try {
+      const [billing, quota] = await Promise.allSettled([fetchUsage(), fetchProviderUsage(true)]);
+      if (billing.status === 'fulfilled') {
+        setUsage(billing.value);
+        setLoadError(null);
+      } else {
+        setLoadError(billing.reason instanceof Error ? billing.reason.message : String(billing.reason));
+      }
+      // Quota windows are optional: a provider may simply report none.
+      if (quota.status === 'fulfilled') setProviderUsage(quota.value.reports);
+      setRefreshedAt(Date.now());
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -387,8 +409,26 @@ export const ProvidersView: React.FC = () => {
                 <Database className="w-3.5 h-3.5" style={{ color: accentColor }} />
                 {zh ? '计费与用量 (Billing &amp; Usage)' : 'Billing &amp; Usage'}
               </div>
-              <div className="text-[10px] font-mono text-[#71717a]" title={usage?.path}>
-                {SOURCE_LABEL}
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] font-mono text-[#71717a]" title={usage?.path}>
+                  {SOURCE_LABEL}
+                </span>
+                {refreshedAt && (
+                  <span className="text-[10px] font-mono text-[#52525b]">
+                    {new Date(refreshedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void refreshUsage()}
+                  disabled={refreshing}
+                  title={zh ? '重新读取 omp 用量与额度（跳过缓存）' : "Re-read omp's usage and quotas (bypasses the cache)"}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] cursor-pointer transition-colors disabled:opacity-50"
+                  style={{ borderColor: theme.border, color: theme.mode === 'light' ? '#334155' : '#a1a1aa' }}
+                >
+                  <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+                  {zh ? '刷新' : 'Refresh'}
+                </button>
               </div>
             </div>
 
@@ -469,6 +509,17 @@ export const ProvidersView: React.FC = () => {
                 placeholder={zh ? '搜索提供商或模型…' : 'Search providers or models…'}
                 className="flex-1 h-7 px-2 bg-[#121215] border border-[#27272a] rounded text-[11px] text-[#fafafa] placeholder-[#52525b] focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
               />
+              <button
+                type="button"
+                onClick={() => void refreshUsage()}
+                disabled={refreshing}
+                title={zh ? '刷新提供商额度与用量' : 'Refresh provider quotas and usage'}
+                className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] cursor-pointer transition-colors disabled:opacity-50"
+                style={{ borderColor: theme.border, color: theme.mode === 'light' ? '#334155' : '#a1a1aa' }}
+              >
+                <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+                {zh ? '刷新' : 'Refresh'}
+              </button>
               <span className="text-[10px] font-mono text-[#71717a] shrink-0">
                 {scope
                   ? `${disabledProviders.size} ${zh ? '个提供商停用' : 'providers off'} · ${

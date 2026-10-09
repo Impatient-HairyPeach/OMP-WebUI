@@ -28,6 +28,10 @@ Settings (`v<version> · <build date>`).
   dim one, and the folded preview uses the dim tier instead of 70% of it.
 - A live generation readout (rate + output tokens) sits above the turn's blocks
   while it streams.
+- Settings → 提供商与模型: the 计费与用量 panel and the provider list both have a
+  **刷新** button that re-reads `omp usage` and bypasses the quota cache
+  (`/api/omp/provider-usage?force=1`), showing a spinner and the time of the last
+  refresh next to the source label.
 
 ## 0.3.17
 
