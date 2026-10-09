@@ -3,6 +3,22 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.25
+
+- Composer toolbar rearranged, left → right: **model** (name only — the brain glyph
+  is gone), **thinking level**, **attach file**, then the action cluster:
+  **context/compact** (moved down from the top banner, with its menu), **voice
+  input**, **read aloud**, **tool permission**, and a **wider action button**.
+- The action button now carries the state: `发送` while idle, a wide red `停止`
+  while a turn runs with an empty composer, and `引导` / `排队` with its mode
+  switcher once you type mid-turn. The old icon-only send/stop buttons are gone.
+- The working clock moved next to the reply's "正在生成回复…" label and reads
+  `m:ss` (no "工作" label); it no longer sits in the top banner.
+- Readability in the light theme: the permission menu labels (`每次询问`,
+  `允许写入`) were white on the light menu — they now use the theme's ink colour.
+  The tool-block name (`bash`) and the cyan accents in thinking/tool blocks also
+  moved onto palette tokens instead of dark-theme literals.
+
 ## 0.3.24
 
 - Tool approval in the composer. The shield sits with the other action icons
@@ -46,22 +62,6 @@ Settings (`v<version> · <build date>`).
   `usageSummary`, `hasModifier`, and eight unused type aliases
   (`ChatSession`, `WorktreeItem`, `PluginItem`, `SkillCategory`, `LLMProvider`,
   `OmpModelRole`).
-
-## 0.3.22
-
-- Composer toolbar rearranged, left → right: **model** (name only — the brain glyph
-  is gone), **thinking level**, **attach file**, then the action cluster:
-  **context/compact** (moved down from the top banner, with its menu), **voice
-  input**, **read aloud**, **tool permission**, and a **wider action button**.
-- The action button now carries the state: `发送` while idle, a wide red `停止`
-  while a turn runs with an empty composer, and `引导` / `排队` with its mode
-  switcher once you type mid-turn. The old icon-only send/stop buttons are gone.
-- The working clock moved next to the reply's "正在生成回复…" label and reads
-  `m:ss` (no "工作" label); it no longer sits in the top banner.
-- Readability in the light theme: the permission menu labels (`每次询问`,
-  `允许写入`) were white on the light menu — they now use the theme's ink colour.
-  The tool-block name (`bash`) and the cyan accents in thinking/tool blocks also
-  moved onto palette tokens instead of dark-theme literals.
 
 ## 0.3.21
 
