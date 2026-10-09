@@ -50,8 +50,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     setTimeout(() => setToastMsg(null), 2500);
   };
 
-  // Parse diff lines
-  const lines = activeDiff.diff.split('\n');
+  // Parse diff lines (untracked files carry no patch: git has nothing to compare)
+  const lines = activeDiff.diff ? activeDiff.diff.split('\n') : [];
 
   return (
     <div className="border border-[#27272a] rounded-xl bg-[#09090b] overflow-hidden flex flex-col font-mono text-xs shadow-lg">
@@ -129,6 +129,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       </div>
 
       {/* Diff Code Viewer */}
+      {lines.length === 0 && (
+        <div className="px-3 py-2 text-[10px] text-[#71717a] border-b border-[#27272a]">
+          {language === 'zh-CN'
+            ? '新文件：git diff 不包含未跟踪内容，提交时会一并纳入'
+            : 'New file: git diff excludes untracked files; it is included when you commit'}
+        </div>
+      )}
       <div className="overflow-x-auto p-3 text-[11px] leading-relaxed max-h-[460px] overflow-y-auto bg-[#09090b]">
         {lines.map((line, lIdx) => {
           const isHunkHeader = line.startsWith('@@');

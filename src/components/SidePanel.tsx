@@ -52,6 +52,7 @@ import {
   type WorkspaceEntry,
   type WorkspaceFile,
 } from '../omp/cli';
+import { gitStatusStyle } from '../lib/gitStatus';
 import { SIDE_PANEL } from '../lib/panelLayout';
 import { renderMarkdown } from '../lib/miniMarkdown';
 import type { FileDiffItem, LogEntry } from '../types';
@@ -133,8 +134,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     void loadDir();
   }, [isOpen, activeTab, entriesByDir, loadDir]);
 
+  /* The diffs tab and the git tab render the same working-tree payload; the git
+     tab used to render the list without ever loading it, so it always claimed
+     "no uncommitted changes" while the header showed the real count. */
   useEffect(() => {
-    if (!isOpen || activeTab !== 'diffs') return;
+    if (!isOpen || (activeTab !== 'diffs' && activeTab !== 'git')) return;
     fetchGitDiff()
       .then((payload) => setDiffFiles(payload.files))
       .catch((error) => setDiffError(error instanceof Error ? error.message : String(error)));
@@ -625,17 +629,31 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 <span>{diffFiles.length}</span>
               </div>
               <div className="space-y-1">
-                {diffFiles.map((file) => (
-                  <div key={file.path} className="flex items-center justify-between gap-2 text-[10px]">
-                    <span className="truncate" style={{ color: theme.mode === 'light' ? '#0f172a' : '#d4d4d8' }} title={file.path}>
-                      {file.path}
-                    </span>
-                    <span className="shrink-0">
-                      <span className="text-[#34d399]">+{file.additions}</span>{' '}
-                      <span className="text-[#ef4444]">-{file.deletions}</span>
-                    </span>
-                  </div>
-                ))}
+                {diffFiles.map((file) => {
+                  const status = gitStatusStyle(file.status);
+                  return (
+                    <div key={`${file.status}:${file.path}`} className="flex items-center justify-between gap-2 text-[10px]">
+                      <span
+                        className="text-[8px] px-1 py-px rounded shrink-0 font-bold uppercase"
+                        style={{ backgroundColor: `${status.color}1a`, color: status.color }}
+                        title={zh ? status.zh : status.en}
+                      >
+                        {zh ? status.zh : status.en}
+                      </span>
+                      <span className="truncate flex-1" style={{ color: theme.mode === 'light' ? '#0f172a' : '#d4d4d8' }} title={file.path}>
+                        {file.path}
+                      </span>
+                      {file.status !== 'untracked' ? (
+                        <span className="shrink-0 tabular-nums">
+                          <span className="text-[#34d399]">+{file.additions}</span>{' '}
+                          <span className="text-[#ef4444]">-{file.deletions}</span>
+                        </span>
+                      ) : (
+                        <span className="shrink-0 text-[#71717a]">{zh ? '新文件' : 'new'}</span>
+                      )}
+                    </div>
+                  );
+                })}
                 {diffFiles.length === 0 && <div className="text-[10px] text-[#52525b]">{zh ? '没有未提交改动。' : 'No uncommitted changes.'}</div>}
               </div>
             </div>

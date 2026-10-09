@@ -3,6 +3,31 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.6
+
+- Theme: the dark palette is now omp's own midnight look — pure black surfaces
+  (#000000 / #0A0A0C panels), magenta accent (#EC5BAB) with the cyan secondary
+  (#7DD7E8) used for focus rings, magenta text selection, and omp's text tiers
+  (#F5F5F5 / #C9C9D1 / #8E8E96). Light stays untouched; "omp Magenta" and
+  "omp Cyan" joined the accent swatches. All of it flows through the existing
+  token bridge, so no component markup changed.
+- Branding: the new conversation shows the pixel `omp web` wordmark
+  (`public/logo-chat.png`, background keyed out so it works on both themes) and
+  the browser tab uses the pixel `omp` ring (`public/favicon.png`,
+  `public/apple-touch-icon.png`) exactly as drawn, background included.
+- Ping (event console, bottom right) is real now: it times `GET /api/health`
+  against the bridge, prints the round-trip next to the button ("4.3 ms"), opens
+  the log body and appends `manual.ping: bridge /api/health 200 in 4.3 ms · omp
+  ready · <workspace>`. It used to append a canned "pulse sent to
+  /var/run/omp.sock" line that never showed up.
+- Git: the uncommitted dot on the header button is gone — the git panel carries
+  that state instead, and now actually loads it. The panel (and the git dialog)
+  list every uncommitted file with a status chip (修改/新增/删除/未跟踪/重命名),
+  +/− line counts, and the patch inline. Two parser bugs fixed on the way:
+  paths containing `b/` (`src/lib/…`) were truncated, and a status could be read
+  out of patched text; statuses now come from the same `git status --porcelain`
+  the header count uses, untracked files included.
+
 ## 0.3.5
 
 - Settings: every module title is the same size (`text-sm`), and section titles

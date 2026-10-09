@@ -164,9 +164,6 @@ export const Header: React.FC<HeaderProps> = ({
           className="relative p-1.5 text-[#a1a1aa] hover:text-[#fafafa] hover:bg-[#18181b] rounded transition-colors cursor-pointer"
         >
           <GitBranch className="w-4 h-4" style={{ color: accentColor }} />
-          {git.snapshot?.dirty && (
-            <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />
-          )}
         </button>
       </div>
     </header>

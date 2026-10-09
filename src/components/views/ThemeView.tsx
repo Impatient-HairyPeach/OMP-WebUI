@@ -28,6 +28,8 @@ interface ThemeViewProps {
 
 
 export const ACCENT_SWATCHES = [
+  { name: 'omp Magenta', color: '#ec5bab' },
+  { name: 'omp Cyan', color: '#7dd7e8' },
   { name: 'Soft Violet', color: '#a78bfa' },
   { name: 'Electric Cyan', color: '#38bdf8' },
   { name: 'Emerald', color: '#34d399' },

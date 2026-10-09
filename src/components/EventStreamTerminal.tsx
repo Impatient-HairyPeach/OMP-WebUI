@@ -51,6 +51,9 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
   const [isMaximized, setIsMaximized] = useState(false);
   const [isStreaming, setIsStreaming] = useState(true);
   const [copied, setCopied] = useState(false);
+  /** Result of the last real bridge round-trip (Zap button). */
+  const [ping, setPing] = useState<{ ms: number; ok: boolean; detail: string } | null>(null);
+  const [pinging, setPinging] = useState(false);
 
   // Shell interactive state
   const [bashInput, setBashInput] = useState('');
@@ -123,6 +126,34 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
 
     return () => clearInterval(interval);
   }, [isStreaming, projectName, onAddLog, terminalType]);
+
+  /**
+   * Real round-trip to the bridge: GET /api/health is answered by the server
+   * that owns the omp child process, so the number is an actual latency and the
+   * payload carries omp's own status. The result is shown next to the button
+   * and appended to the event log.
+   */
+  const runPing = async () => {
+    setPinging(true);
+    const started = performance.now();
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store' });
+      const body: { status?: string; workspace?: string } = await res.json();
+      const ms = performance.now() - started;
+      const detail = `omp ${body.status ?? 'unknown'} · ${body.workspace ?? '-'}`;
+      setPing({ ms, ok: res.ok, detail });
+      setIsExpanded(true);
+      onAddLog('OK', `manual.ping: bridge /api/health ${res.status} in ${ms.toFixed(1)} ms · ${detail}`);
+    } catch (error) {
+      const ms = performance.now() - started;
+      const detail = error instanceof Error ? error.message : String(error);
+      setPing({ ms, ok: false, detail });
+      setIsExpanded(true);
+      onAddLog('WARN', `manual.ping: bridge unreachable after ${ms.toFixed(1)} ms · ${detail}`);
+    } finally {
+      setPinging(false);
+    }
+  };
 
   const copyLogs = () => {
     const text = logs
@@ -359,14 +390,28 @@ export const EventStreamTerminal: React.FC<EventStreamTerminalProps> = ({
         <div className="flex items-center gap-3 font-mono text-[11px] text-[#71717a]">
           {terminalType === 'mcp' && (
             <>
-              {/* Trigger test event button */}
+              {/* Real latency to the bridge + omp's own status */}
               <button
-                onClick={() => onAddLog('INFO', `manual.ping: diagnostic pulse sent to /var/run/omp.sock`)}
-                title="Send test heartbeat ping"
-                className="flex items-center gap-1 hover:text-[#a78bfa] transition-colors cursor-pointer"
+                onClick={() => void runPing()}
+                disabled={pinging}
+                title={
+                  (language === 'zh-CN'
+                    ? '往返测量本地桥接（GET /api/health），并读取 omp 自身状态'
+                    : 'Round-trip to the local bridge (GET /api/health), plus omp status') +
+                  (ping ? `\n${ping.detail}` : '')
+                }
+                className="flex items-center gap-1 hover:text-[#a78bfa] transition-colors cursor-pointer disabled:opacity-60"
               >
-                <Zap className="w-3 h-3 text-[#a78bfa]" />
+                <Zap className={`w-3 h-3 text-[#a78bfa] ${pinging ? 'animate-pulse' : ''}`} />
                 <span className="text-[10px]">Ping</span>
+                {ping && (
+                  <span
+                    className="text-[10px] tabular-nums"
+                    style={{ color: ping.ok ? '#34d399' : '#ef4444' }}
+                  >
+                    {ping.ok ? `${ping.ms.toFixed(1)} ms` : 'failed'}
+                  </span>
+                )}
               </button>
 
               {/* Stream pause/play */}

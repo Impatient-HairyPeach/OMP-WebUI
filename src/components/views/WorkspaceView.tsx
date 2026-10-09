@@ -1312,9 +1312,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
               /* New conversation: omp's mark plus a few quick slash commands. */
               <div className="h-full min-h-[320px] flex flex-col items-center justify-center gap-7 select-none">
                 <img
-                  src={theme.mode === 'light' ? '/logo-light.png' : '/logo-dark.png'}
-                  alt="omp"
-                  className="h-14 w-auto opacity-95"
+                  src="/logo-chat.png"
+                  alt="omp web"
+                  className="h-16 w-auto opacity-95"
                 />
                 <div className="flex items-center justify-center gap-2 flex-wrap text-[11px] font-mono">
                   {quickCommands.map((name) => (
@@ -1341,9 +1341,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
             ) : transcript.length === 0 ? (
               <div className="h-full min-h-[320px] flex flex-col items-center justify-center gap-7 select-none">
                 <img
-                  src={theme.mode === 'light' ? '/logo-light.png' : '/logo-dark.png'}
-                  alt="omp"
-                  className="h-14 w-auto opacity-95"
+                  src="/logo-chat.png"
+                  alt="omp web"
+                  className="h-16 w-auto opacity-95"
                 />
                 <div className="flex items-center justify-center gap-2 flex-wrap text-[11px] font-mono">
                   {quickCommands.map((name) => (

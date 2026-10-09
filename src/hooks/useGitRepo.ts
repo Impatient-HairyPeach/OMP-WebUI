@@ -7,15 +7,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   checkoutGitBranch,
   commitGitChanges,
+  fetchGitDiff,
   fetchGitLog,
   fetchGitSnapshot,
   type GitCommitEntry,
+  type GitDiffFile,
   type GitSnapshot,
 } from "../omp/cli";
 
 export interface GitRepoApi {
   snapshot: GitSnapshot | null;
   commits: GitCommitEntry[];
+  /** Uncommitted working-tree files (patch text included), fetched on demand. */
+  changes: GitDiffFile[];
+  changesLoading: boolean;
+  loadChanges: () => Promise<void>;
   error: string | null;
   loading: boolean;
   /** Set while a checkout/commit is running (holds the branch name or "commit"). */
@@ -28,6 +34,8 @@ export interface GitRepoApi {
 export function useGitRepo(): GitRepoApi {
   const [snapshot, setSnapshot] = useState<GitSnapshot | null>(null);
   const [commits, setCommits] = useState<GitCommitEntry[]>([]);
+  const [changes, setChanges] = useState<GitDiffFile[]>([]);
+  const [changesLoading, setChangesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -60,6 +68,20 @@ export function useGitRepo(): GitRepoApi {
     const timer = window.setInterval(() => void refresh(), 20_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  /** The diff endpoint carries every patch, so it is loaded when a git surface
+      asks for it instead of riding the 20s branch poll. */
+  const loadChanges = useCallback(async () => {
+    setChangesLoading(true);
+    try {
+      const diff = await fetchGitDiff();
+      if (mountedRef.current) setChanges(diff.files);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (mountedRef.current) setChangesLoading(false);
+    }
+  }, []);
 
   const checkout = useCallback(
     async (branch: string) => {
@@ -98,5 +120,17 @@ export function useGitRepo(): GitRepoApi {
     }
   }, []);
 
-  return { snapshot, commits, error, loading, busy, refresh, checkout, commit };
+  return {
+    snapshot,
+    commits,
+    changes,
+    changesLoading,
+    loadChanges,
+    error,
+    loading,
+    busy,
+    refresh,
+    checkout,
+    commit,
+  };
 }

@@ -1064,17 +1064,48 @@ app.get("/api/fs/dirs", (req, res) => {
 /** Real working-tree diff of the agent's workspace, split per file for the Diffs tab. */
 app.get("/api/git/diff", async (_req, res) => {
   try {
-    const { stdout } = await runGit(["diff", "HEAD", "--no-color", "--no-ext-diff"], workspace);
+    const [{ stdout }, { stdout: statusOut }] = await Promise.all([
+      runGit(["diff", "HEAD", "--no-color", "--no-ext-diff"], workspace),
+      // The same porcelain the dirty count comes from, so the panel and the
+      // header badge can never disagree. `git diff HEAD` itself never lists
+      // untracked files, and its content cannot be trusted to classify a change
+      // (a patched line may well contain the words "new file mode").
+      runGit(["status", "--porcelain"], workspace),
+    ]);
+    const statusByPath = new Map<string, string>();
+    for (const line of statusOut.split("\n")) {
+      if (!line.trim()) continue;
+      const code = line.slice(0, 2);
+      const raw = line.slice(3).trim();
+      const path = (raw.includes(" -> ") ? raw.split(" -> ").pop()! : raw).trim();
+      const status = code.includes("?")
+        ? "untracked"
+        : code.includes("A")
+        ? "added"
+        : code.includes("D")
+        ? "deleted"
+        : code.includes("R")
+        ? "renamed"
+        : "modified";
+      statusByPath.set(path, status);
+    }
     const files: Array<{ path: string; status: string; additions: number; deletions: number; diff: string }> = [];
     for (const chunk of stdout.split(/^diff --git /m).slice(1)) {
+      // Header is `a/<old> b/<new>`; anchor on the leading `a/` so a path that
+      // itself contains `b/` (src/lib/...) cannot be mistaken for the b-side.
       const header = chunk.split("\n")[0];
-      const pathMatch = header.match(/b\/(.+)$/);
+      const pathMatch = header.match(/^a\/(.+) b\/(.+)$/);
       if (!pathMatch) continue;
       const body = `diff --git ${chunk}`;
-      const status = body.includes("new file mode") ? "added" : body.includes("deleted file mode") ? "deleted" : "modified";
+      const path = pathMatch[2].trim();
+      const status = statusByPath.get(path) ?? (body.split("\n").slice(0, 4).join("\n").includes("new file mode") ? "added" : "modified");
       const additions = body.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;
       const deletions = body.split("\n").filter((line) => line.startsWith("-") && !line.startsWith("---")).length;
-      files.push({ path: pathMatch[1].trim(), status, additions, deletions, diff: body });
+      files.push({ path, status, additions, deletions, diff: body });
+    }
+    // Untracked entries have no patch to show; carry them so the count matches.
+    for (const [path, status] of statusByPath) {
+      if (status === "untracked") files.push({ path, status, additions: 0, deletions: 0, diff: "" });
     }
     res.json({ workspace, files });
   } catch (error) {

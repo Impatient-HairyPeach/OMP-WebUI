@@ -2,10 +2,11 @@
  * Git repository dialog: real branches (`git branch`), the live HEAD, real
  * recent commits (`git log`) and a real checkout. Nothing here is fixture data.
  */
-import React, { useState } from 'react';
-import { X, GitBranch, GitCommit, Check, Loader2, FolderGit2, AlertCircle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, GitBranch, GitCommit, Check, Loader2, FolderGit2, AlertCircle, ChevronRight, FileDiff } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import type { GitRepoApi } from '../hooks/useGitRepo';
+import { gitStatusStyle } from '../lib/gitStatus';
 
 interface GitModalProps {
   isOpen: boolean;
@@ -17,6 +18,16 @@ export const GitModal: React.FC<GitModalProps> = ({ isOpen, onClose, git }) => {
   const { language } = useI18n();
   const zh = language === 'zh-CN';
   const [pendingBranch, setPendingBranch] = useState<string | null>(null);
+  /** Working-tree file whose patch is expanded, keyed by path. */
+  const [openFile, setOpenFile] = useState<string | null>(null);
+
+  /* The patch list is only needed while the dialog is open; it is not part of
+     the 20s branch poll (patches can be large). */
+  useEffect(() => {
+    if (!isOpen) return;
+    setOpenFile(null);
+    void git.loadChanges();
+  }, [isOpen, git.loadChanges]);
 
   if (!isOpen) return null;
 
@@ -79,6 +90,93 @@ export const GitModal: React.FC<GitModalProps> = ({ isOpen, onClose, git }) => {
                 ? '工作区干净'
                 : 'clean'}
             </span>
+          </div>
+
+          {/* Uncommitted work tree: the header dot is gone, this is the one place
+              that shows what is actually modified. */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] text-[#71717a] uppercase tracking-wider flex items-center gap-1.5">
+                <FileDiff className="w-3 h-3" />
+                {zh
+                  ? `未提交的更改 (${git.changes.length})`
+                  : `Uncommitted changes (${git.changes.length})`}
+              </div>
+              <button
+                type="button"
+                onClick={() => void git.loadChanges()}
+                title={zh ? '重新读取工作区改动' : 'Reload working-tree changes'}
+                className="text-[10px] text-[#71717a] hover:text-[#fafafa] transition-colors cursor-pointer flex items-center gap-1"
+              >
+                <Loader2 className={`w-3 h-3 ${git.changesLoading ? 'animate-spin' : ''}`} />
+                {zh ? '刷新' : 'refresh'}
+              </button>
+            </div>
+
+            {git.changes.length === 0 ? (
+              <div className="p-2.5 rounded bg-[#121215] border border-[#27272a] text-[10px] text-[#71717a]">
+                {git.changesLoading
+                  ? zh ? '正在读取…' : 'Loading…'
+                  : zh ? '工作区干净，没有未提交的改动' : 'Clean work tree — nothing uncommitted'}
+              </div>
+            ) : (
+              <div className="space-y-1 max-h-56 overflow-y-auto">
+                {git.changes.map((file) => {
+                  const style = gitStatusStyle(file.status);
+                  const expanded = openFile === file.path;
+                  return (
+                    <div key={`${file.status}:${file.path}`} className="rounded bg-[#121215] border border-[#27272a] overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setOpenFile(expanded ? null : file.path)}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-[#18181b] transition-colors cursor-pointer"
+                      >
+                        <ChevronRight className={`w-3 h-3 shrink-0 text-[#71717a] transition-transform ${expanded ? 'rotate-90' : ''}`} />
+                        <span
+                          className="text-[9px] px-1.5 py-0.5 rounded shrink-0 font-bold uppercase"
+                          style={{ backgroundColor: `${style.color}1a`, color: style.color }}
+                        >
+                          {zh ? style.zh : style.en}
+                        </span>
+                        <span className="text-[11px] text-[#fafafa] truncate flex-1" title={file.path}>{file.path}</span>
+                        {file.status !== 'untracked' && (
+                          <span className="text-[10px] shrink-0 tabular-nums">
+                            <span className="text-[#34d399]">+{file.additions}</span>{' '}
+                            <span className="text-[#ef4444]">-{file.deletions}</span>
+                          </span>
+                        )}
+                      </button>
+                      {expanded && (
+                        file.diff ? (
+                          <pre className="max-h-56 overflow-auto px-2 py-1.5 text-[10px] leading-[1.5] border-t border-[#1e1e24] whitespace-pre">
+                            {file.diff.split('\n').map((line, index) => (
+                              <div
+                                key={index}
+                                style={{
+                                  color: line.startsWith('+') && !line.startsWith('+++')
+                                    ? '#34d399'
+                                    : line.startsWith('-') && !line.startsWith('---')
+                                    ? '#ef4444'
+                                    : '#a1a1aa',
+                                }}
+                              >
+                                {line || ' '}
+                              </div>
+                            ))}
+                          </pre>
+                        ) : (
+                          <div className="px-2 py-1.5 text-[10px] text-[#71717a] border-t border-[#1e1e24]">
+                            {zh
+                              ? '新文件：git diff 不包含未跟踪内容，提交时会一并纳入'
+                              : 'New file: git diff excludes untracked files; it will be included when you commit'}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {git.error && (
