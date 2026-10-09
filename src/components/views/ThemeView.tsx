@@ -1,27 +1,38 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Palette,
+  Bell,
   Check,
-  Sparkles,
-  Sliders,
-  Type,
-  Maximize2,
-  Minimize2,
-  Terminal,
-  Cpu,
-  Shield,
-  Layers,
   CheckCircle2,
-  RefreshCw,
+  Cpu,
   Eye,
   Globe,
   Keyboard,
+  Layers,
+  Maximize2,
+  Minimize2,
+  Palette,
+  RefreshCw,
   RotateCcw,
+  Shield,
+  Sliders,
+  Sparkles,
+  Terminal,
+  Type,
 } from 'lucide-react';
 import { ThemeOption } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
 import { PALETTES, paletteById, type PalettePreference } from '../../lib/palettes';
+import {
+  alertTurnComplete,
+  loadAlertPrefs,
+  notificationState,
+  playChime,
+  requestNotificationPermission,
+  saveAlertPref,
+  type AlertKind,
+  type NotificationState,
+} from '../../lib/alerts';
 import {
   SHORTCUTS,
   bindingOf,
@@ -85,6 +96,14 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
   const [customBorder, setCustomBorder] = useState(activeTheme.border || '#30363d');
   const [customAccent, setCustomAccent] = useState(activeTheme.accent || '#a78bfa');
   const [shortcuts, setShortcuts] = useState<ShortcutMap>(() => loadShortcuts());
+  const [alerts, setAlerts] = useState(() => loadAlertPrefs());
+  const [notifyState, setNotifyState] = useState<NotificationState>(() => notificationState());
+
+  const setAlert = (kind: AlertKind, enabled: boolean) => {
+    const next = { ...alerts, [kind]: enabled };
+    setAlerts(next);
+    saveAlertPref(kind, enabled);
+  };
   /** Action currently capturing the next key press. */
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
 
@@ -379,6 +398,130 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
             ? 'Ctrl 在 macOS 上即 ⌘；输入框内的裸按键仍按输入处理。'
             : 'Ctrl means ⌘ on macOS; modifier-free bindings still type normally in fields.'}
         </p>
+      </div>
+
+      {/* ======================================================== */}
+      {/* SECTION 1.3: COMPLETION ALERTS (完成提醒)                 */}
+      {/* ======================================================== */}
+      <div
+        className="p-4 rounded-lg border space-y-3 transition-colors"
+        style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.border }}
+      >
+        <div className="border-b pb-3" style={{ borderColor: activeTheme.border }}>
+          <div className="text-xs font-semibold flex items-center gap-1.5" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+            <Bell className="w-4 h-4" style={{ color: customAccent }} />
+            {language === 'zh-CN' ? '完成提醒' : 'Completion alerts'}
+          </div>
+          <div className="text-[10px] text-[#71717a] mt-0.5">
+            {language === 'zh-CN'
+              ? '模型回复结束后提醒你；窗口在前台时不打扰（可用右侧按钮立即测试）。'
+              : 'Fires when a turn finishes; stays quiet while the window is focused (use the test buttons).'}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-medium" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+                {language === 'zh-CN' ? '浏览器消息提示' : 'Desktop notification'}
+              </div>
+              <div className="text-[10px] text-[#71717a] truncate">
+                {notifyState === 'unsupported'
+                  ? language === 'zh-CN'
+                    ? '此浏览器不支持系统通知'
+                    : 'this browser has no Notification API'
+                  : notifyState === 'granted'
+                  ? language === 'zh-CN'
+                    ? '已授权'
+                    : 'permission granted'
+                  : notifyState === 'denied'
+                  ? language === 'zh-CN'
+                    ? '已被拒绝，需在浏览器设置里恢复'
+                    : 'denied — re-enable it in the browser settings'
+                  : language === 'zh-CN'
+                  ? '点击开关时会请求授权'
+                  : 'the switch asks for permission'}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={notifyState !== 'granted'}
+                onClick={() => alertTurnComplete({ title: 'OMP WebUI', body: language === 'zh-CN' ? '这是一条测试通知' : 'This is a test notification', force: true })}
+                className="text-[10px] px-2 py-1 rounded border cursor-pointer disabled:opacity-40"
+                style={{ borderColor: activeTheme.border, color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}
+              >
+                {language === 'zh-CN' ? '测试' : 'Test'}
+              </button>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={alerts.desktop}
+                onClick={async () => {
+                  const next = !alerts.desktop;
+                  if (next && notifyState === 'default') {
+                    const state = await requestNotificationPermission();
+                    setNotifyState(state);
+                    if (state !== 'granted') return;
+                  }
+                  if (next && notifyState === 'denied') return;
+                  setAlert('desktop', next);
+                }}
+                className={`w-9 h-5 rounded-full border transition-colors cursor-pointer shrink-0 ${
+                  alerts.desktop ? '' : 'bg-transparent'
+                }`}
+                style={{
+                  backgroundColor: alerts.desktop ? customAccent : 'transparent',
+                  borderColor: alerts.desktop ? customAccent : activeTheme.border,
+                }}
+                title={alerts.desktop ? (language === 'zh-CN' ? '已开启' : 'on') : language === 'zh-CN' ? '已关闭' : 'off'}
+              >
+                <span
+                  className="block w-4 h-4 rounded-full bg-white transition-transform"
+                  style={{ transform: alerts.desktop ? 'translateX(18px)' : 'translateX(2px)' }}
+                />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-medium" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+                {language === 'zh-CN' ? '声音提醒' : 'Sound alert'}
+              </div>
+              <div className="text-[10px] text-[#71717a] truncate">
+                {language === 'zh-CN' ? '两音提示音（WebAudio 合成，不下载资源）' : 'two-tone chime, synthesized (no download)'}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => playChime()}
+                className="text-[10px] px-2 py-1 rounded border cursor-pointer"
+                style={{ borderColor: activeTheme.border, color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}
+              >
+                {language === 'zh-CN' ? '试听' : 'Play'}
+              </button>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={alerts.sound}
+                onClick={() => setAlert('sound', !alerts.sound)}
+                className="w-9 h-5 rounded-full border transition-colors cursor-pointer shrink-0"
+                style={{
+                  backgroundColor: alerts.sound ? customAccent : 'transparent',
+                  borderColor: alerts.sound ? customAccent : activeTheme.border,
+                }}
+                title={alerts.sound ? (language === 'zh-CN' ? '已开启' : 'on') : language === 'zh-CN' ? '已关闭' : 'off'}
+              >
+                <span
+                  className="block w-4 h-4 rounded-full bg-white transition-transform"
+                  style={{ transform: alerts.sound ? 'translateX(18px)' : 'translateX(2px)' }}
+                />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ======================================================== */}

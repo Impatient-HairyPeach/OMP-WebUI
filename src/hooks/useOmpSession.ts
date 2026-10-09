@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, FileDiffItem, SessionTokenUsage } from "../types";
 import { OmpBridge } from "../omp/client";
 import { repairSession as repairSessionHeader } from "../omp/cli";
+import { alertTurnComplete } from "../lib/alerts";
 import {
   appendLiveText,
   appendLiveThinking,
@@ -141,6 +142,11 @@ export function useOmpSession(): OmpSessionApi {
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [turnActive, setTurnActive] = useState(false);
   const liveRef = useRef<LiveTurn | null>(null);
+  /** Latest transcript + title, read by the frame handler for completion alerts. */
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const sessionTitleRef = useRef<string | null>(null);
+  const workspaceRef = useRef("");
+  workspaceRef.current = workspace;
   const liveDirty = useRef(false);
   /** Set below once `loadCurrentSession` exists; the status handler is wired first. */
   const loadCurrentSessionRef = useRef<() => Promise<void>>(async () => {});
@@ -167,6 +173,8 @@ export function useOmpSession(): OmpSessionApi {
     rateWindow.current = [];
     setLiveTokensPerSecond(null);
   }, []);
+
+  messagesRef.current = messages;
 
   const publishLive = useCallback(() => {
     liveDirty.current = false;
@@ -204,6 +212,7 @@ export function useOmpSession(): OmpSessionApi {
   const [branchAnchors, setBranchAnchors] = useState<Array<{ entryId: string; text: string }>>([]);
   const [sessionRoot, setSessionRoot] = useState("");
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
+  sessionTitleRef.current = sessionTitle;
   const [models, setModels] = useState<OmpModelOption[]>([]);
   const [thinkingLevels, setThinkingLevels] = useState<string[]>([]);
   const [diffs, setDiffs] = useState<FileDiffItem[]>([]);
@@ -294,6 +303,18 @@ export function useOmpSession(): OmpSessionApi {
         }
         case "prompt_result": {
           setTurnActive(false);
+          // The turn is over: alert the user if they enabled it and looked away.
+          if (frame.status !== "error" && frame.status !== "aborted") {
+            // The transcript entry may not be folded in yet, so fall back to the
+            // text this turn streamed.
+            const lastAssistant = [...messagesRef.current].reverse().find((entry) => entry.role === "assistant");
+            const streamed = (liveRef.current?.blocks ?? [])
+              .map((block) => (block.kind === "text" ? block.text : ""))
+              .join(" ");
+            const preview = (lastAssistant?.content || streamed).replace(/\s+/g, " ").trim().slice(0, 140);
+            const title = sessionTitleRef.current || workspaceRef.current.split(/[\\/]/).filter(Boolean).pop() || "omp";
+            alertTurnComplete({ title, body: preview || "turn finished" });
+          }
           if (frame.status === "error") {
             const detail = frame.error as { message?: string } | undefined;
             pushLog("error", detail?.message ?? "prompt failed");

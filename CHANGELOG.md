@@ -3,6 +3,19 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.19
+
+- Completion alerts (Settings → 界面主题与偏好 → 完成提醒), both off by default:
+  - **浏览器消息提示** — a desktop notification when a turn finishes, titled with
+    the workspace and previewing the reply. The switch asks for the browser
+    permission the first time; a `测试` button fires one on demand.
+  - **声音提醒** — a two-tone chime synthesized with WebAudio (nothing is
+    downloaded); a `试听` button plays it.
+  Both stay quiet while the window is focused (the point of an alert is that you
+  looked away) and both are remembered per browser. Verified end-to-end: with the
+  window backgrounded, a finished turn produced one notification
+  (`OMP-WebUI / 收到`) and one chime.
+
 ## 0.3.18
 
 - Chat history works again. Two separate defects:
