@@ -64,6 +64,24 @@ export function saveThinkingVisible(visible: boolean): void {
   window.localStorage.setItem(THINKING_VISIBLE_KEY, String(visible));
 }
 
+/** Collapsible left-panel sections: 项目 / 最近 keep their open state. */
+export const SECTION_OPEN_KEYS = {
+  projects: 'omp-studio:section-projects-open',
+  recent: 'omp-studio:section-recent-open',
+} as const;
+
+export type SectionName = keyof typeof SECTION_OPEN_KEYS;
+
+export function loadSectionOpen(section: SectionName): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.localStorage.getItem(SECTION_OPEN_KEYS[section]) !== 'false';
+}
+
+export function saveSectionOpen(section: SectionName, open: boolean): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(SECTION_OPEN_KEYS[section], String(open));
+}
+
 /** Project folders expanded in the session list (JSON array of directory paths). */
 export const EXPANDED_PROJECTS_KEY = 'omp-studio:expanded-projects';
 

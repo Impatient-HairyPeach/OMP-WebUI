@@ -18,6 +18,7 @@ import { EventStreamTerminal } from './components/EventStreamTerminal';
 import { InstallSkillModal } from './components/InstallSkillModal';
 import { CommandPalette } from './components/CommandPalette';
 import { GitModal } from './components/GitModal';
+import { SHORTCUTS, loadShortcuts, matchesBinding } from './lib/shortcuts';
 
 // Alternate Views
 import { SkillsLibraryView } from './components/views/SkillsLibraryView';
@@ -72,6 +73,30 @@ export default function App() {
     mode: 'install',
   });
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  /* Keyboard shortcuts (set in Settings → 界面主题与偏好): the right panel is ours,
+     the left panel / search belong to the workspace view, which listens for the
+     same event. Editable fields keep their keys unless the binding has a modifier. */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const editable = Boolean(
+        target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      );
+      const bindings = loadShortcuts();
+      for (const def of SHORTCUTS) {
+        const binding = bindings[def.action];
+        if (!binding || !matchesBinding(binding, event)) continue;
+        if (editable && !binding.includes('+')) continue;
+        event.preventDefault();
+        if (def.action === 'toggleRight') setSidePanelOpen((prev) => !prev);
+        else window.dispatchEvent(new CustomEvent('omp-shortcut', { detail: { action: def.action } }));
+        return;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Load real workspace + inventory counts once from the bridge.
   useEffect(() => {

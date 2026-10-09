@@ -3,6 +3,36 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.8
+
+- Light theme is the classic one now: white paper `#ffffff`, cool grey panels
+  `#f6f8fa`, hairline borders `#d8dee4`, ink text `#1f2328` and a single blue
+  accent `#0969da`. Measured contrast on the page background: text 15.8:1,
+  muted 6.1:1, dim 5.2:1, accent 5.2:1, white on the accent fill 5.2:1 — every
+  tier also clears 4.5:1 on the panel and hover surfaces.
+- 配色方案 card: the English note inside the title and the description line under
+  it are gone; only the name remains.
+- Left panel: 项目 and 最近 fold independently again (collapsing 项目 used to take
+  最近 with it, because both lived in one wrapper).
+- Text is selectable again: the workspace root had `select-none`, so partial
+  copy of a reply or of your own prompt was impossible; only the whole-message
+  copy button worked. Message bodies opt back into selection explicitly.
+- Your own prompts can be quoted now (the quote action exists on user turns too).
+- Assistant turns are labelled with the model and provider
+  (`DeepSeek V4.1 Flash (opencode-go)`) instead of "Agent (…)".
+- Thinking blocks are readable: they used an unmapped `bg-[#0c0c0e]/60`, which
+  stayed dark-grey in the light theme with light-grey text on top. The surface,
+  the nest surfaces and the secondary (cyan) accent now go through the theme
+  bridge — light theme: `#f6f8fa` panel + 6.1:1 text; dark: `#0a0a0c` + 12.8:1.
+- Streaming shows a live generation rate above the turn's blocks (`≈ 99.8 tok/s`
+  from a rolling 3s window over streamed characters, divided by the
+  chars-per-token ratio measured on the last finished step). omp's own per-turn
+  `tokensPerSecond` — a fixed figure during a turn — is the settled value, and
+  the fallback when no window exists yet.
+- Settings → 界面主题与偏好 → 快捷键: rebind left panel (default Ctrl+B), right
+  panel (Ctrl+Alt+B) and search (Ctrl+F). Press Backspace/Delete or ✕ to leave a
+  binding empty, which disables that shortcut; Ctrl means ⌘ on macOS.
+
 ## 0.3.7
 
 - Assistant turns now render the way pi-web does. omp's `message.content` order

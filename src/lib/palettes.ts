@@ -42,12 +42,12 @@ export const PALETTES: PaletteDef[] = [
     label: { en: 'Light', zh: '浅色' },
     mode: 'light',
     bg: '#ffffff',
-    bgPanel: '#f5f5f5',
-    border: '#e0e0e0',
-    text: '#1a1a1a',
-    textMuted: '#515c6b',
-    textDim: '#5e6673',
-    accent: '#245bce',
+    bgPanel: '#f6f8fa',
+    border: '#d8dee4',
+    text: '#1f2328',
+    textMuted: '#59636e',
+    textDim: '#656d79',
+    accent: '#0969da',
   },
 ];
 

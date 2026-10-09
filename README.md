@@ -70,15 +70,17 @@ Production build: `bun run build && bun run start`.
 - The bottom terminal / event console is docked, expandable and **resizable** (drag its top edge, double-click to reset); the composer keeps its own drag handle.
 - `/` completion is grouped by omp's own command source (系统内置 / 技能 / 扩展 / 提示词) in a 460px two-column panel; `@` completion lists workspace files.
 - Token, context, generation-rate and cache figures are icon chips at the top-right of the conversation (hover for the numbers); the context chip opens `/compact` and the auto-compaction toggle.
-- Message actions: copy, edit-from-here (session-log branch), retry, fork the session at a turn, quote, read aloud.
+- Message actions: copy (whole turn — markdown source), edit-from-here (session-log branch), retry, fork the session at a turn, quote (assistant turns *and* your own prompts), read aloud. Message text is selectable, so a few words or paragraphs can be copied directly.
+- Assistant turns are labelled `Model (provider)`; thinking blocks are low-emphasis folds that stream a live `≈ tok/s` rate above the turn.
 - Voice: browser dictation into the composer (mic) and read-aloud through `omp say`, with the browser voice as fallback.
+- Keyboard shortcuts (rebindable in Settings → 界面主题与偏好 → 快捷键, empty = off): toggle the left panel (Ctrl+B), the right panel (Ctrl+Alt+B) and session search (Ctrl+F).
 - Sessions: two columns — **项目** (grouped by project directory; each folder collapses, the active folder opens automatically, hover a folder to drop it from the list) and **最近** (the newest turns across every project). Both are searchable, and archive/restore + delete live on each row, alongside model + thinking-level switching from omp's own catalogs.
 
 ## Theme
 
 Two palettes plus `auto` and `custom`: the dark palette is omp's own midnight
 look (pure-black surfaces, magenta accent, cyan focus rings and selection),
-the light one is pi-web's; **跟随系统 / 深色 /
+the light one is the classic white/cool-grey/blue scheme; **跟随系统 / 深色 /
 浅色 / 自定义** (`data-theme` on `<html>`, applied before first paint). Custom
 keeps the chosen base palette and uses the accent you pick. Fonts are system
 stacks only — no webfont is downloaded, Latin and CJK both come from the OS.

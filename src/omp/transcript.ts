@@ -19,7 +19,8 @@ export function emptyLiveTurn(messageId: string): LiveTurn {
   return { messageId, blocks: [] };
 }
 
-function blockText(blocks: unknown, type: string): string {
+/** Text of every block of one type (thinking/text), in order. */
+export function blockText(blocks: unknown, type: string): string {
   return toBlocks(blocks)
     .filter((block) => block.type === type)
     .map((block) => block.text ?? block.thinking ?? "")

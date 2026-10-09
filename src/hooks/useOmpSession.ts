@@ -9,6 +9,7 @@ import { OmpBridge } from "../omp/client";
 import {
   appendLiveText,
   appendLiveThinking,
+  blockText,
   emptyLiveTurn,
   liveTurnToChatMessage,
   mergeAssistantTurn,
@@ -87,6 +88,8 @@ export interface OmpSessionApi {
   /** Share of prompt tokens served from the provider cache (from real usage numbers). */
   cacheHitRate: number | null;
   tokensPerSecond: number | null;
+  /** Streaming-only rolling rate (characters/second ÷ measured chars-per-token). */
+  liveTokensPerSecond: number | null;
   autoCompaction: boolean;
   setAutoCompaction: (enabled: boolean) => Promise<void>;
   recent: () => Promise<void>;
@@ -128,6 +131,29 @@ export function useOmpSession(): OmpSessionApi {
   const [turnActive, setTurnActive] = useState(false);
   const liveRef = useRef<LiveTurn | null>(null);
   const liveDirty = useRef(false);
+  /* Live generation rate: a 3s rolling window over streamed characters, divided
+     by the chars-per-token ratio measured on the last finished turn (omp's own
+     `tokensPerSecond` is a per-turn figure, so it cannot move while streaming). */
+  const rateWindow = useRef<Array<{ chars: number; at: number }>>([]);
+  const charsPerToken = useRef(4);
+  const [liveTokensPerSecond, setLiveTokensPerSecond] = useState<number | null>(null);
+
+  const noteStreamedChars = useCallback((chars: number) => {
+    if (chars <= 0) return;
+    const now = performance.now();
+    const window = rateWindow.current;
+    window.push({ chars, at: now });
+    while (window.length > 0 && now - window[0].at > 3000) window.shift();
+    const total = window.reduce((sum, sample) => sum + sample.chars, 0);
+    const span = window.length > 1 ? (now - window[0].at) / 1000 : 0.5;
+    const perSecond = total / Math.max(span, 0.25);
+    setLiveTokensPerSecond(perSecond / Math.max(charsPerToken.current, 1));
+  }, []);
+
+  const resetLiveRate = useCallback(() => {
+    rateWindow.current = [];
+    setLiveTokensPerSecond(null);
+  }, []);
 
   const publishLive = useCallback(() => {
     liveDirty.current = false;
@@ -245,6 +271,7 @@ export function useOmpSession(): OmpSessionApi {
       switch (frame.type) {
         case "agent_start": {
           setTurnActive(true);
+          resetLiveRate();
           break;
         }
         case "prompt_result": {
@@ -259,6 +286,7 @@ export function useOmpSession(): OmpSessionApi {
         }
         case "session_settled": {
           setTurnActive(false);
+          resetLiveRate();
           clearLive();
           void refreshState();
           break;
@@ -273,8 +301,11 @@ export function useOmpSession(): OmpSessionApi {
           if (!event) break;
           const kind = String(event.type ?? "");
           mutateLive((turn) => {
-            if (kind === "text_delta") return appendLiveText(turn, String(event.delta ?? ""));
-            if (kind === "thinking_delta") return appendLiveThinking(turn, String(event.delta ?? ""));
+            if (kind === "text_delta" || kind === "thinking_delta") {
+              const delta = String(event.delta ?? "");
+              noteStreamedChars(delta.length);
+              return kind === "text_delta" ? appendLiveText(turn, delta) : appendLiveThinking(turn, delta);
+            }
             if (kind === "toolcall_end") {
               const call = event.toolCall as Record<string, unknown> | undefined;
               if (!call) return turn;
@@ -293,6 +324,13 @@ export function useOmpSession(): OmpSessionApi {
         case "message_end": {
           const message = frame.message as OmpMessage | undefined;
           if (!message) break;
+          // Calibrate chars-per-token from what omp itself reports for this step.
+          const stepChars = blockText(message.content, "text").length + blockText(message.content, "thinking").length;
+          const stepTokens = message.usage?.output ?? 0;
+          if (stepChars > 200 && stepTokens > 20) {
+            const ratio = stepChars / stepTokens;
+            if (ratio >= 1 && ratio <= 12) charsPerToken.current = ratio;
+          }
           const appended = transcriptToChatMessages([message]);
           setMessages((prev) => {
             const known = new Set(prev.map((entry) => entry.id));
@@ -756,6 +794,8 @@ export function useOmpSession(): OmpSessionApi {
     refreshDiffs,
     cacheHitRate,
     tokensPerSecond: state?.tokensPerSecond ?? null,
+    /** Rolling estimate while a turn streams; null when nothing is generating. */
+    liveTokensPerSecond,
     autoCompaction: Boolean(state?.autoCompactionEnabled),
     setAutoCompaction,
     recent,

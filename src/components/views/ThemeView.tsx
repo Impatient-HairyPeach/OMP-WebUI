@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Palette,
   Check,
@@ -15,11 +15,23 @@ import {
   RefreshCw,
   Eye,
   Globe,
+  Keyboard,
+  RotateCcw,
 } from 'lucide-react';
 import { ThemeOption } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
 import { PALETTES, paletteById, type PalettePreference } from '../../lib/palettes';
+import {
+  SHORTCUTS,
+  bindingOf,
+  defaultShortcuts,
+  displayBinding,
+  loadShortcuts,
+  saveShortcuts,
+  type ShortcutAction,
+  type ShortcutMap,
+} from '../../lib/shortcuts';
 
 interface ThemeViewProps {
   onSelectAccentColor?: (color: string) => void;
@@ -30,6 +42,7 @@ interface ThemeViewProps {
 export const ACCENT_SWATCHES = [
   { name: 'omp Magenta', color: '#ec5bab' },
   { name: 'omp Cyan', color: '#7dd7e8' },
+  { name: 'Classic Blue', color: '#0969da' },
   { name: 'Soft Violet', color: '#a78bfa' },
   { name: 'Electric Cyan', color: '#38bdf8' },
   { name: 'Emerald', color: '#34d399' },
@@ -71,6 +84,37 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
   const [customCard, setCustomCard] = useState(activeTheme.cardBg || '#161b22');
   const [customBorder, setCustomBorder] = useState(activeTheme.border || '#30363d');
   const [customAccent, setCustomAccent] = useState(activeTheme.accent || '#a78bfa');
+  const [shortcuts, setShortcuts] = useState<ShortcutMap>(() => loadShortcuts());
+  /** Action currently capturing the next key press. */
+  const [recording, setRecording] = useState<ShortcutAction | null>(null);
+
+  useEffect(() => {
+    if (!recording) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        setRecording(null);
+        return;
+      }
+      // Backspace/Delete clears the shortcut (same as the ✕ button).
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        const cleared = { ...loadShortcuts(), [recording]: '' } as ShortcutMap;
+        setShortcuts(cleared);
+        saveShortcuts(cleared);
+        setRecording(null);
+        return;
+      }
+      const binding = bindingOf(event);
+      if (!binding) return;
+      const next = { ...loadShortcuts(), [recording]: binding } as ShortcutMap;
+      setShortcuts(next);
+      saveShortcuts(next);
+      setRecording(null);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [recording]);
   const [customSecondary, setCustomSecondary] = useState(activeTheme.secondary || '#34d399');
   const [customTextColor, setCustomTextColor] = useState(activeTheme.text || '#fafafa');
   const [customTextMuted, setCustomTextMuted] = useState(activeTheme.textMuted || '#a1a1aa');
@@ -127,12 +171,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs font-semibold" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
-              {language === 'zh-CN' ? '配色方案 (Palette)' : 'Palette'}
-            </div>
-            <div className="text-[10px] text-[#71717a] mt-0.5">
-              {language === 'zh-CN'
-                ? '一个选择决定整套界面的底色、边框、文字层级与强调色；标记本身不写死颜色。'
-                : 'One choice drives every surface, border, text tier and accent — markup never hardcodes a colour.'}
+              {language === 'zh-CN' ? '配色方案' : 'Palette'}
             </div>
           </div>
           <span className="text-[10px] font-mono text-[#71717a] shrink-0">{paletteId}</span>
@@ -230,6 +269,118 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
       </div>
 
       {/* ======================================================== */}
+      {/* ======================================================== */}
+      {/* SECTION 1.2: KEYBOARD SHORTCUTS (快捷键)                  */}
+      {/* ======================================================== */}
+      <div
+        className="p-4 rounded-lg border space-y-3 transition-colors"
+        style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.border }}
+      >
+        <div className="flex items-center justify-between gap-3 border-b pb-3" style={{ borderColor: activeTheme.border }}>
+          <div>
+            <div className="text-xs font-semibold flex items-center gap-1.5" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+              <Keyboard className="w-4 h-4" style={{ color: customAccent }} />
+              {language === 'zh-CN' ? '快捷键' : 'Shortcuts'}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const defaults = defaultShortcuts();
+              setShortcuts(defaults);
+              saveShortcuts(defaults);
+              setRecording(null);
+            }}
+            title={language === 'zh-CN' ? '全部恢复默认' : 'Reset every binding'}
+            className="text-[10px] px-2 py-1 rounded border cursor-pointer transition-colors shrink-0"
+            style={{ borderColor: activeTheme.border, color: activeTheme.mode === 'light' ? '#334155' : '#a1a1aa' }}
+          >
+            <span className="flex items-center gap-1">
+              <RotateCcw className="w-3 h-3" />
+              {language === 'zh-CN' ? '恢复默认' : 'Reset'}
+            </span>
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          {SHORTCUTS.map((def) => {
+            const binding = shortcuts[def.action];
+            const isRecording = recording === def.action;
+            return (
+              <div key={def.action} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium" style={{ color: activeTheme.mode === 'light' ? '#0f172a' : '#fafafa' }}>
+                    {language === 'zh-CN' ? def.label.zh : def.label.en}
+                  </div>
+                  <div className="text-[10px] text-[#71717a] truncate">
+                    {language === 'zh-CN' ? def.detail.zh : def.detail.en}
+                  </div>
+                </div>
+                <span className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setRecording(isRecording ? null : def.action)}
+                    title={
+                      isRecording
+                        ? language === 'zh-CN'
+                          ? '按下新的组合键（Esc 取消，Backspace 关闭）'
+                          : 'Press the new combination (Esc cancels, Backspace disables)'
+                        : language === 'zh-CN'
+                        ? '点击后按下新的组合键；Backspace 或 ✕ 关闭该快捷键'
+                        : 'Click, then press the new combination; Backspace or ✕ disables it'
+                    }
+                    className={`px-2.5 py-1 rounded border text-[10px] font-mono cursor-pointer transition-colors ${
+                      isRecording ? 'animate-pulse' : ''
+                    }`}
+                    style={{
+                      borderColor: isRecording ? customAccent : activeTheme.border,
+                      color: isRecording
+                        ? customAccent
+                        : binding
+                        ? activeTheme.mode === 'light'
+                          ? '#334155'
+                          : '#d4d4d8'
+                        : '#71717a',
+                      backgroundColor: isRecording ? `${customAccent}1a` : 'transparent',
+                    }}
+                  >
+                    {isRecording
+                      ? language === 'zh-CN'
+                        ? '按下组合键…'
+                        : 'press keys…'
+                      : binding
+                      ? displayBinding(binding)
+                      : language === 'zh-CN'
+                      ? '已关闭'
+                      : 'off'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = { ...loadShortcuts(), [def.action]: '' } as ShortcutMap;
+                      setShortcuts(next);
+                      saveShortcuts(next);
+                      setRecording(null);
+                    }}
+                    disabled={!binding}
+                    title={language === 'zh-CN' ? '关闭该快捷键（留空）' : 'Disable this shortcut (leave empty)'}
+                    className="px-1.5 py-1 rounded border text-[10px] cursor-pointer transition-colors disabled:opacity-30"
+                    style={{ borderColor: activeTheme.border, color: '#71717a' }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-[#52525b]">
+          {language === 'zh-CN'
+            ? 'Ctrl 在 macOS 上即 ⌘；输入框内的裸按键仍按输入处理。'
+            : 'Ctrl means ⌘ on macOS; modifier-free bindings still type normally in fields.'}
+        </p>
+      </div>
+
       {/* ======================================================== */}
       {/* SECTION 1.5: CUSTOM THEME STUDIO (自定义主题工作区)      */}
       {/* ======================================================== */}

@@ -58,7 +58,9 @@ import {
   comparableDirKey,
   loadExpandedProjects,
   loadHiddenProjects,
+  loadSectionOpen,
   loadThinkingVisible,
+  saveSectionOpen,
   saveThinkingVisible,
   saveExpandedProjects,
   saveHiddenProjects,
@@ -156,6 +158,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [activeMsgId, setActiveMsgId] = useState<string | null>(null);
   /** Global default for reasoning visibility; each block can still toggle itself. */
   const [showThinking, setShowThinking] = useState<boolean>(() => loadThinkingVisible());
+  /** Left panel sections: both collapse independently and remember it. */
+  const [projectsOpen, setProjectsOpen] = useState(() => loadSectionOpen('projects'));
+  const [recentOpen, setRecentOpen] = useState(() => loadSectionOpen('recent'));
   /** Hovered tick in the message rail → a floating preview of that turn. */
   const [railPreview, setRailPreview] = useState<{ id: string; top: number; right: number } | null>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -163,6 +168,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [subagents, setSubagents] = useState<SubagentRow[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sessionSearchRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const lastLogRef = useRef<OmpLogLine | null>(null);
@@ -251,6 +257,28 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   useEffect(() => {
     saveThinkingVisible(showThinking);
   }, [showThinking]);
+
+  useEffect(() => {
+    saveSectionOpen('projects', projectsOpen);
+  }, [projectsOpen]);
+
+  /* Shortcuts owned by this view: the left session panel and its search box. */
+  useEffect(() => {
+    const onShortcut = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: string }>).detail?.action;
+      if (action === 'toggleLeft') setIsPanelCollapsed((prev) => !prev);
+      if (action === 'search') {
+        setIsPanelCollapsed(false);
+        window.setTimeout(() => sessionSearchRef.current?.focus(), 140);
+      }
+    };
+    window.addEventListener('omp-shortcut', onShortcut);
+    return () => window.removeEventListener('omp-shortcut', onShortcut);
+  }, []);
+
+  useEffect(() => {
+    saveSectionOpen('recent', recentOpen);
+  }, [recentOpen]);
 
   // The right panel's file tree inserts @ references through this event.
   useEffect(() => {
@@ -383,6 +411,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   }, [omp.models]);
 
   const currentModel = omp.state?.model ?? null;
+
+  /** "Model (provider)" — the same label the top-right chip shows, per turn. */
+  const modelLabelFor = (msg: ChatMessage): string => {
+    const name = msg.model ?? currentModel?.name ?? currentModel?.id ?? omp.modelLabel ?? 'omp';
+    const known = omp.models.find((model) => (model.name ?? model.id) === name || model.id === name);
+    const provider =
+      known?.provider ?? (msg.model && msg.model === currentModel?.name ? currentModel?.provider : undefined);
+    return provider ? `${name} (${provider})` : name;
+  };
 
   /** For each assistant turn, the user turn it answered — the anchor used by regenerate/retry. */
   const retryOriginByMsgId = useMemo(() => {
@@ -777,7 +814,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   };
 
   return (
-    <div className="flex-1 flex w-full h-full min-h-0 min-w-0 overflow-hidden select-none">
+    <div className="flex-1 flex w-full h-full min-h-0 min-w-0 overflow-hidden">
       {/* ======================================================== */}
       {/* LEFT PANEL: New chat + real omp session history          */}
       {/* ======================================================== */}
@@ -839,15 +876,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
               <span className="truncate">{omp.workspace || '…'}</span>
             </button>
 
-            {/* 2. Projects: real omp sessions grouped by workspace */}
-            <div className="text-[10px] font-mono uppercase text-[#71717a] mb-1.5 flex items-center justify-between">
-              <span>{language === 'zh-CN' ? '项目' : 'Projects'}</span>
-              <span className="text-[#52525b]">{sessionGroups.length}</span>
-            </div>
-
             <div className="relative mb-1">
               <Search className="w-3.5 h-3.5 text-[#71717a] absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
+                ref={sessionSearchRef}
                 type="text"
                 value={searchHistory}
                 onChange={(e) => setSearchHistory(e.target.value)}
@@ -855,6 +887,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                 className="w-full h-7 pl-8 pr-2 bg-[#121215] border border-[#27272a] rounded text-[11px] text-[#fafafa] placeholder-[#52525b] focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
               />
             </div>
+            {/* 2. Projects: real omp sessions grouped by workspace */}
+            <button
+              type="button"
+              onClick={() => setProjectsOpen((prev) => !prev)}
+              aria-expanded={projectsOpen}
+              title={projectsOpen ? (language === 'zh-CN' ? '折叠项目' : 'Collapse projects') : language === 'zh-CN' ? '展开项目' : 'Expand projects'}
+              className="w-full text-[10px] font-mono uppercase text-[#71717a] hover:text-[#a1a1aa] mb-1.5 flex items-center justify-between cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                {projectsOpen ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+                {language === 'zh-CN' ? '项目' : 'Projects'}
+              </span>
+              <span className="text-[#52525b]">{sessionGroups.length}</span>
+            </button>
+
             {searchHistory.trim().length >= 2 && (
               <div className="text-[10px] font-mono text-[#52525b] mb-2">
                 {language === 'zh-CN'
@@ -864,6 +911,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
             )}
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
+              {/* The project tree folds on its own; 最近 below is an independent section. */}
+              <div className={`space-y-3 ${projectsOpen ? '' : 'hidden'}`}>
               {sessionGroups.length === 0 ? (
                 <div className="text-center py-6 text-[11px] text-[#52525b]">{t.noConversations}</div>
               ) : (
@@ -1008,14 +1057,24 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                   );
                 })
               )}
+              </div>
 
               {/* Recent: the same sessions across projects, newest first */}
               <div className="pt-1">
-                <div className="text-[10px] font-mono uppercase text-[#71717a] mb-1.5 flex items-center justify-between">
-                  <span>{language === 'zh-CN' ? '最近' : 'Recent'}</span>
+                <button
+                  type="button"
+                  onClick={() => setRecentOpen((prev) => !prev)}
+                  aria-expanded={recentOpen}
+                  title={recentOpen ? (language === 'zh-CN' ? '折叠最近' : 'Collapse recent') : language === 'zh-CN' ? '展开最近' : 'Expand recent'}
+                  className="w-full text-[10px] font-mono uppercase text-[#71717a] hover:text-[#a1a1aa] mb-1.5 flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-1.5">
+                    {recentOpen ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+                    {language === 'zh-CN' ? '最近' : 'Recent'}
+                  </span>
                   <span className="text-[#52525b]">{recentSessions.length}</span>
-                </div>
-                <div className="space-y-0.5">
+                </button>
+                <div className={`space-y-0.5 ${recentOpen ? '' : 'hidden'}`}>
                   {recentSessions.length === 0 && (
                     <div className="px-1 py-1 text-[10px] text-[#52525b]">
                       {language === 'zh-CN' ? '没有匹配的会话' : 'no matching session'}
@@ -1461,7 +1520,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                                 ? language === 'zh-CN'
                                   ? '你 (You)'
                                   : 'You'
-                                : `Agent (${msg.model ?? omp.modelLabel ?? 'omp'})`}
+                                : modelLabelFor(msg)}
                             </span>
                             <span>{msg.timestamp}</span>
                             {msg.streaming && (
@@ -1472,7 +1531,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                           </div>
 
                           <div
-                            className={`text-[13.5px] leading-[1.7] ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
+                            className={`select-text text-[13.5px] leading-[1.7] ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
                           >
                             {isUser ? (
                               /* Whatever was typed goes out verbatim. */
@@ -1485,6 +1544,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                                 streaming={msg.streaming}
                                 zh={language === 'zh-CN'}
                                 showThinking={showThinking}
+                                metrics={
+                                  msg.streaming
+                                    ? {
+                                        // Live rolling rate while streaming; omp's own
+                                        // per-turn figure is the fallback.
+                                        rate: omp.liveTokensPerSecond ?? omp.state?.tokensPerSecond,
+                                        rateIsEstimate: omp.liveTokensPerSecond !== null,
+                                        outputTokens: omp.usage?.completionTokens,
+                                      }
+                                    : null
+                                }
                                 onInsertCommand={(command) => {
                                   setInputPrompt(command);
                                   textareaRef.current?.focus();
@@ -1589,6 +1659,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                                 >
                                   <RotateCcw className="w-3.5 h-3.5 text-[#38bdf8]" />
                                 </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuoteMessage(msg.content)}
+                                  title={language === 'zh-CN' ? '引用自己这条指令并追问' : 'Quote this prompt and ask about it'}
+                                  className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+                                >
+                                  <Quote className="w-3.5 h-3.5 text-[#38bdf8]" />
+                                </button>
                               </div>
                             )}
                           </div>
@@ -1648,7 +1727,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                     }}
                     onMouseLeave={() => setRailPreview((prev) => (prev?.id === msg.id ? null : prev))}
                     onBlur={() => setRailPreview((prev) => (prev?.id === msg.id ? null : prev))}
-                    title={`${msg.role === 'user' ? (language === 'zh-CN' ? '你' : 'You') : 'Agent'} · ${
+                    title={`${msg.role === 'user' ? (language === 'zh-CN' ? '你' : 'You') : modelLabelFor(msg)} · ${
                       msg.timestamp
                     } — ${msg.content.replace(/\s+/g, ' ').slice(0, 90)}`}
                     className="group/tick w-full h-2.5 flex items-center justify-end shrink-0 cursor-pointer"
@@ -1688,7 +1767,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
                             color: msg.role === 'user' ? '#7ca8ff' : accentColor,
                           }}
                         >
-                          {msg.role === 'user' ? (language === 'zh-CN' ? '你' : 'You') : 'Agent'}
+                          {msg.role === 'user' ? (language === 'zh-CN' ? '你' : 'You') : modelLabelFor(msg)}
                         </span>
                         <span className="text-[#71717a] truncate">{msg.timestamp}</span>
                       </span>
