@@ -1,5 +1,0 @@
-fix(chat): echo the prompt immediately instead of waiting for omp to report it
-
-- send() appends a pending user message (dimmed, no actions); omp's own user entry replaces it by text match
-- failed commands remove the echo; fresh transcripts never carry echoes
-- version 0.3.21
