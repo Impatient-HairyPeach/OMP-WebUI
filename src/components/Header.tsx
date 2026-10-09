@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { SettingsSidebarTab, TopNavTab } from '../types';
 import {
   Settings,
@@ -34,35 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { theme, accentColor } = useTheme();
   const { t, language } = useI18n();
-  const [bridge, setBridge] = useState<{ status: string; workspace: string } | null>(null);
   const currentBranch = git.snapshot?.current ?? (git.loading ? '…' : '—');
-
-  // Real bridge status: poll GET /api/health every 10s (no SSE here).
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const response = await fetch('/api/health');
-        const data = (await response.json()) as { status?: string; workspace?: string };
-        if (!cancelled) setBridge({ status: String(data.status ?? 'unknown'), workspace: String(data.workspace ?? '') });
-      } catch {
-        if (!cancelled) setBridge(null);
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 10_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  const bridgeStatus = bridge?.status ?? 'unreachable';
-  const bridgeColor =
-    bridgeStatus === 'ready' ? '#34d399' : bridgeStatus === 'starting' ? '#f59e0b' : bridgeStatus === 'exited' ? '#ef4444' : '#71717a';
-  const bridgeWorkspace = bridge?.workspace
-    ? bridge.workspace.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || bridge.workspace
-    : '';
 
   return (
     <header
@@ -84,18 +56,6 @@ export const Header: React.FC<HeaderProps> = ({
             OMP WebUI
           </span>
         </div>
-
-        {/* Bridge status pill — real GET /api/health, opens the real .omprc settings tab */}
-        <button
-          type="button"
-          onClick={() => onOpenSettingsTab?.('omp_config')}
-          title={`omp bridge ${bridgeStatus}${bridge?.workspace ? ` (${bridge.workspace})` : ''} — Click to inspect .omprc`}
-          className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#121215] border border-[#27272a] hover:border-[#3f3f46] text-xs font-mono transition-colors cursor-pointer"
-        >
-          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: bridgeColor }} />
-          <span className="text-[11px] text-[#fafafa] font-medium">{bridgeStatus}</span>
-          {bridgeWorkspace && <span className="text-[10px] text-[#71717a] max-w-[120px] truncate">{bridgeWorkspace}</span>}
-        </button>
 
         {/* Global Search / Command Bar */}
         <button

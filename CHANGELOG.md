@@ -3,6 +3,13 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.17
+
+- The omp-bridge status pill is gone from the top bar (and with it the header's
+  10s `/api/health` poll and its state). The bridge status stays where it belongs:
+  the session panel footer still shows `omp 桥接 / ready`, and the chat status
+  row keeps its dot + status.
+
 ## 0.3.16
 
 - The task list above the composer drops its progress bar; the count stays
