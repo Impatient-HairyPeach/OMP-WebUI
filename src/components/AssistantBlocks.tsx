@@ -9,8 +9,8 @@
  *   text     — markdown (tables, code, lists) rendered only while visible.
  *   tool     — tool name, command, arguments and output, each folded.
  *
- * Visibility is `perBlockOverride ?? showThinking`, and collapsing only affects
- * the DOM: the model's reasoning is untouched in the session log.
+ * Every fold is collapsed by default and each block toggles on its own; collapsing
+ * only affects the DOM — the model's reasoning is untouched in the session log.
  */
 import React, { memo, useMemo, useState } from 'react';
 import { Brain, ChevronDown, ChevronRight, CircleAlert, Loader2, Terminal } from 'lucide-react';
@@ -21,8 +21,6 @@ interface AssistantBlocksProps {
   blocks: MessageBlock[];
   streaming?: boolean;
   zh: boolean;
-  /** Global default for thinking visibility; a block can override it. */
-  showThinking: boolean;
   /** Live generation figures shown above the blocks while the turn is streaming. */
   metrics?: { rate?: number | null; rateIsEstimate?: boolean; outputTokens?: number | null } | null;
   onInsertCommand?: (command: string) => void;
@@ -223,7 +221,6 @@ const AssistantBlocksView: React.FC<AssistantBlocksProps> = ({
   blocks,
   streaming,
   zh,
-  showThinking,
   metrics,
   onInsertCommand,
 }) => {
@@ -249,7 +246,7 @@ const AssistantBlocksView: React.FC<AssistantBlocksProps> = ({
       )}
       {groups.map((group) => {
         if (group.kind === 'thinking') {
-          return <ThinkingBlock key={`think-${group.run.id}`} run={group.run} zh={zh} defaultOpen={showThinking} streaming={streaming} />;
+          return <ThinkingBlock key={`think-${group.run.id}`} run={group.run} zh={zh} defaultOpen={false} streaming={streaming} />;
         }
         if (group.kind === 'tool') {
           return <ToolBlock key={`tool-${group.block.id}`} block={group.block} zh={zh} onInsertCommand={onInsertCommand} />;

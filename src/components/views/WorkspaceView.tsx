@@ -60,8 +60,6 @@ import {
   loadExpandedProjects,
   loadHiddenProjects,
   loadSectionOpen,
-  loadThinkingVisible,
-  saveThinkingVisible,
   saveSectionOpen,
   saveExpandedProjects,
   saveHiddenProjects,
@@ -158,7 +156,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [activeMsgId, setActiveMsgId] = useState<string | null>(null);
   /** Default for reasoning visibility (a stored preference); each block toggles itself. */
-  const [showThinking, setShowThinking] = useState<boolean>(() => loadThinkingVisible());
   /** Left panel sections: both collapse independently and remember it. */
   const [projectsOpen, setProjectsOpen] = useState(() => loadSectionOpen('projects'));
   const [recentOpen, setRecentOpen] = useState(() => loadSectionOpen('recent'));
@@ -256,10 +253,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
    */
   const isSessionRunning = (session: OmpSessionSummary): boolean =>
     session.current ? omp.isStreaming : Boolean(session.live);
-
-  useEffect(() => {
-    saveThinkingVisible(showThinking);
-  }, [showThinking]);
 
   useEffect(() => {
     saveSectionOpen('projects', projectsOpen);
@@ -910,7 +903,6 @@ return (
           blocks={msg.blocks ?? []}
           streaming={msg.streaming}
           zh={language === 'zh-CN'}
-          showThinking={showThinking}
           metrics={
             msg.streaming
               ? {
@@ -1040,7 +1032,7 @@ return (
   </div>
 );
       }),
-    [transcript, retryOriginByMsgId, editingEntryId, copiedMessageId, language, showThinking, theme, accentColor,
+    [transcript, retryOriginByMsgId, editingEntryId, copiedMessageId, language, theme, accentColor,
      omp.isStreaming, omp.liveTokensPerSecond, omp.usage, omp.state, omp.slashCommands, modelLabelFor,
      handleRetryFrom, handleQuoteMessage, handleCopyMessage, speakText, handleStartEdit, handleForkAt,
      insertCommandIntoComposer, msgRefs]
@@ -2284,27 +2276,6 @@ return (
                       <ChevronDown className="w-3 h-3 text-[#71717a]" />
                     </button>
 
-                    {/* Global default for reasoning blocks (each block still overrides) */}
-                    <button
-                      type="button"
-                      onClick={() => setShowThinking((prev) => !prev)}
-                      title={
-                        showThinking
-                          ? language === 'zh-CN'
-                            ? '思考块默认展开（点击改为默认折叠）'
-                            : 'Thinking blocks open by default (click to fold them)'
-                          : language === 'zh-CN'
-                          ? '思考块默认折叠（点击展开）'
-                          : 'Thinking blocks folded by default (click to expand)'
-                      }
-                      className={`flex items-center gap-1 px-2 py-1 rounded border text-[11px] font-mono cursor-pointer transition-colors ${
-                        showThinking
-                          ? 'bg-[#18181b] border-[#38bdf8]/60 text-[#38bdf8]'
-                          : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46]'
-                      }`}
-                    >
-                      <Brain className="w-3 h-3" />
-                    </button>
 
                     {thinkingDropdownOpen && (
                       <>

@@ -3,6 +3,12 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.23
+
+- Removed the global reasoning-visibility switch from the composer (`折叠思考块`).
+  Each reasoning block still folds on its own and is collapsed by default; the
+  state, its persistence effect and the stored-preference helpers are gone with it.
+
 ## 0.3.22
 
 - Typing no longer re-renders the whole transcript. The turn rows are built once

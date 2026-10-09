@@ -51,19 +51,6 @@ export const TERMINAL_BOX: PanelSizeConfig & { storageKey: string } = {
   defaultSize: 240,
 };
 
-/** Show reasoning blocks by default (a single fold per thinking run). */
-export const THINKING_VISIBLE_KEY = 'omp-studio:show-thinking';
-
-export function loadThinkingVisible(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(THINKING_VISIBLE_KEY) === 'true';
-}
-
-export function saveThinkingVisible(visible: boolean): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(THINKING_VISIBLE_KEY, String(visible));
-}
-
 /** Collapsible left-panel sections: 项目 / 最近 keep their open state. */
 export const SECTION_OPEN_KEYS = {
   projects: 'omp-studio:section-projects-open',
