@@ -18,6 +18,23 @@ bun run dev            # http://localhost:3000
 
 Production build: `bun run build && bun run start`.
 
+### Global install
+
+```bash
+npm i -g .             # from this repository; the prepare script builds dist/
+cd ~/some/project
+omp-studio             # SPA + bridge on :3000, omp running in ~/some/project
+```
+
+The command resolves the web UI relative to the installation, so it runs from any
+directory; `omp` still uses the directory you launched it from (`OMP_CWD` overrides
+that). `PORT`, `HOST` and `OMP_BIN` work exactly as below. Uninstall with
+`npm rm -g omp-studio`.
+
+The package is `private`, which only blocks `npm publish` — drop that field if you
+want to share it. `npm pack` + `npm i -g omp-studio-<version>.tgz` installs a real
+copy instead of symlinking this folder.
+
 ## Environment
 
 | Variable | Default | Purpose |

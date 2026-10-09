@@ -5,6 +5,12 @@ Settings (`v<version> · <build date>`).
 
 ## 0.3.23
 
+- `npm i -g .` now installs a real command. `bin/omp-studio.mjs` runs the bridge in
+  production mode through tsx (no build step for the server), the SPA is resolved
+  relative to the installation instead of the process cwd, and `tsx` moved to
+  runtime dependencies. `prepare` builds `dist/` during the install.
+  Verified from `D:\Data\Temp\Temp`: the SPA loads, `/api/health` reports that
+  directory as the workspace, and omp is spawned there.
 - Removed the global reasoning-visibility switch from the composer (`折叠思考块`).
   Each reasoning block still folds on its own and is collapsed by default; the
   state, its persistence effect and the stored-preference helpers are gone with it.

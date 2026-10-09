@@ -2074,8 +2074,11 @@ app.use("/api", (req, res) => {
 // ---------------------------------------------------------------- static app
 async function serveFrontend() {
   if (PROD) {
-    app.use(express.static(path.resolve("dist")));
-    app.get("*", (_req, res) => res.sendFile(path.resolve("dist/index.html")));
+    // Resolved against this file, not the process cwd, so a global install can be
+    // launched from any project directory.
+    const dist = path.resolve(import.meta.dirname, "dist");
+    app.use(express.static(dist));
+    app.get("*", (_req, res) => res.sendFile(path.join(dist, "index.html")));
     return;
   }
   const vite = await createServer({ server: { middlewareMode: true, hmr: { server: undefined } }, appType: "spa" });
