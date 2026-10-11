@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, FileDiffItem, SessionTokenUsage } from "../types";
+import { fetchSessionUsage, type SessionUsageSummary } from "../omp/cli";
 import { OmpBridge } from "../omp/client";
 import { repairSession as repairSessionHeader } from "../omp/cli";
 import { alertTurnComplete } from "../lib/alerts";
@@ -56,6 +57,8 @@ export interface OmpSessionApi {
   thinkingLevel: string | null;
   state: OmpSessionState | null;
   usage: SessionTokenUsage | null;
+  /** Session-wide usage from omp's session log; null until the first call is logged. */
+  sessionUsage: SessionUsageSummary | null;
   messages: ChatMessage[];
   liveMessage: ChatMessage | null;
   /** Last session-open failure (kept until the next successful open). */
@@ -129,6 +132,10 @@ const LIVE_FLUSH_MS = 60;
 
 export function useOmpSession(): OmpSessionApi {
   const frameHandlerRef = useRef<(frame: OmpFrame) => void>(() => {});
+  /** Read by the frame handler, which is installed once per connection. */
+  const refreshSessionUsageRef = useRef<() => Promise<void>>(async () => {});
+  /** omp's current session file (a fresh session has no resume path yet). */
+  const sessionFileRef = useRef<string | null>(null);
   const statusHandlerRef = useRef<(status: OmpBridgeStatus, detail: { workspace?: string; resumePath?: string | null; exit?: string | null }) => void>(() => {});
   const logHandlerRef = useRef<(level: OmpLogLine["level"], message: string) => void>(() => {});
   const [status, setStatus] = useState<OmpBridgeStatus>("connecting");
@@ -136,6 +143,8 @@ export function useOmpSession(): OmpSessionApi {
   const [resumePath, setResumePath] = useState<string | null>(null);
   const [state, setState] = useState<OmpSessionState | null>(null);
   const [usage, setUsage] = useState<SessionTokenUsage | null>(null);
+  /** Whole-session totals from omp's log (the transcript is a trimmed view). */
+  const [sessionUsage, setSessionUsage] = useState<SessionUsageSummary | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionError, setSessionError] = useState<string | null>(null);
   /** openSession, referenced by repairSession which is declared above it. */
@@ -148,6 +157,7 @@ export function useOmpSession(): OmpSessionApi {
   const sessionTitleRef = useRef<string | null>(null);
   const workspaceRef = useRef("");
   workspaceRef.current = workspace;
+  sessionFileRef.current = state?.sessionFile ?? resumePath;
   const liveDirty = useRef(false);
   /** Set below once `loadCurrentSession` exists; the status handler is wired first. */
   const loadCurrentSessionRef = useRef<() => Promise<void>>(async () => {});
@@ -245,6 +255,15 @@ export function useOmpSession(): OmpSessionApi {
       setState(data);
       if (data.sessionName) setSessionTitle(data.sessionName);
       if (data.queuedMessages) setQueued(data.queuedMessages);
+    }
+  }, []);
+
+  /** Re-read the session log through the bridge (cached there by mtime + size). */
+  const refreshSessionUsage = useCallback(async () => {
+    try {
+      setSessionUsage(await fetchSessionUsage(sessionFileRef.current));
+    } catch {
+      // The log may not exist yet on a brand-new session; keep the last value.
     }
   }, []);
 
@@ -438,6 +457,8 @@ export function useOmpSession(): OmpSessionApi {
           break;
         }
         case "turn_end": {
+          // The turn just added calls to the session log: refresh the session totals.
+          void refreshSessionUsageRef.current();
           const message = frame.message as OmpMessage | undefined;
           if (message?.usage) {
             const summary = message.usage;
@@ -537,8 +558,27 @@ export function useOmpSession(): OmpSessionApi {
 
   // Handlers are routed through refs so the SSE connection is created exactly once.
   useEffect(() => {
+    refreshSessionUsageRef.current = refreshSessionUsage;
+  }, [refreshSessionUsage]);
+
+  useEffect(() => {
+    void refreshSessionUsage();
+  }, [refreshSessionUsage, state?.sessionFile]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      // A long turn has no frame to hook, so poll — quietly, and not in a hidden tab.
+      if (!document.hidden) void refreshSessionUsage();
+    }, 20_000);
+    return () => window.clearInterval(timer);
+  }, [refreshSessionUsage]);
+
+  useEffect(() => {
     frameHandlerRef.current = (frame) => {
-      if (frame.type === "ready") void refreshState();
+      if (frame.type === "ready") {
+        void refreshState();
+        void refreshSessionUsageRef.current();
+      }
       applyFrame(frame);
     };
     statusHandlerRef.current = (next, detail) => {
@@ -577,6 +617,7 @@ export function useOmpSession(): OmpSessionApi {
       { promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0, contextLimit: 0, costEstimate: 0 }
     );
     setUsage(totals.totalTokens > 0 ? totals : null);
+    void refreshSessionUsageRef.current();
     try {
       setMessages(transcriptToChatMessages(payload.messages, payload.entries));
     } catch (error) {
@@ -876,6 +917,7 @@ export function useOmpSession(): OmpSessionApi {
         setLive(null);
         clearLive();
         setUsage(null);
+        setSessionUsage(null);
         setMessages([]);
         setBranchAnchors([]);
         pushLog("info", `workspace: ${result.workspace}`);
@@ -948,6 +990,7 @@ export function useOmpSession(): OmpSessionApi {
     diffs,
     refreshDiffs,
     cacheHitRate,
+    sessionUsage,
     tokensPerSecond: state?.tokensPerSecond ?? null,
     /** Rolling estimate while a turn streams; null when nothing is generating. */
     liveTokensPerSecond,

@@ -3,6 +3,22 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.27
+
+- Session metrics are the session's, not a window's. The top-bar token/cost and
+  cache-hit chips used to sum the transcript omp hands the UI, which after
+  compaction is only the current window: a 1 118-call session showed
+  30.87M tokens / 96.0% / $0.3346 while omp's own log says
+  403.71M prompt tokens / **97.1%** / $3.3860 — off by 10× on cost.
+  `GET /api/session/usage` now walks the session log (cached by mtime + size),
+  `fetchSessionUsage(sessionFile)` is fed the file omp reports in `get_state`
+  (a fresh session has no resume path yet), and the hook refreshes it when the
+  session changes, after every turn and every 20s. The chips read
+  `本会话 Token（omp 会话日志全量）` with the call count, and totals are formatted
+  as `403.7M` rather than `403713.0k`.
+- Verified against an independent sum of the same log: 4 calls → 25 201 tokens,
+  24 320 cached, 96.92%, $0.000254, byte-identical to the endpoint's answer.
+
 ## 0.3.26
 
 - Composer toolbar: the controls are two clusters again. `justify-between` was

@@ -413,6 +413,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     omp.status === 'ready' ? '#34d399' : omp.status === 'starting' || omp.status === 'connecting' ? '#f59e0b' : '#ef4444';
   /** omp status chips minus the ones this UI already renders as controls. */
   const statusChips = omp.statusChips.filter((chip) => !chip.key.startsWith('pi-permission-system'));
+  /* Session metrics come from omp's session log (every call it recorded), not
+     from the transcript, which is a trimmed view once a long session compacts. */
+  const sessionTotals = omp.sessionUsage;
+  const sessionTokens = sessionTotals?.totalTokens ?? omp.usage?.totalTokens ?? null;
+  const sessionCost = sessionTotals?.costEstimate ?? omp.usage?.costEstimate ?? 0;
+  const sessionCalls = sessionTotals?.calls ?? null;
+  const cachedTokens = sessionTotals?.cachedTokens ?? omp.usage?.cachedTokens ?? 0;
+  const cacheRate = sessionTotals?.cacheHitRate ?? omp.cacheHitRate;
+  /** 403.7M / 30.87k / 512 — keeps a long session's total readable in one chip. */
+  const compactTokens = (value: number) =>
+    value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
 
   // Content hits come from the bridge (real session-log grep), titles filter locally.
   const [contentHits, setContentHits] = useState<Record<string, { snippet: string; hits: number }>>({});
@@ -1555,28 +1566,28 @@ return (
             )}
 
             {/* Consumed tokens for this session (real usage) */}
-            {omp.usage && (
+            {sessionTokens !== null && sessionTotals?.exists !== false && (
               <span
-                title={`${language === 'zh-CN' ? '本会话 Token' : 'session tokens'}: ${omp.usage.totalTokens.toLocaleString()} · ${
+                title={`${language === 'zh-CN' ? '本会话 Token（omp 会话日志全量）' : 'session tokens (whole omp session log)'}: ${sessionTokens.toLocaleString()} · ${
                   language === 'zh-CN' ? '成本' : 'cost'
-                } $${omp.usage.costEstimate.toFixed(4)}`}
+                } $${sessionCost.toFixed(4)}${sessionCalls ? ` · ${sessionCalls} ${language === 'zh-CN' ? '次调用' : 'calls'}` : ''}`}
                 className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-[#a1a1aa]"
               >
                 <Coins className="w-3.5 h-3.5" />
-                <span>{omp.usage.totalTokens >= 1000 ? `${(omp.usage.totalTokens / 1000).toFixed(1)}k` : omp.usage.totalTokens}</span>
+                <span>{compactTokens(sessionTokens)}</span>
               </span>
             )}
 
             {/* Prompt-cache hits */}
-            {omp.cacheHitRate !== null && (
+            {cacheRate !== null && (
               <span
-                title={`${language === 'zh-CN' ? '提示词缓存命中' : 'prompt cache hits'}: ${(omp.cacheHitRate * 100).toFixed(1)}% (${
-                  omp.usage?.cachedTokens.toLocaleString() ?? 0
+                title={`${language === 'zh-CN' ? '提示词缓存命中（本会话全量）' : 'prompt cache hits (whole session)'}: ${(cacheRate * 100).toFixed(1)}% (${cachedTokens.toLocaleString()} ${
+                  language === 'zh-CN' ? '缓存读' : 'cache-read'
                 } tokens)`}
                 className="hidden md:flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-[#34d399]"
               >
                 <Layers className="w-3.5 h-3.5" />
-                <span>{(omp.cacheHitRate * 100).toFixed(0)}%</span>
+                <span>{(cacheRate * 100).toFixed(0)}%</span>
               </span>
             )}
 
@@ -2356,11 +2367,11 @@ return (
                               </div>
                               <div className="flex items-center justify-between">
                                 <span>{language === 'zh-CN' ? '缓存命中' : 'cache hit'}</span>
-                                <span className="text-[#34d399]">{omp.cacheHitRate !== null ? `${(omp.cacheHitRate * 100).toFixed(1)}%` : '—'}</span>
+                                <span className="text-[#34d399]">{cacheRate !== null ? `${(cacheRate * 100).toFixed(1)}%` : '—'}</span>
                               </div>
                               <div className="flex items-center justify-between">
                                 <span>{language === 'zh-CN' ? '累计成本' : 'cost'}</span>
-                                <span className="text-[#a78bfa]">${(omp.usage?.costEstimate ?? 0).toFixed(4)}</span>
+                                <span className="text-[#a78bfa]">${sessionCost.toFixed(4)}</span>
                               </div>
                             </div>
                             <button

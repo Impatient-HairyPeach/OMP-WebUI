@@ -273,6 +273,7 @@ async function restartChild(next: { cwd?: string; resume?: string | null }) {
   stopChild();
   if (next.cwd !== undefined) workspace = next.cwd;
   resumePath = next.resume ?? null;
+  sessionUsageCache = null;
   startChild();
   await awaitReady();
 }
@@ -1022,6 +1023,95 @@ app.post("/api/session/repair", (req, res) => {
 
 /** Transcript of the session the child is *already* running: no restart, so a
     page reload can rebuild the chat instead of starting from an empty list. */
+/**
+ * Whole-session usage, summed from omp's own session log.
+ *
+ * The transcript omp hands the UI (`/api/session/current`) is a trimmed view —
+ * once a long session compacts, it only carries the current window — so summing
+ * it under-reports the session by an order of magnitude (30.8M vs 403.7M prompt
+ * tokens in a 1.1k-call session). Every model call is recorded in the log, so
+ * that is what "this session" has to mean. Cached by mtime + size: the log grows
+ * during a turn, and re-reading it on every poll would be wasteful.
+ */
+interface SessionUsage {
+  path: string | null;
+  exists: boolean;
+  calls: number;
+  promptTokens: number;
+  /** Prompt tokens the provider served from cache (omp's `cacheRead`). */
+  cachedTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costEstimate: number;
+  /** cachedTokens / (promptTokens + cachedTokens); null until any call is logged. */
+  cacheHitRate: number | null;
+}
+
+const NO_SESSION_USAGE: SessionUsage = {
+  path: null,
+  exists: false,
+  calls: 0,
+  promptTokens: 0,
+  cachedTokens: 0,
+  completionTokens: 0,
+  totalTokens: 0,
+  costEstimate: 0,
+  cacheHitRate: null,
+};
+
+let sessionUsageCache: { file: string; mtimeMs: number; size: number; totals: SessionUsage } | null = null;
+
+function readSessionUsage(requested?: string | null): SessionUsage {
+  /* A brand-new session has no `--resume` path on the bridge, but omp's
+     `get_state` reports the file it just created, so the UI passes it along.
+     Only paths inside the session root are honoured. */
+  let file = resumePath;
+  if (requested) {
+    const resolved = path.resolve(requested);
+    if (resolved.startsWith(path.resolve(SESSION_ROOT) + path.sep) && resolved.endsWith(".jsonl") && existsSync(resolved)) {
+      file = resolved;
+    }
+  }
+  if (!file || !existsSync(file)) return { ...NO_SESSION_USAGE, path: file };
+  const stat = statSync(file);
+  if (
+    sessionUsageCache &&
+    sessionUsageCache.file === file &&
+    sessionUsageCache.mtimeMs === stat.mtimeMs &&
+    sessionUsageCache.size === stat.size
+  ) {
+    return sessionUsageCache.totals;
+  }
+  const totals: SessionUsage = { ...NO_SESSION_USAGE, path: file, exists: true };
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let record: { usage?: Record<string, unknown>; message?: { usage?: Record<string, unknown> } };
+    try {
+      record = JSON.parse(line) as typeof record;
+    } catch {
+      continue;
+    }
+    const usage = record.usage ?? record.message?.usage;
+    if (!usage || typeof usage.cacheRead !== "number") continue;
+    const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+    totals.calls += 1;
+    totals.promptTokens += num(usage.input);
+    totals.cachedTokens += num(usage.cacheRead);
+    totals.completionTokens += num(usage.output);
+    totals.totalTokens += num(usage.totalTokens);
+    totals.costEstimate += num((usage.cost as { total?: unknown } | undefined)?.total);
+  }
+  const prompt = totals.promptTokens + totals.cachedTokens;
+  totals.cacheHitRate = prompt > 0 ? totals.cachedTokens / prompt : null;
+  sessionUsageCache = { file, mtimeMs: stat.mtimeMs, size: stat.size, totals };
+  return totals;
+}
+
+app.get("/api/session/usage", (req, res) => {
+  const requested = typeof req.query.path === "string" ? req.query.path : null;
+  res.json(readSessionUsage(requested));
+});
+
 app.get("/api/session/current", async (_req, res) => {
   try {
     const payload = await enqueue(async () => {

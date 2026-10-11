@@ -288,6 +288,25 @@ export const fetchDirEntries = (dirPath?: string) =>
 /** One text file, capped at `limit` characters. */
 export const fetchFileContent = (filePath: string, limit = 200_000) =>
   getJson<WorkspaceFile>(`/api/fs/file?path=${encodeURIComponent(filePath)}&limit=${limit}`);
+/** Whole-session usage, summed from omp's session log by the bridge. */
+export interface SessionUsageSummary {
+  path: string | null;
+  exists: boolean;
+  calls: number;
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costEstimate: number;
+  cacheHitRate: number | null;
+}
+
+/** `sessionFile` comes from omp's own state, so a fresh session is found too. */
+export const fetchSessionUsage = (sessionFile?: string | null) =>
+  getJson<SessionUsageSummary>(
+    `/api/session/usage${sessionFile ? `?path=${encodeURIComponent(sessionFile)}` : ""}`
+  );
+
 export const fetchGitLog = (limit = 10) =>
   getJson<{ workspace: string; isRepo?: boolean; commits: GitCommitEntry[] }>(`/api/git/log?limit=${limit}`);
 export const fetchGitDiff = () =>
