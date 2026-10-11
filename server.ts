@@ -1224,6 +1224,174 @@ app.post("/api/cli", (req, res) => {
 });
 
 /** Import a skill from GitHub by cloning it into the agents skills directory omp discovers. */
+/** Refresh one provider's catalog (`omp models refresh <provider>`) and report
+ *  what appeared: providers publish new model ids without an omp release. */
+app.post("/api/omp/models/refresh", async (req, res) => {
+  const provider = String(req.body?.provider || "").trim();
+  if (!provider || /[\/\s]/.test(provider)) {
+    res.status(400).json({ error: "invalid provider" });
+    return;
+  }
+  try {
+    const before = new Set((await loadModelCatalog()).map(selectorOf));
+    await runOmpCli(["models", "refresh", provider, "--json"], { timeoutMs: 180_000 });
+    modelCatalogCache = null;
+    const models = await loadModelCatalog();
+    const added = models.map(selectorOf).filter((selector) => !before.has(selector));
+    emit("log", {
+      level: "info",
+      message: `models.refresh: ${provider} -> ${added.length} new (${models.filter((m) => m.provider === provider).length} total)`,
+    });
+    res.json({
+      ok: true,
+      provider,
+      added,
+      models: models.filter((model) => model.provider === provider).map((model) => ({ id: model.id, name: model.name ?? model.id, selector: selectorOf(model) })),
+    });
+  } catch (error) {
+    res.status(400).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
+  }
+});
+
+/**
+ * Register a model id the user typed. omp only selects models it knows, so the
+ * id is validated against the provider catalog: refresh first (a provider may
+ * have shipped the model since omp's last catalog), then enable it through the
+ * same `enabledModels` write the toggles use. An id omp cannot resolve is
+ * reported as such instead of being added as a row that cannot run.
+ */
+app.post("/api/omp/models/add", async (req, res) => {
+  let provider = String(req.body?.provider || "").trim();
+  let id = String(req.body?.id || "").trim();
+  if (id.includes("/")) {
+    const [prefix, rest] = id.split("/");
+    if (!provider) provider = prefix;
+    id = rest;
+  }
+  if (!provider || /[\/\s]/.test(provider) || !id || /\s/.test(id)) {
+    res.status(400).json({ error: "expected a provider and a model id" });
+    return;
+  }
+  const selector = `${provider}/${id}`;
+  try {
+    let models = await loadModelCatalog();
+    let refreshed = false;
+    if (!models.some((model) => selectorOf(model) === selector)) {
+      refreshed = true;
+      await runOmpCli(["models", "refresh", provider, "--json"], { timeoutMs: 180_000 }).catch(() => "");
+      modelCatalogCache = null;
+      models = await loadModelCatalog();
+    }
+    const known = models.find((model) => selectorOf(model) === selector);
+    if (!known) {
+      res.status(404).json({
+        ok: false,
+        refreshed,
+        error: `${selector} is not in omp's catalog for ${provider} (refreshed: ${refreshed ? "yes" : "no"}); omp cannot select a model it does not know`,
+      });
+      return;
+    }
+    const scope = await readOmpScope();
+    const universe = [...new Set([...models.map(selectorOf), ...Object.values(scope.modelRoles), selector])];
+    const allowed = new Set(scope.enabledModels.length > 0 ? scope.enabledModels : universe);
+    allowed.add(selector);
+    const next = universe.filter((candidate) => allowed.has(candidate));
+    await writeOmpArray("enabledModels", next.length === universe.length ? [] : next);
+    await enqueue(() => restartChild({}));
+    emit("log", { level: "info", message: `models.add: ${selector} (enabled${refreshed ? ", catalog refreshed" : ""})` });
+    res.json({ ok: true, selector, refreshed, name: known.name ?? known.id, restarted: true });
+  } catch (error) {
+    res.status(400).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
+  }
+});
+
+/** One real request per model, through omp itself: the only honest connectivity
+ *  test (it uses omp's own auth, endpoint and model resolution). */
+let modelTestChain: Promise<unknown> = Promise.resolve();
+
+app.post("/api/omp/models/test", async (req, res) => {
+  const provider = String(req.body?.provider || "").trim();
+  const id = String(req.body?.id || "").trim();
+  if (!provider || /[\/\s]/.test(provider) || !id || /\s/.test(id)) {
+    res.status(400).json({ error: "expected a provider and a model id" });
+    return;
+  }
+  const selector = `${provider}/${id}`;
+  const run = async () => {
+    const command = resolveOmpCommand();
+    const started = Date.now();
+    // spawn, not execFile: stdin must be closed, or omp in print mode waits for
+    // piped input and the probe hangs until it is killed.
+    const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(
+        command.file,
+        [
+          ...command.args,
+          "-p",
+          "Reply with the single word: ok",
+          "--model",
+          selector,
+          "--no-tools",
+          "--no-session",
+          "--no-extensions",
+          "--no-skills",
+          "--no-rules",
+          "--no-lsp",
+          "--max-time",
+          "60",
+          "--cwd",
+          workspace,
+        ],
+        { cwd: workspace, env: childEnv(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }
+      );
+      let stdout = "";
+      let stderr = "";
+      const keep = (current: string, chunk: Buffer) => (current + chunk.toString()).slice(-200_000);
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout = keep(stdout, chunk);
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr = keep(stderr, chunk);
+      });
+      const timer = setTimeout(() => child.kill(), 75_000);
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ code: code ?? 1, stdout, stderr });
+      });
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        resolve({ code: 1, stdout, stderr: `${stderr}\n${error.message}` });
+      });
+    });
+    const ms = Date.now() - started;
+    const text = `${result.stdout}\n${result.stderr}`.trim();
+    const lines = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    // The useful part of a failure is the provider's own line (status code or
+    // error type), not the exit code omp returns.
+    const interesting = lines.find((line) =>
+      /(^|\s)(4\d\d|5\d\d)\s|type=[A-Za-z]|not found|unauthorized|invalid|forbidden|refused|rate limit|timed? ?out/i.test(line)
+    );
+    const ok = result.code === 0 && !interesting;
+    const error = ok ? undefined : (interesting ?? lines[lines.length - 1] ?? `exit ${result.code}`).slice(0, 200);
+    emit("log", { level: ok ? "info" : "warn", message: `models.test: ${selector} -> ${ok ? `ok in ${ms}ms` : `failed (${error})`}` });
+    return { ok, ms, selector, code: result.code, output: text.slice(-1500), error };
+  };
+  // One test at a time: each one spawns its own omp process.
+  const queued = modelTestChain.then(run, run);
+  modelTestChain = queued.then(
+    () => {},
+    () => {}
+  );
+  try {
+    res.json(await queued);
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
+  }
+});
+
 /* ========================================================================== */
 /* SKILLS: installation follows the ecosystem, not a hand-rolled git clone.    */
 /*                                                                            */

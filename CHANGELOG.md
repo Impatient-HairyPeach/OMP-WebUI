@@ -3,6 +3,26 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.29
+
+- Models can be added by id, and every model can be tested for real. In the
+  providers tab each provider's expanded list gained a typed-id field
+  (`provider/` prefix optional), an **添加** button and **刷新目录**
+  (`omp models refresh <provider>`, the native way a provider's new ids reach
+  omp). A typed id is validated against omp's catalog after that refresh: if omp
+  knows it, it is enabled through the same `enabledModels` write the toggles use;
+  if not, the card says so instead of adding a row that cannot run.
+- **测试** on every model row (both the providers tab and the routing table):
+  one real request through omp itself
+  (`omp -p "…" --model <provider/id> --no-tools --no-session --no-extensions
+  --no-skills --no-rules --no-lsp`), reporting latency on success and the
+  provider's own line on failure, e.g. `400 Model does not support this
+  protocol.` or `Model "…" not found`. Tests run one at a time; each costs a few
+  dozen tokens (the tooltip says so).
+- Two fixes found by testing: the probe must be spawned with stdin closed (omp's
+  print mode waits for piped input and the request hung until it was killed), and
+  the routing row needed 11 inner columns after the test button took one.
+
 ## 0.3.28
 
 - Skill installation follows the ecosystem instead of a hand-rolled `git clone`.

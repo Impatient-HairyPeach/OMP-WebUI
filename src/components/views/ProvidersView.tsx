@@ -10,15 +10,25 @@ import {
   Globe,
   Layers,
   Loader2,
+  Plus,
   Receipt,
   RefreshCw,
   Search,
   Server,
+  Zap,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
 import { ScopeSwitch } from '../ScopeSwitch';
-import { fetchModelScope, fetchProviderUsage, fetchUsage, setModelScope } from '../../omp/cli';
+import {
+  addProviderModel,
+  fetchModelScope,
+  fetchProviderUsage,
+  fetchUsage,
+  refreshProviderModels,
+  setModelScope,
+  testProviderModel,
+} from '../../omp/cli';
 import type { OmpModelScope, OmpUsagePayload, ProviderUsageReport } from '../../omp/cli';
 import { ModelsView, fetchModelCatalog } from './ModelsView';
 import type { CatalogModel } from './ModelsView';
@@ -95,6 +105,13 @@ export const ProvidersView: React.FC = () => {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [scopeMessage, setScopeMessage] = useState<string | null>(null);
   const [modelQuery, setModelQuery] = useState('');
+  /** Per-model connectivity results, keyed by `provider/model`. */
+  const [modelTests, setModelTests] = useState<Record<string, { state: 'running' | 'ok' | 'fail'; ms?: number; error?: string }>>({});
+  /** Typed model ids per provider, for the "add a model" field. */
+  const [modelDraft, setModelDraft] = useState<Record<string, string>>({});
+  /** One message per provider card (add/refresh outcome). */
+  const [providerMessage, setProviderMessage] = useState<Record<string, string>>({});
+  const [catalogBusy, setCatalogBusy] = useState<string | null>(null);
   /** Both refresh buttons re-read omp's usage (billing) and quota reports. */
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
@@ -202,6 +219,80 @@ export const ProvidersView: React.FC = () => {
   const modelEnabled = (provider: string, id: string): boolean =>
     !disabledProviders.has(provider) &&
     ((scope?.enabledModels ?? []).length === 0 || (scope?.enabledModels ?? []).includes(`${provider}/${id}`));
+
+  /** One real request through omp: the only honest "is this model reachable" test. */
+  const runModelTest = async (provider: string, id: string) => {
+    const selector = `${provider}/${id}`;
+    setModelTests((prev) => ({ ...prev, [selector]: { state: 'running' } }));
+    try {
+      const result = await testProviderModel(provider, id);
+      setModelTests((prev) => ({
+        ...prev,
+        [selector]: result.ok
+          ? { state: 'ok', ms: result.ms }
+          : { state: 'fail', error: result.error ?? `exit ${result.code}` },
+      }));
+    } catch (error) {
+      setModelTests((prev) => ({
+        ...prev,
+        [selector]: { state: 'fail', error: error instanceof Error ? error.message : String(error) },
+      }));
+    }
+  };
+
+  /** Pull the provider's current model list (`omp models refresh`). */
+  const refreshProviderCatalog = async (provider: string) => {
+    setCatalogBusy(`${provider}:refresh`);
+    setProviderMessage((prev) => ({ ...prev, [provider]: '' }));
+    try {
+      const result = await refreshProviderModels(provider);
+      const [nextCatalog, nextScope] = await Promise.all([fetchModelCatalog(), fetchModelScope()]);
+      setCatalog(nextCatalog);
+      setScope(nextScope);
+      setProviderMessage((prev) => ({
+        ...prev,
+        [provider]: result.added.length
+          ? zh
+            ? `目录已刷新：新增 ${result.added.length} 个模型（${result.added.slice(0, 3).join('、')}${result.added.length > 3 ? '…' : ''}）`
+            : `Catalog refreshed: ${result.added.length} new model(s)`
+          : zh
+          ? `目录已刷新：该提供商共 ${result.models.length} 个模型，没有新增`
+          : `Catalog refreshed: ${result.models.length} models, nothing new`,
+      }));
+    } catch (error) {
+      setProviderMessage((prev) => ({ ...prev, [provider]: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setCatalogBusy(null);
+    }
+  };
+
+  /** Register a typed id: refresh, validate against omp's catalog, then enable it. */
+  const addModel = async (provider: string) => {
+    const id = (modelDraft[provider] ?? '').trim();
+    if (!id) return;
+    setCatalogBusy(`${provider}:add`);
+    setProviderMessage((prev) => ({ ...prev, [provider]: '' }));
+    try {
+      const result = await addProviderModel(provider, id);
+      const [nextCatalog, nextScope] = await Promise.all([fetchModelCatalog(), fetchModelScope()]);
+      setCatalog(nextCatalog);
+      setScope(nextScope);
+      setModelDraft((prev) => ({ ...prev, [provider]: '' }));
+      setProviderMessage((prev) => ({
+        ...prev,
+        [provider]: zh
+          ? `${result.selector} 已加入并启用${result.refreshed ? '（先刷新了目录）' : ''}`
+          : `${result.selector} added and enabled${result.refreshed ? ' (catalog refreshed first)' : ''}`,
+      }));
+    } catch (error) {
+      setProviderMessage((prev) => ({
+        ...prev,
+        [provider]: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setCatalogBusy(null);
+    }
+  };
 
   const applyScope = async (body: { kind: 'model' | 'provider'; selector?: string; provider?: string; enabled: boolean }, label: string) => {
     const key = body.selector ?? body.provider ?? '';
@@ -729,6 +820,41 @@ export const ProvidersView: React.FC = () => {
                     </div>
 
                     {open && (
+                      <>
+                        <div className="mt-2 flex items-center gap-2 flex-wrap">
+                          <input
+                            value={modelDraft[p.id] ?? ''}
+                            onChange={(e) => setModelDraft((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void addModel(p.id);
+                            }}
+                            placeholder={zh ? '输入模型 id 添加（如 gpt-5.2，可带 provider/ 前缀）' : 'Add a model id (e.g. gpt-5.2, provider/ prefix allowed)'}
+                            aria-label={zh ? `${p.id} 添加模型` : `Add a model to ${p.id}`}
+                            className="flex-1 min-w-[220px] h-7 px-2 rounded bg-[#121215] border border-[#27272a] text-[11px] font-mono text-[#fafafa] placeholder-[#52525b] focus:outline-none focus:border-[#a78bfa]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void addModel(p.id)}
+                            disabled={!(modelDraft[p.id] ?? '').trim() || catalogBusy !== null}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40 active:translate-y-px"
+                          >
+                            {catalogBusy === `${p.id}:add` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                            {zh ? '添加' : 'Add'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void refreshProviderCatalog(p.id)}
+                            disabled={catalogBusy !== null}
+                            title={zh ? 'omp models refresh：拉取该提供商当前公开的模型列表' : 'omp models refresh: pull the provider’s current public model list'}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded border border-[#27272a] bg-[#121215] text-[#a1a1aa] hover:text-[#fafafa] hover:bg-[#18181b] text-[11px] transition-colors cursor-pointer disabled:opacity-40 active:translate-y-px"
+                          >
+                            {catalogBusy === `${p.id}:refresh` ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                            {zh ? '刷新目录' : 'Refresh catalog'}
+                          </button>
+                        </div>
+                        {providerMessage[p.id] && (
+                          <div className="mt-1.5 text-[10px] font-mono text-[#a1a1aa] break-words">{providerMessage[p.id]}</div>
+                        )}
                       <div className="mt-2 rounded border border-[#27272a] divide-y divide-[#1e1e24] max-h-[340px] overflow-y-auto">
                         {providerModels.length === 0 && (
                           <div className="px-2.5 py-2 text-[10px] font-mono text-[#52525b]">
@@ -771,27 +897,66 @@ export const ProvidersView: React.FC = () => {
                                 )}
                               </div>
 
-                              <ScopeSwitch
-                                accentColor={accentColor}
-                                checked={on}
-                                busy={busyKey === selector}
-                                disabled={!providerEnabled}
-                                icon={<Check className="w-2 h-2" />}
-                                title={
-                                  on
-                                    ? zh
-                                      ? '使用该模型（点击停用）'
-                                      : 'This model is available (click to disable)'
-                                    : zh
-                                    ? '已停用：写入 omp enabledModels，模型选择器中不再出现'
-                                    : 'Disabled: written to omp enabledModels, hidden from the model picker'
-                                }
-                                onToggle={() => void applyScope({ kind: 'model', selector, enabled: !on }, selector)}
-                              />
+                              <div className="flex items-center gap-2 shrink-0">
+                                {(() => {
+                                  const test = modelTests[selector];
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => void runModelTest(p.id, m.id)}
+                                      disabled={test?.state === 'running'}
+                                      title={
+                                        zh
+                                          ? '发一次真实请求（omp -p，无工具、无会话）验证该模型能否连通，约消耗几十 token'
+                                          : 'Send one real request (omp -p, no tools, no session) to verify the model connects; costs a few dozen tokens'
+                                      }
+                                      className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#27272a] bg-[#121215] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46] text-[10px] font-mono transition-colors cursor-pointer disabled:opacity-50 active:translate-y-px"
+                                    >
+                                      {test?.state === 'running' ? (
+                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                      ) : (
+                                        <Zap className="w-3 h-3" />
+                                      )}
+                                      <span>{zh ? '测试' : 'test'}</span>
+                                    </button>
+                                  );
+                                })()}
+                                {modelTests[selector]?.state === 'ok' && (
+                                  <span className="text-[10px] font-mono text-[#34d399]" title={zh ? '连通正常' : 'reachable'}>
+                                    {modelTests[selector].ms}ms
+                                  </span>
+                                )}
+                                {modelTests[selector]?.state === 'fail' && (
+                                  <span
+                                    className="text-[10px] font-mono text-[#ef4444] max-w-[160px] truncate"
+                                    title={modelTests[selector].error}
+                                  >
+                                    {modelTests[selector].error}
+                                  </span>
+                                )}
+                                <ScopeSwitch
+                                  accentColor={accentColor}
+                                  checked={on}
+                                  busy={busyKey === selector}
+                                  disabled={!providerEnabled}
+                                  icon={<Check className="w-2 h-2" />}
+                                  title={
+                                    on
+                                      ? zh
+                                        ? '使用该模型（点击停用）'
+                                        : 'This model is available (click to disable)'
+                                      : zh
+                                      ? '已停用：写入 omp enabledModels，模型选择器中不再出现'
+                                      : 'Disabled: written to omp enabledModels, hidden from the model picker'
+                                  }
+                                  onToggle={() => void applyScope({ kind: 'model', selector, enabled: !on }, selector)}
+                                />
+                              </div>
                             </div>
                           );
                         })}
                       </div>
+                      </>
                     )}
                   </div>
                 );

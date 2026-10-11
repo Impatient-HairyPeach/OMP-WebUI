@@ -1,7 +1,7 @@
 {
   "name": "omp-studio",
   "private": true,
-  "version": "0.3.28",
+  "version": "0.3.29",
   "type": "module",
   "bin": {
     "omp-studio": "bin/omp-studio.mjs"

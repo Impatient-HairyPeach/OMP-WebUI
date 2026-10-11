@@ -208,6 +208,33 @@ export const checkOmpUpdate = (force = false) => postJson<OmpUpdateStatus>("/api
 /** Run `omp update`; the bridge stops the session first and restarts it afterwards. */
 export const installOmpUpdate = (force = false) => postJson<OmpUpdateResult>("/api/omp/update", { action: "update", force });
 
+/** Refresh one provider's model catalog (`omp models refresh`). */
+export const refreshProviderModels = (provider: string) =>
+  postJson<{ ok: boolean; provider: string; added: string[]; models: Array<{ id: string; name: string; selector: string }> }>(
+    "/api/omp/models/refresh",
+    { provider }
+  );
+
+/** Register a typed model id: validated against the catalog, then enabled. */
+export const addProviderModel = (provider: string, id: string) =>
+  postJson<{ ok: boolean; selector: string; refreshed: boolean; name?: string; error?: string }>("/api/omp/models/add", {
+    provider,
+    id,
+  });
+
+/** One real request through omp with that model (latency + error text). */
+export interface ModelTestResult {
+  ok: boolean;
+  ms: number;
+  selector: string;
+  code: number;
+  output: string;
+  error?: string;
+}
+
+export const testProviderModel = (provider: string, id: string) =>
+  postJson<ModelTestResult>("/api/omp/models/test", { provider, id });
+
 /** Turn one skill on/off globally (writes the front-matter flag omp reads). */
 export const setSkillEnabled = (name: string, enabled: boolean) =>
   postJson<{ ok: boolean; name: string; enabled: boolean; restarted: boolean; path: string }>("/api/skills/enable", {

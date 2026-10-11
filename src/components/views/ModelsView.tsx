@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Check, Cpu, Loader2, Search } from 'lucide-react';
+import { AlertCircle, Check, Cpu, Loader2, Search, Zap } from 'lucide-react';
+import { testProviderModel } from '../../omp/cli';
 import { useTheme } from '../../context/ThemeContext';
 import { useI18n } from '../../context/I18nContext';
 
@@ -80,6 +81,25 @@ export const ModelsView: React.FC<ModelsViewProps> = ({ embedded = false }) => {
   const [current, setCurrent] = useState<AgentState['model'] | null>(null);
   const [query, setQuery] = useState('');
   const [switching, setSwitching] = useState<string | null>(null);
+  /** Per-model connectivity results, keyed by `provider/model`. */
+  const [modelTests, setModelTests] = useState<Record<string, { state: 'running' | 'ok' | 'fail'; ms?: number; error?: string }>>({});
+
+  const runTest = async (provider: string, id: string) => {
+    const key = `${provider}/${id}`;
+    setModelTests((prev) => ({ ...prev, [key]: { state: 'running' } }));
+    try {
+      const result = await testProviderModel(provider, id);
+      setModelTests((prev) => ({
+        ...prev,
+        [key]: result.ok ? { state: 'ok', ms: result.ms } : { state: 'fail', error: result.error ?? `exit ${result.code}` },
+      }));
+    } catch (error) {
+      setModelTests((prev) => ({
+        ...prev,
+        [key]: { state: 'fail', error: error instanceof Error ? error.message : String(error) },
+      }));
+    }
+  };
   const [switchError, setSwitchError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -226,14 +246,18 @@ export const ModelsView: React.FC<ModelsViewProps> = ({ embedded = false }) => {
             {list.map((m) => {
               const isCurrent = !!current && current.provider === m.provider && current.id === m.id;
               const key = `${m.provider}/${m.id}`;
+              const test = modelTests[key];
               return (
+                <div
+                  key={m.id}
+                  className="w-full grid grid-cols-12 gap-3 px-3 py-2 items-center hover:bg-[#121215] transition-colors"
+                  style={isCurrent ? { backgroundColor: `${accentColor}12` } : undefined}
+                >
                 <button
                   type="button"
-                  key={m.id}
                   onClick={() => handleSelect(m)}
                   disabled={switching !== null}
-                  className="w-full text-left grid grid-cols-12 gap-3 px-3 py-2 items-center hover:bg-[#121215] transition-colors cursor-pointer disabled:cursor-wait"
-                  style={isCurrent ? { backgroundColor: `${accentColor}12` } : undefined}
+                  className="col-span-11 text-left grid grid-cols-11 gap-3 items-center cursor-pointer disabled:cursor-wait"
                 >
                   <div className="col-span-5 flex items-center gap-2 min-w-0">
                     <div
@@ -266,10 +290,32 @@ export const ModelsView: React.FC<ModelsViewProps> = ({ embedded = false }) => {
                   <div className="col-span-1 text-center font-mono text-[10px]">
                     {m.reasoning ? <span className="text-[#34d399]">✓</span> : <span className="text-[#52525b]">: </span>}
                   </div>
-                  <div className="col-span-4 text-right font-mono text-[10px] text-[#a1a1aa]">
+                  <div className="col-span-3 text-right font-mono text-[10px] text-[#a1a1aa]">
                     {formatPrice(m.cost?.input)} / {formatPrice(m.cost?.output)} / {formatPrice(m.cost?.cacheRead)}
                   </div>
                 </button>
+                <div className="col-span-1 flex items-center justify-end gap-1.5">
+                  {test?.state === 'ok' && <span className="text-[10px] font-mono text-[#34d399]">{test.ms}ms</span>}
+                  {test?.state === 'fail' && (
+                    <span className="text-[10px] font-mono text-[#ef4444] max-w-[110px] truncate" title={test.error}>
+                      {zh ? '失败' : 'failed'}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void runTest(m.provider, m.id)}
+                    disabled={test?.state === 'running'}
+                    title={
+                      zh
+                        ? '发一次真实请求（omp -p，无工具、无会话）验证连通，约消耗几十 token'
+                        : 'Send one real request (omp -p, no tools, no session); costs a few dozen tokens'
+                    }
+                    className="p-1 rounded border border-[#27272a] bg-[#121215] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-50 active:translate-y-px"
+                  >
+                    {test?.state === 'running' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                  </button>
+                </div>
+                </div>
               );
             })}
           </div>
