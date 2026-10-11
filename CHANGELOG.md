@@ -3,6 +3,15 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.31
+
+- Adding a model by id now respects what was typed. A `provider/model` prefix
+  beats the card the text was entered in, so pasting a full selector into the
+  wrong provider still installs it in the right one (previously the card won and
+  the request failed). A bare id that belongs to another provider is reported as
+  such: the card says which provider owns the id and shows the exact selector to
+  type, in the UI language, instead of an English internal sentence.
+
 ## 0.3.30
 
 - A stale bridge now says so. `vite.config.ts` bakes a sha1 of `server.ts` into

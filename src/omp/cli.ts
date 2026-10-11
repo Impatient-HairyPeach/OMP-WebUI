@@ -181,7 +181,11 @@ async function postJson<T>(url: string, body: Record<string, unknown>): Promise<
     body: JSON.stringify(body),
   });
   const payload = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(payload.error || `${url} failed: ${res.status}`);
+  if (!res.ok) {
+    // Callers sometimes need the structured detail (which provider owns a model),
+    // not just the sentence, so the payload rides along on the error.
+    throw Object.assign(new Error(payload.error || `${url} failed: ${res.status}`), { payload });
+  }
   return payload;
 }
 
@@ -215,7 +219,18 @@ export const refreshProviderModels = (provider: string) =>
     { provider }
   );
 
-/** Register a typed model id: validated against the catalog, then enabled. */
+/** Register a typed model id: validated against the catalog, then enabled.
+ *  On failure the error carries `payload` with `provider`, `id`, `refreshed` and
+ *  `elsewhere` (providers that do own that id) so the UI can say what to do. */
+export interface AddModelFailure {
+  ok: false;
+  provider: string;
+  id: string;
+  refreshed: boolean;
+  elsewhere: string[];
+  error: string;
+}
+
 export const addProviderModel = (provider: string, id: string) =>
   postJson<{ ok: boolean; selector: string; refreshed: boolean; name?: string; error?: string }>("/api/omp/models/add", {
     provider,

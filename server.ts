@@ -1289,9 +1289,11 @@ app.post("/api/omp/models/add", async (req, res) => {
   let provider = String(req.body?.provider || "").trim();
   let id = String(req.body?.id || "").trim();
   if (id.includes("/")) {
-    const [prefix, rest] = id.split("/");
-    if (!provider) provider = prefix;
-    id = rest;
+    // A typed `provider/model` is explicit intent: it beats the card it was
+    // typed in, so pasting a full selector into the wrong provider still works.
+    const [prefix, ...rest] = id.split("/");
+    provider = prefix;
+    id = rest.join("/");
   }
   if (!provider || /[\/\s]/.test(provider) || !id || /\s/.test(id)) {
     res.status(400).json({ error: "expected a provider and a model id" });
@@ -1309,10 +1311,15 @@ app.post("/api/omp/models/add", async (req, res) => {
     }
     const known = models.find((model) => selectorOf(model) === selector);
     if (!known) {
+      // Say who owns that id: typing it into the wrong provider is the usual cause.
+      const elsewhere = [...new Set(models.filter((model) => model.id === id).map((model) => model.provider))];
       res.status(404).json({
         ok: false,
+        provider,
+        id,
         refreshed,
-        error: `${selector} is not in omp's catalog for ${provider} (refreshed: ${refreshed ? "yes" : "no"}); omp cannot select a model it does not know`,
+        elsewhere,
+        error: `${selector} is not in omp's catalog for ${provider} (refreshed: ${refreshed ? "yes" : "no"})${elsewhere.length ? `; omp knows this id under: ${elsewhere.join(", ")}` : ""}; omp cannot select a model it does not know`,
       });
       return;
     }

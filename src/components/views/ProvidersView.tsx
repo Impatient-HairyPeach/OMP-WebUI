@@ -285,9 +285,22 @@ export const ProvidersView: React.FC = () => {
           : `${result.selector} added and enabled${result.refreshed ? ' (catalog refreshed first)' : ''}`,
       }));
     } catch (error) {
+      // The bridge reports which providers do own that id; typing an id into the
+      // wrong card is the usual cause, so say where it belongs.
+      const payload = (error as { payload?: { provider?: string; id?: string; elsewhere?: string[] } }).payload;
+      const elsewhere = payload?.elsewhere ?? [];
+      const id2 = payload?.id ?? id;
+      const owner = payload?.provider ?? provider;
       setProviderMessage((prev) => ({
         ...prev,
-        [provider]: error instanceof Error ? error.message : String(error),
+        [provider]:
+          elsewhere.length > 0
+            ? zh
+              ? `${owner} 的目录里没有 ${id2}。omp 目录里这个 id 属于 ${elsewhere.join('、')} —— 在对应的提供商卡片里添加，或直接输入 ${elsewhere[0]}/${id2}（前缀会覆盖当前卡片）。`
+              : `${owner} has no ${id2} in its catalog. omp knows this id under ${elsewhere.join(', ')}; add it there, or type ${elsewhere[0]}/${id2} (the prefix wins over this card).`
+            : zh
+            ? `${owner} 的目录里没有 ${id2}（已刷新目录）。omp 无法选择它不认识的模型 id。`
+            : `${owner} has no ${id2} in its catalog (catalog refreshed). omp cannot select a model id it does not know.`,
       }));
     } finally {
       setCatalogBusy(null);
