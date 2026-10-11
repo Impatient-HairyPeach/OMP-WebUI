@@ -3,6 +3,8 @@
 /** Injected by vite.config.ts `define`. */
 declare const __APP_VERSION__: string;
 declare const __APP_BUILD_DATE__: string;
+/** sha1 prefix of `server.ts` at SPA build time; the bridge reports its own. */
+declare const __SERVER_CODE_ID__: string;
 
 /** Minimal Web Speech dictation typings (not in the DOM lib). */
 interface OmpSpeechResult {

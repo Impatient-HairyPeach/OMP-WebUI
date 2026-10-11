@@ -3,6 +3,18 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.30
+
+- A stale bridge now says so. `vite.config.ts` bakes a sha1 of `server.ts` into
+  the SPA, the bridge reports the sha1 of the code it actually started with, and
+  the header shows an amber "桥接代码已过期 / bridge code stale" chip when they
+  differ, with the restart command in its tooltip (click copies it). Until now a
+  process started before the last build answered the first new route with
+  `unknown bridge endpoint: POST /api/omp/models/add`, which looks like a bug in
+  the new feature instead of a process that needs a restart.
+- The bridge reports how it was started (`omp-studio`, `bun run start`,
+  `bun run dev`) so the chip's hint is the command that actually applies.
+
 ## 0.3.29
 
 - Models can be added by id, and every model can be tested for real. In the

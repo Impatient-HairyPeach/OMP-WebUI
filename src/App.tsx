@@ -112,6 +112,40 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  /**
+   * A bridge started before this SPA was built serves older routes, so the first
+   * new call would fail with "unknown bridge endpoint". Compare fingerprints
+   * (the bridge reports the one it started with) and offer the restart command.
+   */
+  const [staleBridge, setStaleBridge] = useState<{ running: string; expected: string; restartHint: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await fetch('/api/health', { cache: 'no-store' });
+        const body = (await res.json()) as { codeId?: string; restartHint?: string };
+        if (cancelled) return;
+        if (body.codeId && body.codeId !== __SERVER_CODE_ID__) {
+          setStaleBridge({
+            running: body.codeId,
+            expected: __SERVER_CODE_ID__,
+            restartHint: body.restartHint ?? 'bun run dev',
+          });
+        } else {
+          setStaleBridge(null);
+        }
+      } catch {
+        // No bridge at all is handled by the session status; nothing to warn about here.
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   // Load real workspace + inventory counts once from the bridge.
   useEffect(() => {
     let cancelled = false;
@@ -196,6 +230,7 @@ export default function App() {
         isSidePanelOpen={sidePanelOpen}
         onToggleSidePanel={() => setSidePanelOpen(!sidePanelOpen)}
         onOpenSettingsTab={openSettingsTab}
+        staleCode={staleBridge}
       />
 
       {/* Main Container Layout */}

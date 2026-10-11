@@ -14,6 +14,8 @@ import type { Response } from "express";
 import { execFile, execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -158,6 +160,25 @@ function childEnv(): Record<string, string | undefined> {
   for (const key of ["NODE_ENV", "PORT", "HOST", "NODE_OPTIONS"]) delete env[key];
   return env;
 }
+
+/** sha1 prefix of this file as it was when the process started. A bridge started
+ *  before a build serves older routes than the SPA expects, which used to surface
+ *  as "unknown bridge endpoint" on the first new call. */
+/** The command that starts a bridge like this one (shown when it is stale). */
+const RESTART_HINT = (() => {
+  const argv = process.argv.join(" ");
+  if (/omp-studio/i.test(argv)) return "omp-studio";
+  if (process.argv.includes("--prod") || process.env.NODE_ENV === "production") return "bun run start";
+  return "bun run dev";
+})();
+
+const SERVER_CODE_ID = (() => {
+  try {
+    return createHash("sha1").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex").slice(0, 12);
+  } catch {
+    return "unknown";
+  }
+})();
 
 /** Resolve the omp executable without shell:true (Windows needs the real .exe, not a shim concat). */
 function resolveOmpCommand(): { file: string; args: string[] } {
@@ -847,6 +868,10 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     status: childStatus,
+    // Fingerprint of the code this process started with (see vite.config.ts).
+    codeId: SERVER_CODE_ID,
+    // How to start a bridge that serves the current source.
+    restartHint: RESTART_HINT,
     workspace,
     resumePath,
     ompBin: OMP_BIN,

@@ -5,6 +5,7 @@ import {
   GitBranch,
   Search,
   PanelRight,
+  TriangleAlert,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
@@ -20,6 +21,8 @@ interface HeaderProps {
   isSidePanelOpen?: boolean;
   onToggleSidePanel?: () => void;
   onOpenSettingsTab?: (tab: SettingsSidebarTab) => void;
+  /** Set when the running bridge started from older code than this SPA was built from. */
+  staleCode?: { running: string; expected: string; restartHint: string } | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -31,6 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
   isSidePanelOpen = false,
   onToggleSidePanel,
   onOpenSettingsTab,
+  staleCode = null,
 }) => {
   const { theme, accentColor } = useTheme();
   const { t, language } = useI18n();
@@ -71,8 +75,27 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
       </div>
 
-      {/* Right Actions: side panel, settings, git */}
+      {/* Right Actions: stale-code warning, side panel, settings, git */}
       <div className="flex items-center gap-2">
+        {staleCode && (
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(staleCode.restartHint);
+            }}
+            title={
+              (language === 'zh-CN'
+                ? `正在运行的桥接进程是旧代码（${staleCode.running}），本页面按新代码构建（${staleCode.expected}）：新接口会返回 unknown bridge endpoint。重启后生效：`
+                : `The running bridge started from older code (${staleCode.running}) than this page was built against (${staleCode.expected}), so new routes answer "unknown bridge endpoint". Restart it:`) +
+              `\n${staleCode.restartHint}\n` +
+              (language === 'zh-CN' ? '（点击复制该命令）' : '(click to copy the command)')
+            }
+            className="flex items-center gap-1.5 px-2 py-1 rounded border border-[#f59e0b]/50 bg-[#f59e0b]/10 text-[#f59e0b] text-[10px] font-mono transition-colors cursor-pointer hover:bg-[#f59e0b]/20 active:translate-y-px"
+          >
+            <TriangleAlert className="w-3 h-3" />
+            <span>{language === 'zh-CN' ? '桥接代码已过期' : 'bridge code stale'}</span>
+          </button>
+        )}
 
         <button
           type="button"
