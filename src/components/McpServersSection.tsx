@@ -120,7 +120,7 @@ export const McpServersSection: React.FC<McpServersSectionProps> = () => {
         <span>
           {zh
             ? '参数 / 环境变量 / 请求头仅显示数量，其值可能包含密钥，永不在此展示。'
-            : 'Args / env / header keys are shown as counts only — values may hold secrets and are never displayed.'}
+            : 'Args / env / header keys are shown as counts only: values may hold secrets and are never displayed.'}
         </span>
       </div>
 

@@ -437,7 +437,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
                   : notifyState === 'denied'
                   ? language === 'zh-CN'
                     ? '已被拒绝，需在浏览器设置里恢复'
-                    : 'denied — re-enable it in the browser settings'
+                    : 'denied: re-enable it in the browser settings'
                   : language === 'zh-CN'
                   ? '点击开关时会请求授权'
                   : 'the switch asks for permission'}
@@ -811,7 +811,7 @@ export const ThemeView: React.FC<ThemeViewProps> = ({ onSelectAccentColor }) => 
         </div>
 
         {customAppliedNotice && (
-          <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono flex items-center gap-2 animate-in fade-in">
+          <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono flex items-center gap-2 animate-in fade-in motion-reduce:animate-none">
             <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
             <span>{t.customThemeSaveSuccess}</span>
           </div>

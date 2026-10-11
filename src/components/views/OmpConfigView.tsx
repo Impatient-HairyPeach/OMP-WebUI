@@ -57,7 +57,7 @@ export const OmpConfigView: React.FC = () => {
           <p className="text-xs text-[#a1a1aa] mt-0.5">
             {zh
               ? '读取 omp 真实的 config.yml 内容与解析后的路径。只读展示，不支持在此编辑。'
-              : "omp's real config.yml contents and resolved paths. Read-only — editing is out of scope."}
+              : "omp's real config.yml contents and resolved paths. Read-only: editing is out of scope."}
           </p>
         </div>
 
@@ -168,7 +168,7 @@ export const OmpConfigView: React.FC = () => {
               {Object.entries(data.paths).map(([key, value]) => (
                 <div key={key} className="px-3 py-2 flex items-start gap-3">
                   <span className="text-[#71717a] w-28 shrink-0">{key}</span>
-                  <span className="text-[#fafafa] break-all">{value || '—'}</span>
+                  <span className="text-[#fafafa] break-all">{value || '-'}</span>
                 </div>
               ))}
             </div>

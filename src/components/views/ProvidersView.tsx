@@ -26,7 +26,7 @@ import type { CatalogModel } from './ModelsView';
 const SOURCE_LABEL = '~/.omp/agent/usage.db';
 
 const formatCompact = (n?: number): string => {
-  if (n === undefined || n === null || Number.isNaN(n)) return '—';
+  if (n === undefined || n === null || Number.isNaN(n)) return '-';
   if (n >= 1_000_000_000) return `${parseFloat((n / 1_000_000_000).toFixed(2))}B`;
   if (n >= 1_000_000) return `${parseFloat((n / 1_000_000).toFixed(2))}M`;
   if (n >= 1_000) return `${parseFloat((n / 1_000).toFixed(1))}K`;
@@ -34,7 +34,7 @@ const formatCompact = (n?: number): string => {
 };
 
 const formatCost = (n?: number): string => {
-  if (n === undefined || n === null || Number.isNaN(n)) return '—';
+  if (n === undefined || n === null || Number.isNaN(n)) return '-';
   return `$${n.toFixed(n > 0 && n < 0.01 ? 4 : 2)}`;
 };
 
@@ -435,7 +435,7 @@ export const ProvidersView: React.FC = () => {
             <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-[11px] font-mono">
               {[
                 { k: zh ? '消耗' : 'Cost', v: formatCost(totals?.cost) },
-                { k: zh ? '轮次' : 'Turns', v: totals?.turns ?? '—' },
+                { k: zh ? '轮次' : 'Turns', v: totals?.turns ?? '-' },
                 { k: zh ? '输入' : 'Input', v: formatCompact(totals?.input) },
                 { k: zh ? '输出' : 'Output', v: formatCompact(totals?.output) },
                 { k: zh ? '缓存读取' : 'CacheRead', v: formatCompact(totals?.cacheRead) },
@@ -575,7 +575,7 @@ export const ProvidersView: React.FC = () => {
                       ))}
                     </div>
                     <div className="text-[11px] font-mono text-[#71717a] mt-0.5 truncate" title={p.baseUrl}>
-                      {p.baseUrl || '—'}
+                      {p.baseUrl || '-'}
                     </div>
                   </div>
                 </div>
@@ -589,15 +589,15 @@ export const ProvidersView: React.FC = () => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 rounded bg-[#121215] border border-[#27272a] text-xs font-mono">
                 <div>
                   <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? '累计消耗' : 'Total cost'}</div>
-                  <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCost(p.cost) : '—'}</div>
+                  <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCost(p.cost) : '-'}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? 'Token 总量' : 'Tokens'}</div>
-                  <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCompact(p.tokens) : '—'}</div>
+                  <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCompact(p.tokens) : '-'}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? '缓存读取' : 'Cache read'}</div>
-                  <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCompact(p.cacheRead) : '—'}</div>
+                  <div className="text-sm font-semibold text-[#fafafa]">{p.hasUsage ? formatCompact(p.cacheRead) : '-'}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-[#71717a] uppercase mb-0.5">{zh ? '额度用量' : 'Quota used'}</div>
@@ -611,7 +611,7 @@ export const ProvidersView: React.FC = () => {
                     if (!worst) {
                       return (
                         <>
-                          <div className="text-sm font-semibold text-[#71717a]">—</div>
+                          <div className="text-sm font-semibold text-[#71717a]">: </div>
                           <div className="text-[9px] text-[#52525b] mt-0.5">
                             {zh ? 'omp 未报告该提供商的额度' : 'omp reports no quota for this provider'}
                           </div>
@@ -716,10 +716,10 @@ export const ProvidersView: React.FC = () => {
                             providerEnabled
                               ? zh
                                 ? '已启用：允许使用该提供商的模型（点击停用）'
-                                : 'Enabled — models from this provider are available (click to disable)'
+                                : 'Enabled: models from this provider are available (click to disable)'
                               : zh
                               ? '已停用：该提供商已从 omp 模型注册表移除（disabledProviders）'
-                              : "Disabled — removed from omp's model registry (disabledProviders)"
+                              : "Disabled: removed from omp's model registry (disabledProviders)"
                           }
                           onToggle={() =>
                             void applyScope({ kind: 'provider', provider: p.id, enabled: !providerEnabled }, p.id)
@@ -784,7 +784,7 @@ export const ProvidersView: React.FC = () => {
                                       : 'This model is available (click to disable)'
                                     : zh
                                     ? '已停用：写入 omp enabledModels，模型选择器中不再出现'
-                                    : 'Disabled — written to omp enabledModels, hidden from the model picker'
+                                    : 'Disabled: written to omp enabledModels, hidden from the model picker'
                                 }
                                 onToggle={() => void applyScope({ kind: 'model', selector, enabled: !on }, selector)}
                               />

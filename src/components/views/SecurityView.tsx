@@ -121,12 +121,12 @@ export const SecurityView: React.FC = () => {
               <div className="flex items-start gap-2">
                 <span className="text-[#71717a] w-28 shrink-0">argv</span>
                 <span className="text-[#34d399] break-all">
-                  {launch.argv.length ? launch.argv.join(' ') : '—'}
+                  {launch.argv.length ? launch.argv.join(' ') : '-'}
                 </span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="text-[#71717a] w-28 shrink-0">{zh ? '会话工作目录' : 'session cwd'}</span>
-                <span className="text-[#fafafa] break-all">{launch.sessionCwd || '—'}</span>
+                <span className="text-[#fafafa] break-all">{launch.sessionCwd || '-'}</span>
               </div>
               {launch.resumePath && (
                 <div className="flex items-start gap-2">
@@ -204,7 +204,7 @@ export const SecurityView: React.FC = () => {
           </div>
           <div className="flex flex-wrap gap-1.5 mt-2">
             {servers.length === 0 ? (
-              <span className="text-[11px] text-[#71717a] font-mono">—</span>
+              <span className="text-[11px] text-[#71717a] font-mono">: </span>
             ) : (
               servers.map((s) => (
                 <span
@@ -229,7 +229,7 @@ export const SecurityView: React.FC = () => {
           </div>
           <div className="flex flex-wrap gap-1.5 mt-2">
             {plugins.length === 0 ? (
-              <span className="text-[11px] text-[#71717a] font-mono">—</span>
+              <span className="text-[11px] text-[#71717a] font-mono">: </span>
             ) : (
               plugins.map((p) => (
                 <span

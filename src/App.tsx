@@ -68,6 +68,8 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Modals & Drawers
+  /** Bumped after an install so the skills list reloads without a manual refresh. */
+  const [skillsRefreshToken, setSkillsRefreshToken] = useState(0);
   const [skillModal, setSkillModal] = useState<{ open: boolean; mode: 'install' | 'upload' }>({
     open: false,
     mode: 'install',
@@ -232,6 +234,7 @@ export default function App() {
 
                       {/* Section 3: Skills Directory (real ~/.agents/skills) */}
                       <SkillsSection
+                        refreshToken={skillsRefreshToken}
                         onUploadSkill={() => setSkillModal({ open: true, mode: 'upload' })}
                         onInstallSkill={() => setSkillModal({ open: true, mode: 'install' })}
                       />
@@ -289,7 +292,7 @@ export default function App() {
 
       {/* Floating Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-12 right-6 z-50 bg-[#18181b] text-[#fafafa] border border-[#a78bfa]/40 px-3 py-2 rounded shadow-2xl text-xs font-mono flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-150">
+        <div className="fixed bottom-12 right-6 z-50 bg-[#18181b] text-[#fafafa] border border-[#a78bfa]/40 px-3 py-2 rounded shadow-2xl text-xs font-mono flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-150 motion-reduce:animate-none">
           <span className="w-1.5 h-1.5 rounded-full bg-[#a78bfa]" />
           <span>{toastMessage}</span>
         </div>
@@ -302,9 +305,10 @@ export default function App() {
         isOpen={skillModal.open}
         mode={skillModal.mode}
         onClose={() => setSkillModal({ open: false, mode: 'install' })}
-        onInstall={(newSkill) => {
-          addLog('OK', `skill.install: ${newSkill.command}`);
-          showToast(`Installed ${newSkill.command}`);
+        onInstalled={(names, detail) => {
+          addLog('OK', `skill.install: ${detail}`);
+          showToast(`Installed ${names.join(', ')}`);
+          setSkillsRefreshToken((token) => token + 1);
         }}
       />
 

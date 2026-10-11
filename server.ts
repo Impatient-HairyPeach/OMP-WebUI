@@ -1202,7 +1202,6 @@ app.post("/api/workspace", async (req, res) => {
 
 /** omp subcommands the UI may run; keeps the bridge from becoming a generic shell. */
 const CLI_ACTIONS = new Set(["plugin", "skill", "install", "models", "agents", "gc", "ps", "doctor"]);
-const SKILLS_DIR = process.env.OMP_SKILLS_DIR || path.join(homedir(), ".agents", "skills");
 
 /** Run one real `omp` CLI command (plugin/skill management) in the active workspace. */
 app.post("/api/cli", (req, res) => {
@@ -1225,31 +1224,279 @@ app.post("/api/cli", (req, res) => {
 });
 
 /** Import a skill from GitHub by cloning it into the agents skills directory omp discovers. */
-app.post("/api/skills/import", (req, res) => {
-  const repo = String(req.body?.repo || "").trim();
-  if (!/^(https?:\/\/|git@)[\w.@:/~-]+$/.test(repo)) {
-    res.status(400).json({ error: "expected a git URL, e.g. https://github.com/owner/skill-repo" });
-    return;
+/* ========================================================================== */
+/* SKILLS: installation follows the ecosystem, not a hand-rolled git clone.    */
+/*                                                                            */
+/* omp itself reads skills from <project>/.agents/skills and ~/.agents/skills, */
+/* and takes registry packages through its own CLI (`omp skill install`).      */
+/* Git-hosted skills (single skill OR a collection of `skills/<name>/SKILL.md`) */
+/* go through the Agent Skills CLI (`npx skills add`), which is the tool the    */
+/* ecosystem uses: it scans the repo, copies into `.agents/skills/<name>` and   */
+/* links the other agents' directories. A raw `git clone` cannot do that, which */
+/* is why collection repos used to install as one unreadable directory.        */
+/* ========================================================================== */
+
+/** ANSI colour (SGR + cursor) and the CLI's carriage-return spinner frames. */
+function stripAnsi(text: string): string {
+  return text
+    .replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "")
+    .replace(/\u001b\][^\u0007]*\u0007/g, "")
+    .replace(/\r/g, "\n");
+}
+
+/**
+ * The CLI draws a banner, repaints progress lines and lists every agent it
+ * linked. None of that belongs in a dialog, so keep only the lines that carry
+ * the outcome: source, counts, selected/installed names, paths and errors.
+ */
+const CLI_OUTPUT_KEEP = /^(Source:|Found \d+ skills?|Selected \d+ skills?|Installed \d+ skills?|Removed \d+|Removal process complete|Successfully removed|No matching skills|No skills found|\u2713|\u2192|!|\u26a0|Error|Warning|Usage:|Installing|Cloning|Copying|Linking)/i;
+
+function cleanCliOutput(text: string): string {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const raw of stripAnsi(text).split("\n")) {
+    const line = raw
+      .replace(/^[\s\u2502|]+/, "")
+      .replace(/[\s\u2502|]+$/, "")
+      .trim();
+    if (!line || line.length > 160) continue;
+    if (!CLI_OUTPUT_KEEP.test(line)) continue;
+    if (seen.has(line)) continue;
+    seen.add(line);
+    kept.push(line);
   }
-  const name = repo.replace(/\.git$/, "").split(/[/:]/).pop();
-  if (!name || !/^[\w.-]+$/.test(name)) {
-    res.status(400).json({ error: "could not derive a directory name from that URL" });
-    return;
-  }
-  const destination = path.join(SKILLS_DIR, name);
-  if (existsSync(destination)) {
-    res.status(409).json({ error: `already installed: ${destination}` });
-    return;
-  }
-  execFile(
-    "git",
-    ["clone", "--depth", "1", repo, destination],
-    { cwd: workspace, maxBuffer: 16 * 1024 * 1024, timeout: 300000 },
-    (error, stdout, stderr) => {
-      const code = error && typeof error.code === "number" ? error.code : error ? 1 : 0;
-      res.json({ code, path: destination, stdout: String(stdout), stderr: String(stderr) });
+  return kept.join("\n");
+}
+
+/**
+ * `npx skills add <repo> -l` prints `│    <name>` followed by `│      <desc>`
+ * (descriptions wrap over several lines). Box furniture and banner noise never
+ * match those indents, so the parser only has to know about the two.
+ */
+function parseSkillListing(stdout: string): Array<{ name: string; description?: string }> {
+  const skills: Array<{ name: string; description?: string }> = [];
+  let current: { name: string; description?: string } | null = null;
+  for (const raw of stripAnsi(stdout).split("\n")) {
+    const line = raw.replace(/^[\s│|]*[│|]/, "").replace(/[ \t]+$/, "");
+    const name = line.match(/^ {2,6}(\S+)$/);
+    if (name) {
+      current = { name: name[1] };
+      skills.push(current);
+      continue;
     }
-  );
+    const description = line.match(/^ {6,}(\S.*)$/);
+    if (description && current) {
+      current.description = `${current.description ? `${current.description} ` : ""}${description[1].trim()}`;
+    }
+  }
+  return skills;
+}
+
+/** Run the Agent Skills CLI. `.cmd` shims need a shell on Windows; every argument
+    is validated by the callers, so no metacharacter can reach it. */
+function runSkillsCli(args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
+  const { promise, resolve } = Promise.withResolvers<{ code: number; stdout: string; stderr: string }>();
+  const options = { cwd: workspace, maxBuffer: 32 * 1024 * 1024, timeout: timeoutMs, windowsHide: true };
+  const done = (error: Error | null, stdout: string | Buffer, stderr: string | Buffer) => {
+    const exit = error as (Error & { code?: unknown }) | null;
+    const code = exit && typeof exit.code === "number" ? exit.code : exit ? 1 : 0;
+    resolve({ code, stdout: stripAnsi(String(stdout)), stderr: stripAnsi(String(stderr)) });
+  };
+  if (process.platform === "win32") {
+    execFile(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", "npx", "--yes", "skills", ...args], options, done);
+  } else {
+    execFile("npx", ["--yes", "skills", ...args], options, done);
+  }
+  return promise;
+}
+
+const SKILL_NAME_RE = /^[\w.-]+$/;
+/* owner/repo, or a full URL (any host, one or more path segments). */
+const SKILL_REPO_RE = /^(https?:\/\/)?[\w.-]+(\/[\w.-]+)+$/;
+
+/** Discover what a git repository actually ships, without installing anything. */
+app.post("/api/skills/discover", async (req, res) => {
+  const repo = String(req.body?.repo || "").trim().replace(/\.git$/, "").replace(/\/+$/, "");
+  if (!SKILL_REPO_RE.test(repo)) {
+    res.status(400).json({ error: "expected owner/repo or a repository URL" });
+    return;
+  }
+  const result = await runSkillsCli(["add", repo, "-l"], 180_000);
+  const skills = parseSkillListing(result.stdout);
+  res.json({ repo, skills, code: result.code, output: cleanCliOutput(result.stdout || result.stderr) });
+});
+
+/** Install the selected skills from that repository (project or user scope). */
+app.post("/api/skills/install", async (req, res) => {
+  const repo = String(req.body?.repo || "").trim().replace(/\.git$/, "").replace(/\/+$/, "");
+  const requested = Array.isArray(req.body?.skills) ? (req.body.skills as unknown[]).map(String) : [];
+  const global = req.body?.global === true;
+  if (!SKILL_REPO_RE.test(repo)) {
+    res.status(400).json({ error: "expected owner/repo or a repository URL" });
+    return;
+  }
+  const skills = requested.filter((name) => SKILL_NAME_RE.test(name));
+  if (requested.length > 0 && skills.length !== requested.length) {
+    res.status(400).json({ error: "invalid skill name" });
+    return;
+  }
+  // One -s per skill (a comma list is treated as one unmatched name), and `-a pi`
+  // (omp's own agent id) so the CLI writes `.agents/skills` only: without it the
+  // CLI copies the skill into every agent directory it knows (~50 of them).
+  const args = [
+    "add",
+    repo,
+    ...(skills.length > 0 ? skills.flatMap((name) => ["-s", name]) : ["-s", "*"]),
+    "-a",
+    "pi",
+    "-y",
+    "--copy",
+  ];
+  if (global) args.push("-g");
+  const selection = skills.length > 0 ? skills.join(", ") : "*";
+  const result = await runSkillsCli(args, 300_000);
+  emit("log", {
+    level: result.code === 0 ? "info" : "warn",
+    message: `skill.install: ${repo} [${selection}]${global ? " (global)" : ""} -> exit ${result.code}`,
+  });
+  res.json({
+    code: result.code,
+    repo,
+    skills: skills.length > 0 ? skills : ["*"],
+    global,
+    stdout: cleanCliOutput(result.stdout),
+    stderr: cleanCliOutput(result.stderr),
+  });
+});
+
+/** Remove an installed skill, whichever way it got there. */
+app.post("/api/skills/remove", async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  const global = req.body?.global === true;
+  if (!SKILL_NAME_RE.test(name)) {
+    res.status(400).json({ error: "invalid skill name" });
+    return;
+  }
+  const notes: string[] = [];
+  const args = ["remove", name, "-a", "pi", "-y"];
+  if (global) args.push("-g");
+  const result = await runSkillsCli(args, 120_000);
+  notes.push(result.stdout, result.stderr);
+
+  const roots = [global ? USER_SKILLS : path.join(workspace, ".agents", "skills")];
+  const dirFor = (root: string) => path.join(root, name);
+  const stillThere = roots.map(dirFor).filter((dir) => existsSync(path.join(dir, "SKILL.md")));
+  if (stillThere.length > 0) {
+    // A registry package or a hand-placed folder: try omp's own uninstall, then
+    // remove the directory omp scans (that is what uninstalling means here).
+    const command = resolveOmpCommand();
+    await new Promise<void>((resolve) => {
+      execFile(
+        command.file,
+        [...command.args, "skill", "uninstall", name, ...(global ? ["--global"] : [])],
+        { cwd: workspace, env: childEnv(), timeout: 120_000, windowsHide: true },
+        (error, stdout, stderr) => {
+          notes.push(String(stdout), String(stderr), error ? String(error.message) : "");
+          resolve();
+        }
+      );
+    });
+    for (const dir of stillThere) {
+      if (!existsSync(path.join(dir, "SKILL.md"))) continue;
+      const resolved = path.resolve(dir);
+      const insideRoot = roots.some((root) => resolved.startsWith(path.resolve(root) + path.sep));
+      if (!insideRoot) continue;
+      rmSync(resolved, { recursive: true, force: true });
+      notes.push(`→ removed ${resolved}`);
+    }
+  }
+  // What matters is the outcome: the CLI can exit with a Windows fault code
+  // while still having removed the skill, and omp's own uninstall reports
+  // "not installed" for git-installed skills.
+  const left = roots.filter((root) => existsSync(path.join(root, name, "SKILL.md"))).length;
+  const cleaned = notes
+    .filter(Boolean)
+    .filter((line) => !/STATUS_STACK_BUFFER|3221226505|Command failed/i.test(line))
+    // omp's registry uninstall has nothing to say about a git-installed skill.
+    .filter((line) => !/expected @scope\/name|Invalid skill name|not installed/i.test(line))
+    .join("\n")
+    .trim();
+  emit("log", { level: "info", message: `skill.remove: ${name}${global ? " (global)" : ""} -> ${left === 0 ? "removed" : "still installed"}` });
+  res.json({ code: left === 0 ? 0 : result.code, name, global, stdout: cleanCliOutput(cleaned), stderr: "" });
+});
+
+/** The Skillshare registry, through omp's own CLI (`omp skill <action>`). */
+app.post("/api/skills/registry", async (req, res) => {
+  const action = String(req.body?.action || "").trim();
+  const spec = String(req.body?.spec || "").trim();
+  const global = req.body?.global === true;
+  if (!["install", "update", "uninstall", "search", "info", "list"].includes(action)) {
+    res.status(400).json({ error: `unsupported skill action: ${action}` });
+    return;
+  }
+  if (action !== "list" && !spec) {
+    res.status(400).json({ error: "a package spec is required" });
+    return;
+  }
+  if (spec && !/^[@\w./^-]+$/.test(spec)) {
+    res.status(400).json({ error: "invalid package spec" });
+    return;
+  }
+  const command = resolveOmpCommand();
+  const args = [...command.args, "skill", action, ...(spec ? [spec] : [])];
+  if (global) args.push("--global");
+  if (action === "search" || action === "info" || action === "list") args.push("--json");
+  const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+    execFile(
+      command.file,
+      args,
+      { cwd: workspace, env: childEnv(), maxBuffer: 32 * 1024 * 1024, timeout: 300_000, windowsHide: true },
+      (error, stdout, stderr) => {
+        const exit = error as (Error & { code?: unknown }) | null;
+        const code = exit && typeof exit.code === "number" ? exit.code : exit ? 1 : 0;
+        resolve({ code, stdout: String(stdout), stderr: String(stderr) });
+      }
+    );
+  });
+  let data: unknown = null;
+  if (result.code === 0 && (action === "search" || action === "info" || action === "list")) {
+    try {
+      data = JSON.parse(result.stdout);
+    } catch {
+      data = null;
+    }
+  }
+  emit("log", { level: result.code === 0 ? "info" : "warn", message: `skill.${action}: ${spec || "(list)"} -> exit ${result.code}` });
+  res.json({ code: result.code, action, spec, global, data, stdout: result.stdout, stderr: result.stderr });
+});
+
+/** Author a skill where omp reads it: <root>/<name>/SKILL.md with real front matter. */
+app.post("/api/skills/create", async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  const description = String(req.body?.description || "").trim();
+  const body = String(req.body?.body || "").trim();
+  const global = req.body?.global === true;
+  if (!SKILL_NAME_RE.test(name)) {
+    res.status(400).json({ error: "use letters, digits, dot, dash or underscore for the name" });
+    return;
+  }
+  const root = global ? USER_SKILLS : path.join(workspace, ".agents", "skills");
+  const dir = path.join(root, name);
+  const file = path.join(dir, "SKILL.md");
+  if (existsSync(file)) {
+    res.status(409).json({ error: `already exists: ${file}` });
+    return;
+  }
+  const frontMatter = ["---", `name: ${name}`, description ? `description: ${description.replace(/\n/g, " ")}` : "description: ", "---", ""].join("\n");
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, `${frontMatter}\n${body}\n`, "utf8");
+    await enqueue(() => restartChild({}));
+    emit("log", { level: "info", message: `skill.create: ${name} -> ${file}` });
+    res.json({ ok: true, name, path: file, global });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 /** Speak text with omp's own local TTS engine and hand the audio back to the browser. */

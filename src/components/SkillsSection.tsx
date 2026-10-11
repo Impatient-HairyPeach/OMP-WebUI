@@ -3,11 +3,13 @@ import { Upload, Plus, Search, RefreshCw, Loader2, AlertCircle, Trash2, FileCode
 import { useI18n } from '../context/I18nContext';
 import { useTheme } from '../context/ThemeContext';
 import { ScopeSwitch } from './ScopeSwitch';
-import { fetchSkills, runOmpCli, setSkillEnabled, OmpSkillEntry } from '../omp/cli';
+import { fetchSkills, removeInstalledSkill, setSkillEnabled, OmpSkillEntry } from '../omp/cli';
 
 interface SkillsSectionProps {
   onUploadSkill: () => void;
   onInstallSkill: () => void;
+  /** Changes after an install/create so the list reloads itself. */
+  refreshToken?: number;
 }
 
 interface SkillsPayload {
@@ -15,7 +17,7 @@ interface SkillsPayload {
   roots: string[];
 }
 
-export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onInstallSkill }) => {
+export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onInstallSkill, refreshToken = 0 }) => {
   const { t, language } = useI18n();
   const { accentColor } = useTheme();
   const zh = language === 'zh-CN';
@@ -41,7 +43,7 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshToken]);
 
   const skills = data?.skills ?? [];
 
@@ -81,7 +83,9 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
     setActionBusy(skill.name);
     setOutput(null);
     try {
-      const result = await runOmpCli(['skill', 'uninstall', skill.name]);
+      // The skills CLI handles git installs (and their agent links); the bridge
+      // falls back to omp's registry uninstall and to the scanned directory.
+      const result = await removeInstalledSkill(skill.name, skill.source === 'user');
       setOutput([result.stdout, result.stderr].filter(Boolean).join('\n').trim() || `exit ${result.code}`);
       await load();
     } catch (err) {
@@ -127,7 +131,7 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
             onClick={onInstallSkill}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] text-xs font-medium rounded transition-colors shadow-sm cursor-pointer"
           >
-            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+            <Plus className="w-3.5 h-3.5" />
             <span>{t.installSkill}</span>
           </button>
         </div>
@@ -236,11 +240,11 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ onUploadSkill, onI
                   title={
                     skill.enabled
                       ? zh
-                        ? '已启用 — 点击停用（写入 SKILL.md front-matter）'
-                        : 'Enabled — click to disable (writes SKILL.md front matter)'
+                        ? '已启用: 点击停用（写入 SKILL.md front-matter）'
+                        : 'Enabled: click to disable (writes SKILL.md front matter)'
                       : zh
-                      ? '已停用 — 点击启用'
-                      : 'Disabled — click to enable'
+                      ? '已停用: 点击启用'
+                      : 'Disabled: click to enable'
                   }
                   onToggle={() => void handleToggle(skill)}
                 />

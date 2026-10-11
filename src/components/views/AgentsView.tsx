@@ -48,7 +48,7 @@ export const AgentsView: React.FC = () => {
           <p className="text-xs text-[#a1a1aa] mt-0.5 max-w-3xl leading-relaxed">
             {zh
               ? '这些是 omp 自带的 task 智能体（即 task 工具实际 spawn 的定义），由 omp agents unpack 解包后读取。'
-              : "These are omp's bundled task agents — the definitions the task tool actually spawns — read after omp agents unpack."}
+              : "These are omp's bundled task agents: the definitions the task tool actually spawns: read after omp agents unpack."}
           </p>
         </div>
 

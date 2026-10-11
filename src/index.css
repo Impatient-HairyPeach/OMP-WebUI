@@ -11,6 +11,13 @@
 }
 
 /* ========================================================== */
+/* SHAPE SCALE (one radius system, applied everywhere)         */
+/*   rounded     4px  — buttons, inputs, chips, list rows      */
+/*   rounded-sm  2px  — glyph boxes (checkbox marks)           */
+/*   rounded-lg  8px  — cards, panels, dialogs                 */
+/*   rounded-full     — switches, status dots, avatars         */
+/* Nothing else: no rounded-md/xl/2xl in new markup.           */
+/* ========================================================== */
 /* DESIGN TOKENS — ported from pi-web (github.com/agegr/pi-web) */
 /*                                                             */
 /* 15 palette tokens switched by [data-theme] on <html>; the    */

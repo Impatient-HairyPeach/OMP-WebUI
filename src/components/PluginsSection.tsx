@@ -274,11 +274,11 @@ export const PluginsSection: React.FC = () => {
                     title={
                       plugin.enabled
                         ? zh
-                          ? '已全局启用（omp 插件锁）— 点击全局停用'
-                          : 'Enabled globally (omp plugin lock) — click to disable everywhere'
+                          ? '已全局启用（omp 插件锁）: 点击全局停用'
+                          : 'Enabled globally (omp plugin lock): click to disable everywhere'
                         : zh
-                        ? '已全局停用 — 点击全局启用'
-                        : 'Disabled globally — click to enable everywhere'
+                        ? '已全局停用: 点击全局启用'
+                        : 'Disabled globally: click to enable everywhere'
                     }
                     onToggle={() => void handleToggleEnabled(plugin)}
                   />

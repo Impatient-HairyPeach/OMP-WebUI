@@ -54,14 +54,14 @@ export const setSessionModel = (provider: string, modelId: string) =>
   postCommand<AgentState['model']>({ type: 'set_model', provider, modelId });
 
 const formatContext = (n?: number): string => {
-  if (!n || n <= 0) return '—';
+  if (!n || n <= 0) return '-';
   if (n >= 1_000_000) return `${parseFloat((n / 1_000_000).toFixed(2))}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
   return String(n);
 };
 
 const formatPrice = (n?: number): string => {
-  if (n === undefined || n === null || Number.isNaN(n)) return '—';
+  if (n === undefined || n === null || Number.isNaN(n)) return '-';
   return `$${n.toFixed(n < 0.01 && n > 0 ? 4 : 2)}`;
 };
 
@@ -264,7 +264,7 @@ export const ModelsView: React.FC<ModelsViewProps> = ({ embedded = false }) => {
                     {formatContext(m.contextWindow)}
                   </div>
                   <div className="col-span-1 text-center font-mono text-[10px]">
-                    {m.reasoning ? <span className="text-[#34d399]">✓</span> : <span className="text-[#52525b]">—</span>}
+                    {m.reasoning ? <span className="text-[#34d399]">✓</span> : <span className="text-[#52525b]">: </span>}
                   </div>
                   <div className="col-span-4 text-right font-mono text-[10px] text-[#a1a1aa]">
                     {formatPrice(m.cost?.input)} / {formatPrice(m.cost?.output)} / {formatPrice(m.cost?.cacheRead)}

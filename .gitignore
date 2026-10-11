@@ -7,10 +7,13 @@ coverage/
 .env*
 !.env.example
 
-# Workspace runtime data — skills installed per project and the bridge's
-# project-scope extension pins are machine state, not app source.
+# Workspace runtime data — skills installed per project (the Agent Skills CLI
+# writes .agents/, the other agents' dirs and its lock file), and the bridge's
+# project-scope extension pins: machine state, not app source.
 .agents/
 .omp/
+.claude/
+skills-lock.json
 
 # Local safety copies of user-supplied art (never committed).
 .assets-backup/

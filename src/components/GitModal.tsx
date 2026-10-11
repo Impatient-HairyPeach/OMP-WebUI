@@ -32,12 +32,12 @@ export const GitModal: React.FC<GitModalProps> = ({ isOpen, onClose, git }) => {
   if (!isOpen) return null;
 
   const snapshot = git.snapshot;
-  const currentBranch = snapshot?.current ?? (git.loading ? '…' : '—');
+  const currentBranch = snapshot?.current ?? (git.loading ? '…' : '-');
   const notARepo = snapshot?.isRepo === false;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none">
-      <div className="w-full max-w-lg bg-[#0c0c0e] border border-[#27272a] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 font-mono text-xs">
+      <div className="w-full max-w-lg bg-[#0c0c0e] border border-[#27272a] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none font-mono text-xs">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#27272a] bg-[#121215]">
           <div className="flex items-center gap-2">
@@ -122,7 +122,7 @@ export const GitModal: React.FC<GitModalProps> = ({ isOpen, onClose, git }) => {
               <div className="p-2.5 rounded bg-[#121215] border border-[#27272a] text-[10px] text-[#71717a]">
                 {git.changesLoading
                   ? zh ? '正在读取…' : 'Loading…'
-                  : zh ? '工作区干净，没有未提交的改动' : 'Clean work tree — nothing uncommitted'}
+                  : zh ? '工作区干净，没有未提交的改动' : 'Clean work tree: nothing uncommitted'}
               </div>
             ) : (
               <div className="space-y-1 max-h-56 overflow-y-auto">
@@ -190,7 +190,7 @@ export const GitModal: React.FC<GitModalProps> = ({ isOpen, onClose, git }) => {
               <span className="whitespace-pre-wrap break-words">
                 {zh
                   ? `当前工作目录不是 git 仓库，没有分支、改动或提交可读：${snapshot?.workspace ?? ''}`
-                  : `The workspace is not a git repository — no branches, changes or commits to read: ${snapshot?.workspace ?? ''}`}
+                  : `The workspace is not a git repository: no branches, changes or commits to read: ${snapshot?.workspace ?? ''}`}
               </span>
             </div>
           )}

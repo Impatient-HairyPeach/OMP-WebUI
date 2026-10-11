@@ -115,7 +115,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   // --- git tab ---
   const [commitMessage, setCommitMessage] = useState('');
   const [commitOutput, setCommitOutput] = useState<string | null>(null);
-  const currentBranch = git.snapshot?.current ?? (git.loading ? '…' : '—');
+  const currentBranch = git.snapshot?.current ?? (git.loading ? '…' : '-');
   /** The agent's workspace can be a plain folder (e.g. $HOME) — not an error. */
   const notARepo = git.snapshot?.isRepo === false;
 
@@ -442,7 +442,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   )}
                   {openFile.truncated && (
                     <div className="px-2 pb-2 text-[10px] text-[#71717a]">
-                      {zh ? '（文件过大，仅显示前 200k 字符）' : '(file too large — first 200k characters shown)'}
+                      {zh ? '（文件过大，仅显示前 200k 字符）' : '(file too large: first 200k characters shown)'}
                     </div>
                   )}
                 </div>
@@ -537,11 +537,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       title={
                         skill.projectEnabled
                           ? zh
-                            ? '在本项目中启用 — 点击在本项目中停用'
-                            : 'Used in this project — click to switch it off here'
+                            ? '在本项目中启用: 点击在本项目中停用'
+                            : 'Used in this project: click to switch it off here'
                           : zh
-                          ? '在本项目中停用 — 点击恢复（跟随全局）'
-                          : 'Switched off in this project — click to follow the global state again'
+                          ? '在本项目中停用: 点击恢复（跟随全局）'
+                          : 'Switched off in this project: click to follow the global state again'
                       }
                       onToggle={() => void applyProjectScope('skill', skill.name, !skill.projectEnabled)}
                     />
@@ -581,11 +581,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       title={
                         plugin.projectEnabled
                           ? zh
-                            ? '在本项目中启用 — 点击在本项目中停用'
-                            : 'Used in this project — click to switch it off here'
+                            ? '在本项目中启用: 点击在本项目中停用'
+                            : 'Used in this project: click to switch it off here'
                           : zh
-                          ? '在本项目中停用 — 点击恢复（跟随全局）'
-                          : 'Switched off in this project — click to follow the global state again'
+                          ? '在本项目中停用: 点击恢复（跟随全局）'
+                          : 'Switched off in this project: click to follow the global state again'
                       }
                       onToggle={() => void applyProjectScope('extension', plugin.name, !plugin.projectEnabled)}
                     />
@@ -800,7 +800,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             </div>
 
             <form onSubmit={(e) => void handleCommit(e)} className={`space-y-2 pt-1 border-t ${notARepo ? 'hidden' : ''}`} style={{ borderColor: theme.border }}>
+              <label className="block text-[10px] font-mono uppercase text-[#71717a]" htmlFor="git-commit-message">
+                {zh ? '提交说明' : 'Commit message'}
+              </label>
               <input
+                id="git-commit-message"
                 type="text"
                 required
                 value={commitMessage}

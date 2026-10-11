@@ -3,6 +3,36 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.28
+
+- Skill installation follows the ecosystem instead of a hand-rolled `git clone`.
+  The old flow cloned a repository into `~/.agents/skills/<repo>`: a collection
+  like taste-skill (`skills/<name>/SKILL.md`) landed as one directory with no
+  top-level `SKILL.md`, so omp never listed it, and a single skill went to the
+  user scope whether you wanted that or not. The install dialog now has three
+  real sources:
+  - **Git repository** — `npx skills add <repo>` (the Agent Skills CLI): scan a
+    repo without installing (`-l`), pick from the discovered skills, install the
+    selection into `.agents/skills` (project) or `~/.agents/skills` (global).
+  - **Skillshare registry** — omp's own `omp skill install` / `search`, with
+    `--global` wired to the same scope switch.
+  - **Write one** — creates a real `<root>/<name>/SKILL.md` with front matter
+    instead of the fake in-memory skill the old "upload" tab produced.
+  Install output is the CLI's result lines only (banner, spinner frames and the
+  ~50-agent link list are stripped), and the skills list reloads itself.
+- Uninstall goes through the same CLIs (`npx skills remove`, then omp's registry
+  uninstall, then the scanned directory) and reports the outcome, not a Windows
+  fault code. Installs are pinned to `-a pi` (omp's agent id): without it the CLI
+  copies every skill into every agent directory it knows, which put 47 stray
+  dot-directories into this repository.
+- UI pass (design-taste skill, product-UI scope): em-dashes removed from every
+  visible string, entrance animations honour `prefers-reduced-motion`, icon
+  stroke standardised (2, or 3 for glyphs at or below 12px), the shape scale
+  documented in `index.css` (4px controls, 2px glyph boxes, 8px surfaces,
+  full for switches), the git panel's commit field got a real label instead of
+  placeholder-as-label, and the skills copy no longer describes the mock era
+  ("prompt-to-AST pipelines"); it names the directories omp actually reads.
+
 ## 0.3.27
 
 - Session metrics are the session's, not a window's. The top-bar token/cost and

@@ -34,7 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { theme, accentColor } = useTheme();
   const { t, language } = useI18n();
-  const currentBranch = git.snapshot?.current ?? (git.loading ? '…' : '—');
+  const currentBranch = git.snapshot?.current ?? (git.loading ? '…' : '-');
   const notARepo = git.snapshot?.isRepo === false;
 
   return (

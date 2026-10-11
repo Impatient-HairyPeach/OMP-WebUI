@@ -125,7 +125,7 @@ const APPROVAL_LABEL: Record<string, { zh: string; en: string }> = {
 };
 
 const APPROVAL_HINT: Record<string, { zh: string; en: string }> = {
-  'always-ask': { zh: '每个工具调用都要批准，最安全', en: 'approve every tool call — safest' },
+  'always-ask': { zh: '每个工具调用都要批准，最安全', en: 'approve every tool call: safest' },
   write: { zh: '写文件免批准，其余仍然询问', en: 'writes run unattended, the rest still asks' },
   yolo: { zh: '所有工具自动执行，不再询问', en: 'every tool runs unattended' },
 };
@@ -961,7 +961,7 @@ const retryTitle = origin?.entryId
   ? omp.isStreaming
     ? language === 'zh-CN'
       ? '智能体运行中，请先停止或等待结束'
-      : 'Agent is running — stop or wait for the turn to settle'
+      : 'Agent is running: stop or wait for the turn to settle'
     : undefined
   : anchorTitle;
 return (
@@ -1183,7 +1183,7 @@ return (
               }`}
               style={{ backgroundColor: noActiveSession ? accentColor : undefined }}
             >
-              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+              <Plus className="w-3.5 h-3.5" />
               <span>{t.newChat}</span>
             </button>
 
@@ -1277,7 +1277,7 @@ return (
                         title={
                           language === 'zh-CN'
                             ? '从「项目」中移除（会话文件保留在磁盘，仍列在「最近」里）'
-                            : 'Remove this project from the list (hidden only — session files stay on disk)'
+                            : 'Remove this project from the list (hidden only: session files stay on disk)'
                         }
                         aria-label={language === 'zh-CN' ? '从「项目」中移除' : 'Remove project from the list'}
                         className="p-1 rounded text-[#52525b] opacity-0 group-hover/project:opacity-100 hover:text-[#fafafa] hover:bg-[#18181b] transition-opacity cursor-pointer shrink-0"
@@ -1291,7 +1291,7 @@ return (
                       return (
                         <div
                           key={session.path}
-                          title={session.resumable === false ? (language === 'zh-CN' ? '该日志缺少 omp 头部，无法恢复' : 'no omp header — this log cannot be resumed') : undefined}
+                          title={session.resumable === false ? (language === 'zh-CN' ? '该日志缺少 omp 头部，无法恢复' : 'no omp header: this log cannot be resumed') : undefined}
                           onClick={() => {
                             // Opening a session always shows the transcript, never the diff view.
                             setSessionViewMode('chat');
@@ -1516,13 +1516,13 @@ return (
             <div className="flex items-center justify-between">
               <span>{language === 'zh-CN' ? '工作目录' : 'Workspace'}</span>
               <span className="text-[#a78bfa] truncate max-w-[120px]" title={omp.workspace}>
-                {omp.workspace ? basename(omp.workspace) : '—'}
+                {omp.workspace ? basename(omp.workspace) : '-'}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span>{language === 'zh-CN' ? '会话目录' : 'Sessions'}</span>
               <span className="truncate max-w-[120px]" title={omp.sessionRoot}>
-                {omp.sessionRoot ? basename(omp.sessionRoot) : '—'}
+                {omp.sessionRoot ? basename(omp.sessionRoot) : '-'}
               </span>
             </div>
           </div>
@@ -1718,8 +1718,8 @@ return (
                       <Pencil className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />
                       <span className="truncate">
                         {language === 'zh-CN'
-                          ? '正在编辑历史指令 — 发送后将从该轮分叉并重新执行'
-                          : 'Editing an earlier turn — sending branches the omp log here and re-runs it'}
+                          ? '正在编辑历史指令: 发送后将从该轮分叉并重新执行'
+                          : 'Editing an earlier turn: sending branches the omp log here and re-runs it'}
                       </span>
                     </div>
                     <button type="button" onClick={cancelEdit} className="text-[10px] text-[#71717a] hover:text-[#fafafa] cursor-pointer shrink-0 ml-2">
@@ -1914,8 +1914,8 @@ return (
                   <Pencil className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />
                   <span className="truncate">
                     {language === 'zh-CN'
-                      ? '正在编辑历史指令 — 发送后将从该轮分叉并重新执行'
-                      : 'Editing an earlier turn — sending branches the omp log here and re-runs it'}
+                      ? '正在编辑历史指令: 发送后将从该轮分叉并重新执行'
+                      : 'Editing an earlier turn: sending branches the omp log here and re-runs it'}
                   </span>
                 </div>
                 <button
@@ -2050,7 +2050,7 @@ return (
                       </span>
                     </span>
                     <span className="shrink-0">
-                      {completion.items.length > 0 ? `${completion.index + 1}/${completion.items.length} · Tab ⇥` : '—'}
+                      {completion.items.length > 0 ? `${completion.index + 1}/${completion.items.length} · Tab ⇥` : '-'}
                     </span>
                   </div>
 
@@ -2357,7 +2357,7 @@ return (
                       >
                         <Gauge className="w-3.5 h-3.5" style={{ color: accentColor }} />
                         <span className="text-[10px] font-mono">
-                          {contextUsage ? `${contextUsage.percent.toFixed(0)}%` : '—'}
+                          {contextUsage ? `${contextUsage.percent.toFixed(0)}%` : '-'}
                         </span>
                       </button>
 
@@ -2374,12 +2374,12 @@ return (
                                 <span className="text-[#fafafa]">
                                   {contextUsage
                                     ? `${contextUsage.tokens.toLocaleString()} / ${Math.round(contextUsage.contextWindow / 1000)}k (${contextUsage.percent.toFixed(1)}%)`
-                                    : '—'}
+                                    : '-'}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between">
                                 <span>{language === 'zh-CN' ? '缓存命中' : 'cache hit'}</span>
-                                <span className="text-[#34d399]">{cacheRate !== null ? `${(cacheRate * 100).toFixed(1)}%` : '—'}</span>
+                                <span className="text-[#34d399]">{cacheRate !== null ? `${(cacheRate * 100).toFixed(1)}%` : '-'}</span>
                               </div>
                               <div className="flex items-center justify-between">
                                 <span>{language === 'zh-CN' ? '累计成本' : 'cost'}</span>

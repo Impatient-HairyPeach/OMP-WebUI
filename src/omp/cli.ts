@@ -27,10 +27,57 @@ export function installPlugin(spec: string): Promise<CliResult> {
   return runOmpCli(["plugin", "install", spec]);
 }
 
-/** Import a skill repository into the directory omp discovers for user skills. */
-export function importSkillFromGitHub(repo: string): Promise<CliResult> {
-  return post("/api/skills/import", { repo });
+/**
+ * Skills are installed the way the ecosystem does it: `omp skill install` for
+ * registry packages, and the Agent Skills CLI (`npx skills add`) for git repos,
+ * which handles collections (`skills/<name>/SKILL.md`) and writes the real
+ * `SKILL.md` directories omp scans. A raw git clone could do neither.
+ */
+export interface SkillListing {
+  name: string;
+  description?: string;
 }
+
+export interface SkillsCliResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Scan a repository for skills without installing anything (`skills add -l`). */
+export const discoverRepoSkills = (repo: string) =>
+  postJson<{ repo: string; skills: SkillListing[]; code: number; output: string }>("/api/skills/discover", { repo });
+
+/** Install the chosen skills from that repository (project scope unless global). */
+export const installRepoSkills = (repo: string, skills: string[], global = false) =>
+  postJson<SkillsCliResult & { repo: string; skills: string[]; global: boolean }>("/api/skills/install", {
+    repo,
+    skills,
+    global,
+  });
+
+/** Remove an installed skill (project scope unless global). */
+export const removeInstalledSkill = (name: string, global = false) =>
+  postJson<SkillsCliResult & { name: string; global: boolean }>("/api/skills/remove", { name, global });
+
+/** The Skillshare registry through omp's own CLI. */
+export type SkillRegistryAction = "install" | "update" | "uninstall" | "search" | "info" | "list";
+
+export const skillRegistryAction = (action: SkillRegistryAction, spec = "", global = false) =>
+  postJson<SkillsCliResult & { action: string; spec: string; global: boolean; data: unknown }>("/api/skills/registry", {
+    action,
+    spec,
+    global,
+  });
+
+/** Author a skill where omp reads it (`<root>/<name>/SKILL.md`). */
+export const createSkillFile = (name: string, description: string, body: string, global = false) =>
+  postJson<{ ok: boolean; name: string; path: string; global: boolean }>("/api/skills/create", {
+    name,
+    description,
+    body,
+    global,
+  });
 
 /** Speak text with omp's local TTS engine; resolves to a playable blob URL. */
 export async function speakWithOmp(text: string, voice?: string): Promise<string> {
