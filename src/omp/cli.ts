@@ -212,6 +212,35 @@ export const checkOmpUpdate = (force = false) => postJson<OmpUpdateStatus>("/api
 /** Run `omp update`; the bridge stops the session first and restarts it afterwards. */
 export const installOmpUpdate = (force = false) => postJson<OmpUpdateResult>("/api/omp/update", { action: "update", force });
 
+/** Custom endpoints from omp's own `models.yml` (the file it actually reads). */
+export interface CustomEndpointModel {
+  id: string;
+  name: string;
+}
+
+export interface CustomEndpoint {
+  name: string;
+  baseUrl: string;
+  api: string;
+  hasApiKey: boolean;
+  apiKeyMasked: string;
+  models: CustomEndpointModel[];
+}
+
+export const fetchCustomEndpoints = () =>
+  getJson<{ path: string; warning?: string; providers: CustomEndpoint[] }>("/api/omp/custom-providers");
+
+/** Save (create or replace) or delete one endpoint; the bridge restarts omp. */
+export const saveCustomEndpoint = (body: {
+  action: "save" | "delete";
+  name: string;
+  baseUrl?: string;
+  api?: string;
+  /** Empty keeps the stored key: the UI never receives it. */
+  apiKey?: string;
+  models?: CustomEndpointModel[];
+}) => postJson<{ ok: boolean; path: string; providers: string[]; restarted: boolean }>("/api/omp/custom-providers", body);
+
 /** Refresh one provider's model catalog (`omp models refresh`). */
 export const refreshProviderModels = (provider: string) =>
   postJson<{ ok: boolean; provider: string; added: string[]; models: Array<{ id: string; name: string; selector: string }> }>(

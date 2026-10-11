@@ -1425,6 +1425,223 @@ app.post("/api/omp/models/test", async (req, res) => {
 });
 
 /* ========================================================================== */
+/* CUSTOM ENDPOINTS — omp reads ~/.omp/agent/models.yml (NOT models.json, as   */
+/* the published docs say). The panel edits that file: endpoints that speak a  */
+/* supported API (openai-completions, …) plus the model ids they serve.        */
+/*                                                                             */
+/* The file is hand-editable, so parsing keeps every line it does not manage    */
+/* verbatim and re-emits it unchanged: a field this app has never heard of must */
+/* survive an edit here.                                                       */
+/* ========================================================================== */
+
+/** Resolved lazily: the agent dir constant is declared further down. */
+const modelsFile = () => path.join(OMP_AGENT_DIR, "models.yml");
+
+interface CustomModel {
+  id: string;
+  name: string;
+  /** Lines of this model block we do not manage, kept verbatim. */
+  extra: string[];
+}
+
+interface CustomProvider {
+  name: string;
+  baseUrl: string;
+  api: string;
+  apiKey: string;
+  models: CustomModel[];
+  /** Provider-level lines we do not manage (headers, authHeader, …). */
+  extra: string[];
+}
+
+/** Parse the subset of models.yml this panel owns; anything else is preserved. */
+function parseModelsYml(text: string): { providers: CustomProvider[]; header: string[]; unparsed: string[] } {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const providers: CustomProvider[] = [];
+  const header: string[] = [];
+  const unparsed: string[] = [];
+  let current: CustomProvider | null = null;
+  let model: CustomModel | null = null;
+  const scalar = (raw: string): string => {
+    const value = raw.trim();
+    if (value.startsWith("\"") && value.endsWith("\"") && value.length > 1) {
+      return value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    }
+    return value;
+  };
+  for (const line of lines) {
+    const providerMatch = line.match(/^ {2}([\w.@-]+):\s*$/);
+    if (providerMatch) {
+      current = { name: providerMatch[1], baseUrl: "", api: "", apiKey: "", models: [], extra: [] };
+      providers.push(current);
+      model = null;
+      continue;
+    }
+    if (!current) {
+      if (line.trim() && !/^providers:\s*$/.test(line)) header.push(line);
+      continue;
+    }
+    // A model block starts at this indent whether or not one is already open.
+    const modelStart = line.match(/^ {6}-\s*id:\s*(.+)$/);
+    if (modelStart) {
+      model = { id: scalar(modelStart[1]), name: "", extra: [] };
+      current.models.push(model);
+      continue;
+    }
+    if (model) {
+      // `name` is ours; every other field inside the block is kept verbatim.
+      const modelName = line.match(/^ {8}name:\s*(.+)$/);
+      if (modelName) {
+        model.name = scalar(modelName[1]);
+        continue;
+      }
+      // Anything indented inside the model block (its own fields, nested arrays)
+      // stays with the model; only a shallower line ends it.
+      if (/^ {6}\s*\S/.test(line) || /^ {8,}/.test(line)) {
+        model.extra.push(line);
+        continue;
+      }
+      model = null;
+    }
+    if (/^ {4}models:\s*$/.test(line)) continue;
+    const field = line.match(/^ {4}([\w.@-]+):\s*(.*)$/);
+    if (field) {
+      const [, key, rawValue] = field;
+      if (key === "baseUrl") current.baseUrl = scalar(rawValue);
+      else if (key === "api") current.api = scalar(rawValue);
+      else if (key === "apiKey") current.apiKey = scalar(rawValue);
+      else current.extra.push(line);
+      continue;
+    }
+    if (!line.trim()) continue;
+    if (/^ {4,}\S/.test(line)) current.extra.push(line);
+    else unparsed.push(line);
+  }
+  return { providers, header, unparsed };
+}
+
+/** Quote only when a plain scalar would be ambiguous, so the file stays readable. */
+const yamlString = (value: string): string =>
+  /^[\w./:@+-]+$/.test(value) ? value : `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
+function renderModelsYml(providers: CustomProvider[], header: string[]): string {
+  const out: string[] = [...header.filter((line) => line.trim() !== "providers:"), "providers:"];
+  for (const provider of providers) {
+    out.push(`  ${provider.name}:`);
+    out.push(`    baseUrl: ${yamlString(provider.baseUrl)}`);
+    out.push(`    api: ${yamlString(provider.api)}`);
+    if (provider.apiKey) out.push(`    apiKey: ${yamlString(provider.apiKey)}`);
+    out.push(...provider.extra);
+    if (provider.models.length > 0) {
+      out.push("    models:");
+      for (const model of provider.models) {
+        out.push(`      - id: ${yamlString(model.id)}`);
+        if (model.name) out.push(`        name: ${yamlString(model.name)}`);
+        out.push(...model.extra);
+      }
+    }
+  }
+  return `${out.join("\n")}\n`;
+}
+
+function readModelsFile(): { providers: CustomProvider[]; raw: string; warning?: string } {
+  if (!existsSync(modelsFile())) return { providers: [], raw: "" };
+  const raw = readFileSync(modelsFile(), "utf8");
+  try {
+    const parsed = parseModelsYml(raw);
+    return { providers: parsed.providers, raw, warning: parsed.unparsed.length > 0 ? `${parsed.unparsed.length} line(s) outside the managed shape were left untouched` : undefined };
+  } catch (error) {
+    return { providers: [], raw, warning: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Written to the list, never to the browser: only whether a key exists. */
+const maskKey = (key: string) => (key ? `${key.slice(0, 6)}…${key.slice(-4)} (${key.length} chars)` : "");
+
+app.get("/api/omp/custom-providers", (_req, res) => {
+  try {
+    const { providers, warning } = readModelsFile();
+    res.json({
+      path: modelsFile(),
+      warning,
+      providers: providers.map((provider) => ({
+        name: provider.name,
+        baseUrl: provider.baseUrl,
+        api: provider.api,
+        hasApiKey: Boolean(provider.apiKey),
+        apiKeyMasked: maskKey(provider.apiKey),
+        models: provider.models.map((model) => ({ id: model.id, name: model.name })),
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/** Save (create or replace) or delete one custom provider, then restart omp. */
+app.post("/api/omp/custom-providers", async (req, res) => {
+  const action = String(req.body?.action || "save");
+  const name = String(req.body?.name || "").trim();
+  if (!/^[\w.@-]+$/.test(name)) {
+    res.status(400).json({ error: "use letters, digits, dot, dash, underscore or @ for the provider name" });
+    return;
+  }
+  const { providers } = readModelsFile();
+  const index = providers.findIndex((provider) => provider.name === name);
+  const keep = providers.filter((provider) => provider.name !== name);
+  if (action === "delete") {
+    if (index === -1) {
+      res.status(404).json({ error: `no custom provider named ${name}` });
+      return;
+    }
+  } else {
+    const baseUrl = String(req.body?.baseUrl || "").trim();
+    if (!/^https?:\/\/[^\s]+$/.test(baseUrl)) {
+      res.status(400).json({ error: "baseUrl must be an http(s) URL" });
+      return;
+    }
+    const api = String(req.body?.api || "openai-completions").trim();
+    const previous = index >= 0 ? providers[index] : null;
+    const requestedKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+    const models = (Array.isArray(req.body?.models) ? (req.body.models as unknown[]) : [])
+      .map((entry) => (typeof entry === "string" ? { id: entry.trim(), name: "" } : { id: String((entry as { id?: string }).id ?? "").trim(), name: String((entry as { name?: string }).name ?? "").trim() }))
+      .filter((model) => model.id)
+      .map((model) => {
+        const before = previous?.models.find((existing) => existing.id === model.id);
+        return { id: model.id, name: model.name || before?.name || "", extra: before?.extra ?? [] };
+      });
+    if (models.length === 0) {
+      res.status(400).json({ error: "at least one model id is required" });
+      return;
+    }
+    keep.push({
+      name,
+      baseUrl,
+      api,
+      // An empty field keeps the stored key (the UI never receives it).
+      apiKey: requestedKey || previous?.apiKey || "",
+      models,
+      extra: previous?.extra ?? [],
+    });
+    keep.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  const { header } = parseModelsYml(existsSync(modelsFile()) ? readFileSync(modelsFile(), "utf8") : "");
+  try {
+    if (keep.length === 0 && !existsSync(modelsFile())) {
+      res.json({ ok: true, path: modelsFile(), providers: [], restarted: false });
+      return;
+    }
+    writeFileSync(modelsFile(), renderModelsYml(keep, header), "utf8");
+    // omp resolves providers at startup.
+    await enqueue(() => restartChild({}));
+    emit("log", { level: "info", message: `models.endpoint: ${action} ${name} in ${modelsFile()} (session restarted)` });
+    res.json({ ok: true, path: modelsFile(), providers: keep.map((provider) => provider.name), restarted: true });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/* ========================================================================== */
 /* SKILLS: installation follows the ecosystem, not a hand-rolled git clone.    */
 /*                                                                            */
 /* omp itself reads skills from <project>/.agents/skills and ~/.agents/skills, */

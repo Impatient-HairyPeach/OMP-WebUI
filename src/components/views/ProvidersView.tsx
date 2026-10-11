@@ -22,6 +22,9 @@ import { useI18n } from '../../context/I18nContext';
 import { ScopeSwitch } from '../ScopeSwitch';
 import {
   addProviderModel,
+  fetchCustomEndpoints,
+  saveCustomEndpoint,
+  type CustomEndpoint,
   fetchModelScope,
   fetchProviderUsage,
   fetchUsage,
@@ -112,6 +115,67 @@ export const ProvidersView: React.FC = () => {
   /** One message per provider card (add/refresh outcome). */
   const [providerMessage, setProviderMessage] = useState<Record<string, string>>({});
   const [catalogBusy, setCatalogBusy] = useState<string | null>(null);
+  /** Custom endpoints from omp's models.yml (providers omp would not ship). */
+  const [endpoints, setEndpoints] = useState<{ path: string; warning?: string; providers: CustomEndpoint[] } | null>(null);
+  const [endpointForm, setEndpointForm] = useState<{ name: string; baseUrl: string; api: string; apiKey: string; models: string }>({
+    name: '',
+    baseUrl: '',
+    api: 'openai-completions',
+    apiKey: '',
+    models: '',
+  });
+  const [endpointBusy, setEndpointBusy] = useState<string | null>(null);
+  const [endpointMessage, setEndpointMessage] = useState<string | null>(null);
+
+  const reloadEndpoints = async () => {
+    try {
+      setEndpoints(await fetchCustomEndpoints());
+    } catch (error) {
+      setEndpointMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const submitEndpoint = async (action: 'save' | 'delete', name: string) => {
+    const target = action === 'delete' ? name : endpointForm.name.trim();
+    if (!target) return;
+    setEndpointBusy(`${action}:${target}`);
+    setEndpointMessage(null);
+    try {
+      const models =
+        action === 'delete'
+          ? undefined
+          : endpointForm.models
+              .split('\n')
+              .map((line) => line.trim())
+              .filter(Boolean)
+              .map((line) => {
+                const [id, ...rest] = line.split('|');
+                return { id: id.trim(), name: rest.join('|').trim() };
+              });
+      await saveCustomEndpoint({
+        action,
+        name: target,
+        baseUrl: endpointForm.baseUrl.trim(),
+        api: endpointForm.api.trim(),
+        apiKey: endpointForm.apiKey.trim(),
+        models,
+      });
+      await reloadEndpoints();
+      const [nextCatalog, nextScope] = await Promise.all([fetchModelCatalog(), fetchModelScope()]);
+      setCatalog(nextCatalog);
+      setScope(nextScope);
+      setEndpointForm({ name: '', baseUrl: '', api: 'openai-completions', apiKey: '', models: '' });
+      setEndpointMessage(
+        zh
+          ? `${action === 'delete' ? '已删除' : '已保存'} ${target}，omp 会话已重启使其生效。`
+          : `${action === 'delete' ? 'deleted' : 'saved'} ${target}; the omp session restarted so it takes effect.`
+      );
+    } catch (error) {
+      setEndpointMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setEndpointBusy(null);
+    }
+  };
   /** Both refresh buttons re-read omp's usage (billing) and quota reports. */
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
@@ -136,6 +200,7 @@ export const ProvidersView: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
+    void reloadEndpoints();
     Promise.allSettled([fetchUsage(), fetchModelCatalog(), fetchModelScope(), fetchProviderUsage()]).then(([u, c, s, p]) => {
       if (cancelled) return;
       if (u.status === 'fulfilled') setUsage(u.value);
@@ -651,6 +716,154 @@ export const ProvidersView: React.FC = () => {
                   ✕
                 </button>
               </div>
+            )}
+          </div>
+
+          {/* Custom endpoints: omp reads these from models.yml, not models.json */}
+          <div className="p-4 rounded-lg border space-y-3" style={{ backgroundColor: theme.cardBg, borderColor: theme.border }}>
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <h3 className="text-xs font-semibold text-[#fafafa] flex items-center gap-2">
+                  <Server className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                  {zh ? '自定义端点（models.yml）' : 'Custom endpoints (models.yml)'}
+                </h3>
+                <p className="text-[10px] text-[#71717a] mt-1 font-mono truncate" title={endpoints?.path}>
+                  {endpoints?.path ?? '…'}
+                </p>
+              </div>
+              <span className="text-[10px] font-mono text-[#71717a] shrink-0">
+                {endpoints ? `${endpoints.providers.length} ${zh ? '个端点' : 'endpoint(s)'}` : ''}
+              </span>
+            </div>
+
+            <p className="text-[10px] text-[#71717a] leading-relaxed">
+              {zh
+                ? 'omp 从这个 YAML 读取自定义兼容端点（OpenAI / Anthropic / Google 协议的网关、Ollama、vLLM…）。保存后会重启会话立即生效；不认识的字段会原样保留。'
+                : 'omp reads custom compatible endpoints (OpenAI / Anthropic / Google-protocol gateways, Ollama, vLLM…) from this YAML. Saving restarts the session; fields this app does not manage are preserved verbatim.'}
+            </p>
+
+            {endpoints?.warning && (
+              <div className="p-2 rounded border border-[#f59e0b]/40 bg-[#f59e0b]/10 text-[10px] text-[#f59e0b]">{endpoints.warning}</div>
+            )}
+
+            {endpoints && endpoints.providers.length > 0 && (
+              <div className="rounded border border-[#27272a] divide-y divide-[#1e1e24]">
+                {endpoints.providers.map((provider) => (
+                  <div key={provider.name} className="flex items-center justify-between gap-3 px-2.5 py-1.5">
+                    <div className="min-w-0">
+                      <div className="font-mono text-[11px] text-[#fafafa] truncate">{provider.name}</div>
+                      <div className="text-[10px] text-[#71717a] font-mono truncate" title={provider.baseUrl}>
+                        {provider.baseUrl} · {provider.api} · {provider.models.length} {zh ? '个模型' : 'models'}
+                        {provider.hasApiKey ? ` · key ${provider.apiKeyMasked}` : zh ? ' · 未设 key' : ' · no key'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEndpointForm({
+                            name: provider.name,
+                            baseUrl: provider.baseUrl,
+                            api: provider.api,
+                            apiKey: '',
+                            models: provider.models.map((model) => (model.name ? `${model.id} | ${model.name}` : model.id)).join('\n'),
+                          })
+                        }
+                        className="px-2 py-1 rounded border border-[#27272a] bg-[#121215] text-[#a1a1aa] hover:text-[#fafafa] text-[10px] transition-colors cursor-pointer active:translate-y-px"
+                      >
+                        {zh ? '编辑' : 'edit'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void submitEndpoint('delete', provider.name)}
+                        disabled={endpointBusy !== null}
+                        className="px-2 py-1 rounded border border-[#ef4444]/40 text-[#ef4444] hover:bg-[#ef4444]/10 text-[10px] transition-colors cursor-pointer disabled:opacity-40 active:translate-y-px"
+                      >
+                        {endpointBusy === `delete:${provider.name}` ? <Loader2 className="w-3 h-3 animate-spin" /> : zh ? '删除' : 'delete'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <label className="block">
+                <span className="block text-[10px] font-mono uppercase tracking-wide text-[#71717a] mb-1">{zh ? '名称（provider id）' : 'name (provider id)'}</span>
+                <input
+                  value={endpointForm.name}
+                  onChange={(e) => setEndpointForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="my-gateway"
+                  className="w-full h-7 px-2 rounded bg-[#121215] border border-[#27272a] text-[11px] font-mono text-[#fafafa] focus:outline-none focus:border-[#a78bfa]"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[10px] font-mono uppercase tracking-wide text-[#71717a] mb-1">baseUrl</span>
+                <input
+                  value={endpointForm.baseUrl}
+                  onChange={(e) => setEndpointForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
+                  placeholder="https://host/v1"
+                  className="w-full h-7 px-2 rounded bg-[#121215] border border-[#27272a] text-[11px] font-mono text-[#fafafa] focus:outline-none focus:border-[#a78bfa]"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[10px] font-mono uppercase tracking-wide text-[#71717a] mb-1">{zh ? '协议' : 'api'}</span>
+                <select
+                  value={endpointForm.api}
+                  onChange={(e) => setEndpointForm((prev) => ({ ...prev, api: e.target.value }))}
+                  className="w-full h-7 px-2 rounded bg-[#121215] border border-[#27272a] text-[11px] font-mono text-[#fafafa] focus:outline-none focus:border-[#a78bfa]"
+                >
+                  {['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai'].map((api) => (
+                    <option key={api} value={api}>
+                      {api}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-[10px] font-mono uppercase tracking-wide text-[#71717a] mb-1">
+                  apiKey {zh ? '（留空＝保持已存的）' : '(empty keeps the stored one)'}
+                </span>
+                <input
+                  type="password"
+                  value={endpointForm.apiKey}
+                  onChange={(e) => setEndpointForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={zh ? '留空则不改动' : 'leave empty to keep'}
+                  className="w-full h-7 px-2 rounded bg-[#121215] border border-[#27272a] text-[11px] font-mono text-[#fafafa] focus:outline-none focus:border-[#a78bfa]"
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="block text-[10px] font-mono uppercase tracking-wide text-[#71717a] mb-1">
+                  {zh ? '模型（每行一个，可写 id | 显示名）' : 'models (one per line, id | display name)'}
+                </span>
+                <textarea
+                  rows={3}
+                  value={endpointForm.models}
+                  onChange={(e) => setEndpointForm((prev) => ({ ...prev, models: e.target.value }))}
+                  placeholder={'deepseek-v4.1-flash | DeepSeek V4.1 Flash\nqwen3.7-max'}
+                  className="w-full p-2 rounded bg-[#121215] border border-[#27272a] text-[11px] font-mono text-[#fafafa] focus:outline-none focus:border-[#a78bfa]"
+                />
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-[10px] text-[#71717a] flex items-center gap-1.5">
+                <RefreshCw className="w-3 h-3" />
+                {zh ? '保存会重启 omp 会话（新端点/模型立即生效）' : 'Saving restarts the omp session so the endpoint takes effect'}
+              </span>
+              <button
+                type="button"
+                onClick={() => void submitEndpoint('save', endpointForm.name)}
+                disabled={endpointBusy !== null || !endpointForm.name.trim() || !endpointForm.baseUrl.trim() || !endpointForm.models.trim()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40 active:translate-y-px"
+              >
+                {endpointBusy?.startsWith('save') ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                {zh ? '保存端点' : 'Save endpoint'}
+              </button>
+            </div>
+
+            {endpointMessage && (
+              <div className="text-[10px] font-mono text-[#a1a1aa] whitespace-pre-wrap break-words">{endpointMessage}</div>
             )}
           </div>
 

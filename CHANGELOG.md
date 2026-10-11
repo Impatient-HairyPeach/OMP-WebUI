@@ -3,6 +3,22 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.32
+
+- Settings → Providers has a **custom endpoints** panel: it edits the file omp
+  actually reads (`~/.omp/agent/models.yml`), so a compatible gateway becomes a
+  provider here instead of by hand. List with masked keys, edit, delete, and a
+  form for name / baseUrl / api / apiKey / model ids (one per line, `id | name`).
+  Saving restarts the omp session so the provider is selectable immediately.
+- The parser preserves every line it does not manage (headers, cost, thinking,
+  discovery, …) verbatim and re-emits them, so hand-written fields survive an
+  edit here. Verified idempotent: two consecutive saves of the same provider
+  produce byte-identical files, and a probe provider added through the API shows
+  up in `omp models --json` and disappears again on delete.
+- The panel writes `apiKey` literals (omp resolves env-var-name-or-literal) and
+  leaves the stored key alone when the field is left empty; the key is never
+  sent back to the browser, only a masked preview.
+
 ## 0.3.31
 
 - Adding a model by id now respects what was typed. A `provider/model` prefix
