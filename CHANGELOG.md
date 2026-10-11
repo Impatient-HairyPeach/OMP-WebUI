@@ -16,6 +16,10 @@ Settings (`v<version> · <build date>`).
   session changes, after every turn and every 20s. The chips read
   `本会话 Token（omp 会话日志全量）` with the call count, and totals are formatted
   as `403.7M` rather than `403713.0k`.
+- The `pi-cache-stats` chip is hidden too: its counter is per-process (it reads
+  `0/0·0M/0M 0.0%` right after a restart) while the session-log figure survives
+  restarts, so two cache numbers on one row read as a contradiction. Both hidden
+  extensions are listed in `HIDDEN_STATUS_CHIP_PREFIXES`.
 - Verified against an independent sum of the same log: 4 calls → 25 201 tokens,
   24 320 cached, 96.92%, $0.000254, byte-identical to the endpoint's answer.
 

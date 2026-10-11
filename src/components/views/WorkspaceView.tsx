@@ -108,6 +108,16 @@ const formatElapsed = (seconds: number): string => {
 };
 
 /** omp's approval modes, worded the way the agent behaves. */
+/**
+ * omp extension status chips this UI deliberately does not show.
+ *
+ * `pi-permission-system` repeats the composer's permission control, and
+ * `pi-cache-stats` reports the cache from its own process-lifetime window (it
+ * resets on restart), which contradicts the session-wide figure read from omp's
+ * session log — one cache number, and it is the one that survives a restart.
+ */
+const HIDDEN_STATUS_CHIP_PREFIXES = ['pi-permission-system', 'pi-cache-stats'];
+
 const APPROVAL_LABEL: Record<string, { zh: string; en: string }> = {
   'always-ask': { zh: '每次询问', en: 'Always ask' },
   write: { zh: '允许写入', en: 'Allow writes' },
@@ -412,7 +422,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const statusColor =
     omp.status === 'ready' ? '#34d399' : omp.status === 'starting' || omp.status === 'connecting' ? '#f59e0b' : '#ef4444';
   /** omp status chips minus the ones this UI already renders as controls. */
-  const statusChips = omp.statusChips.filter((chip) => !chip.key.startsWith('pi-permission-system'));
+  const statusChips = omp.statusChips.filter(
+    (chip) => !HIDDEN_STATUS_CHIP_PREFIXES.some((prefix) => chip.key.startsWith(prefix))
+  );
   /* Session metrics come from omp's session log (every call it recorded), not
      from the transcript, which is a trimmed view once a long session compacts. */
   const sessionTotals = omp.sessionUsage;
@@ -1593,8 +1605,8 @@ return (
 
             {/* Status text published by omp extensions (setStatus): one span per chip,
                 each with its own tooltip, so a long value is not cut off mid-number.
-                The permission extension's chip repeats the composer's permission
-                control, so it is filtered out here. */}
+                Chips already covered by a control or by a session metric are
+                filtered out (see HIDDEN_STATUS_CHIP_PREFIXES). */}
             {statusChips.length > 0 && (
               <span className="hidden xl:flex items-center gap-1.5 text-[10px] text-[#71717a] min-w-0">
                 {statusChips.map((chip) => (
