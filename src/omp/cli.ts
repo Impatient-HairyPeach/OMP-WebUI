@@ -217,6 +217,8 @@ export interface GitBranchEntry {
 /** Real repository state of the agent's workspace. */
 export interface GitSnapshot {
   workspace: string;
+  /** false when the agent's workspace is a plain folder, not a repository. */
+  isRepo: boolean;
   current: string;
   detached: boolean;
   dirty: boolean;
@@ -286,8 +288,10 @@ export const fetchDirEntries = (dirPath?: string) =>
 /** One text file, capped at `limit` characters. */
 export const fetchFileContent = (filePath: string, limit = 200_000) =>
   getJson<WorkspaceFile>(`/api/fs/file?path=${encodeURIComponent(filePath)}&limit=${limit}`);
-export const fetchGitLog = (limit = 10) => getJson<{ workspace: string; commits: GitCommitEntry[] }>(`/api/git/log?limit=${limit}`);
-export const fetchGitDiff = () => getJson<{ workspace: string; files: GitDiffFile[] }>("/api/git/diff");
+export const fetchGitLog = (limit = 10) =>
+  getJson<{ workspace: string; isRepo?: boolean; commits: GitCommitEntry[] }>(`/api/git/log?limit=${limit}`);
+export const fetchGitDiff = () =>
+  getJson<{ workspace: string; isRepo?: boolean; files: GitDiffFile[] }>("/api/git/diff");
 
 /** Real `git checkout`; git refuses when the working tree does not allow it. */
 export const checkoutGitBranch = (branch: string) =>

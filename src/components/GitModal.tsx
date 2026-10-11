@@ -33,6 +33,7 @@ export const GitModal: React.FC<GitModalProps> = ({ isOpen, onClose, git }) => {
 
   const snapshot = git.snapshot;
   const currentBranch = snapshot?.current ?? (git.loading ? '…' : '—');
+  const notARepo = snapshot?.isRepo === false;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none">
@@ -82,7 +83,11 @@ export const GitModal: React.FC<GitModalProps> = ({ isOpen, onClose, git }) => {
                   : 'bg-[#34d399]/10 text-[#34d399] border-[#34d399]/30'
               }`}
             >
-              {snapshot?.dirty
+              {notARepo
+                ? zh
+                  ? '非 git 仓库'
+                  : 'not a repo'
+                : snapshot?.dirty
                 ? zh
                   ? `${snapshot.changedCount} 个文件未提交`
                   : `${snapshot.changedCount} uncommitted`
@@ -94,7 +99,7 @@ export const GitModal: React.FC<GitModalProps> = ({ isOpen, onClose, git }) => {
 
           {/* Uncommitted work tree: the header dot is gone, this is the one place
               that shows what is actually modified. */}
-          <div>
+          <div className={notARepo ? 'hidden' : undefined}>
             <div className="flex items-center justify-between mb-2">
               <div className="text-[10px] text-[#71717a] uppercase tracking-wider flex items-center gap-1.5">
                 <FileDiff className="w-3 h-3" />
@@ -178,6 +183,17 @@ export const GitModal: React.FC<GitModalProps> = ({ isOpen, onClose, git }) => {
               </div>
             )}
           </div>
+
+          {notARepo && (
+            <div className="flex items-start gap-2 p-2.5 rounded border border-[#71717a]/40 bg-[#71717a]/10 text-[11px] text-[#a1a1aa]">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span className="whitespace-pre-wrap break-words">
+                {zh
+                  ? `当前工作目录不是 git 仓库，没有分支、改动或提交可读：${snapshot?.workspace ?? ''}`
+                  : `The workspace is not a git repository — no branches, changes or commits to read: ${snapshot?.workspace ?? ''}`}
+              </span>
+            </div>
+          )}
 
           {git.error && (
             <div className="flex items-start gap-2 p-2.5 rounded border border-[#ef4444]/40 bg-[#ef4444]/10 text-[11px] text-[#f87171]">

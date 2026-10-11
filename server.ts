@@ -1246,6 +1246,10 @@ app.get("/api/fs/dirs", (req, res) => {
 
 /** Real working-tree diff of the agent's workspace, split per file for the Diffs tab. */
 app.get("/api/git/diff", async (_req, res) => {
+  if (!(await isGitRepo())) {
+    res.json({ workspace, isRepo: false, files: [] });
+    return;
+  }
   try {
     const [{ stdout }, { stdout: statusOut }] = await Promise.all([
       runGit(["diff", "HEAD", "--no-color", "--no-ext-diff"], workspace),
@@ -1290,7 +1294,7 @@ app.get("/api/git/diff", async (_req, res) => {
     for (const [path, status] of statusByPath) {
       if (status === "untracked") files.push({ path, status, additions: 0, deletions: 0, diff: "" });
     }
-    res.json({ workspace, files });
+    res.json({ workspace, isRepo: true, files });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -1317,7 +1321,36 @@ interface GitBranchEntry {
 }
 
 /** Real repository state: branches (`refs/heads`), HEAD, dirty flag, remote. */
+/**
+ * `git rev-parse --is-inside-work-tree`: false when the agent's workspace is a
+ * plain folder (launching the app from $HOME is normal). Every git surface has
+ * to answer for that case instead of failing with a 400.
+ */
+async function isGitRepo(): Promise<boolean> {
+  try {
+    const { stdout } = await runGit(["rev-parse", "--is-inside-work-tree"], workspace);
+    return stdout.trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+/** Snapshot for a workspace that is not a repository at all. */
+function emptySnapshot() {
+  return {
+    workspace,
+    isRepo: false,
+    current: "",
+    detached: false,
+    dirty: false,
+    changedCount: 0,
+    branches: [] as GitBranchEntry[],
+    remoteUrl: null,
+  };
+}
+
 async function gitSnapshot() {
+  if (!(await isGitRepo())) return emptySnapshot();
   const [headOut, branchesOut, statusOut, remoteOut] = await Promise.all([
     runGit(["rev-parse", "--abbrev-ref", "HEAD"], workspace),
     runGit(["for-each-ref", "--format=%(refname:short)\t%(objectname:short)\t%(committerdate:relative)\t%(upstream:short)\t%(HEAD)", "refs/heads"], workspace),
@@ -1336,6 +1369,7 @@ async function gitSnapshot() {
   const changed = statusOut.stdout.split("\n").filter(Boolean);
   return {
     workspace,
+    isRepo: true,
     current: head,
     detached: head === "HEAD",
     dirty: changed.length > 0,
@@ -1357,6 +1391,10 @@ app.get("/api/git/branches", async (_req, res) => {
 /** Switch branches for real; git itself refuses when the tree does not allow it. */
 app.post("/api/git/checkout", async (req, res) => {
   const branch = String(req.body?.branch || "").trim();
+  if (!(await isGitRepo())) {
+    res.status(409).json({ error: `${workspace} is not a git repository` });
+    return;
+  }
   try {
     const snapshot = await gitSnapshot();
     if (!snapshot.branches.some((entry) => entry.name === branch)) {
@@ -1375,6 +1413,10 @@ app.post("/api/git/checkout", async (req, res) => {
 /** Recent commits of the current branch (real `git log`). */
 app.get("/api/git/log", async (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit ?? 10) || 10, 1), 50);
+  if (!(await isGitRepo())) {
+    res.json({ workspace, isRepo: false, commits: [] });
+    return;
+  }
   try {
     const { stdout } = await runGit(["log", `-${limit}`, "--no-color", "--pretty=format:%h\t%an\t%ar\t%s"], workspace);
     const commits = stdout
@@ -1384,7 +1426,7 @@ app.get("/api/git/log", async (req, res) => {
         const [hash = "", author = "", when = "", ...rest] = line.split("\t");
         return { hash, author, when, subject: rest.join("\t") };
       });
-    res.json({ workspace, commits });
+    res.json({ workspace, isRepo: true, commits });
   } catch (error) {
     res.status(400).json({ error: String(error instanceof Error ? error.message : error).slice(0, 500) });
   }
@@ -1395,6 +1437,10 @@ app.post("/api/git/commit", async (req, res) => {
   const message = String(req.body?.message || "").trim();
   if (!message) {
     res.status(400).json({ error: "a commit message is required" });
+    return;
+  }
+  if (!(await isGitRepo())) {
+    res.status(409).json({ error: `${workspace} is not a git repository` });
     return;
   }
   try {

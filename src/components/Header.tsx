@@ -35,6 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   const { theme, accentColor } = useTheme();
   const { t, language } = useI18n();
   const currentBranch = git.snapshot?.current ?? (git.loading ? '…' : '—');
+  const notARepo = git.snapshot?.isRepo === false;
 
   return (
     <header
@@ -112,6 +113,11 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Git worktrees, branches and commits (single entry point) */}
         <button
           title={
+            notARepo
+              ? language === 'zh-CN'
+                ? '当前工作目录不是 git 仓库'
+                : 'The workspace is not a git repository'
+              :
             (language === 'zh-CN' ? `Git 分支与提交（当前 ${currentBranch}` : `Git branches & commits (on ${currentBranch}`) +
             (git.snapshot?.dirty
               ? language === 'zh-CN'

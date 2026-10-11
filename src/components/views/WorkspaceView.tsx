@@ -2188,7 +2188,9 @@ return (
               />
 
               {/* Toolbar Controls */}
-              <div className="px-3 py-2 bg-[#0c0c0e] border-t border-[#1e1e24] flex items-center justify-between text-xs flex-wrap gap-2 rounded-b-lg">
+              {/* No justify-between here: every control belongs to one of the two
+                  clusters, and only the right cluster is pushed to the edge. */}
+              <div className="px-3 py-2 bg-[#0c0c0e] border-t border-[#1e1e24] flex items-center text-xs flex-wrap gap-2 rounded-b-lg">
                 <div className="flex items-center gap-2 flex-wrap min-w-0">
                   {/* Model dropdown: real omp model catalog, grouped by provider */}
                   <div className="relative">
@@ -2454,6 +2456,9 @@ return (
                       <Volume2 className="w-3.5 h-3.5" />
                     </button>
 
+                    {/* Right cluster: the toolbar's right-hand buttons sit together
+                        (justify-between used to strand approval in the middle). */}
+                    <div className="flex items-center gap-2 ml-auto">
                     {/* Tool approval: omp's own tools.approvalMode (icon like its neighbours) */}
                     <div className="relative">
                       <button
@@ -2620,6 +2625,7 @@ return (
                       )}
                     </div>
                   )}
+                </div>
                 </div>
 
               </div>

@@ -116,6 +116,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [commitMessage, setCommitMessage] = useState('');
   const [commitOutput, setCommitOutput] = useState<string | null>(null);
   const currentBranch = git.snapshot?.current ?? (git.loading ? '…' : '—');
+  /** The agent's workspace can be a plain folder (e.g. $HOME) — not an error. */
+  const notARepo = git.snapshot?.isRepo === false;
 
   const loadDir = useCallback(async (dirPath?: string) => {
     try {
@@ -734,13 +736,27 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               <span
                 className="text-[9px] px-1.5 py-0.5 rounded border shrink-0"
                 style={{
-                  borderColor: git.snapshot?.dirty ? '#f59e0b66' : '#34d39966',
-                  color: git.snapshot?.dirty ? '#f59e0b' : '#34d399',
+                  borderColor: notARepo ? '#71717a66' : git.snapshot?.dirty ? '#f59e0b66' : '#34d39966',
+                  color: notARepo ? '#71717a' : git.snapshot?.dirty ? '#f59e0b' : '#34d399',
                 }}
               >
-                {git.snapshot?.dirty ? `${git.snapshot.changedCount} ${zh ? '改动' : 'changed'}` : zh ? '干净' : 'clean'}
+                {notARepo
+                  ? zh ? '非 git 仓库' : 'not a repo'
+                  : git.snapshot?.dirty
+                  ? `${git.snapshot.changedCount} ${zh ? '改动' : 'changed'}`
+                  : zh ? '干净' : 'clean'}
               </span>
             </div>
+
+            {notARepo && (
+              <div className="p-2 rounded border border-[#71717a]/40 bg-[#71717a]/10 text-[10px] text-[#a1a1aa] space-y-1">
+                <div>{zh ? '当前工作目录不是 git 仓库，因此没有分支、改动或提交可读。' : 'The workspace is not a git repository, so there are no branches, changes or commits to read.'}</div>
+                <div className="font-mono text-[#71717a] break-all">{git.snapshot?.workspace}</div>
+                <div className="text-[#71717a]">
+                  {zh ? '用左上角「切换工作空间目录」指向一个仓库后即可提交。' : 'Point the workspace at a repository (top-left switcher) to commit.'}
+                </div>
+              </div>
+            )}
 
             {git.error && (
               <div className="p-1.5 rounded border border-[#ef4444]/40 bg-[#ef4444]/10 text-[10px] text-[#f87171] whitespace-pre-wrap break-words">
@@ -748,7 +764,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               </div>
             )}
 
-            <div>
+            <div className={notARepo ? 'hidden' : undefined}>
               <div className="flex items-center justify-between text-[10px] mb-1.5 text-[#71717a]">
                 <span>{t.changedFiles}</span>
                 <span>{diffFiles.length}</span>
@@ -783,7 +799,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               </div>
             </div>
 
-            <form onSubmit={(e) => void handleCommit(e)} className="space-y-2 pt-1 border-t" style={{ borderColor: theme.border }}>
+            <form onSubmit={(e) => void handleCommit(e)} className={`space-y-2 pt-1 border-t ${notARepo ? 'hidden' : ''}`} style={{ borderColor: theme.border }}>
               <input
                 type="text"
                 required

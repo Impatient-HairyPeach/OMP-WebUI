@@ -3,6 +3,22 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.26
+
+- Composer toolbar: the controls are two clusters again. `justify-between` was
+  spreading every control it found — model/thinking/attach, the context chip,
+  voice input and read-aloud ended up as separate columns, and the tool-permission
+  button floated dead centre. The left cluster is now flush left, the
+  permission + action cluster is flush right, and everything inside each cluster
+  sits 7px apart.
+- Git outside a repository is a state, not a failure. Launching the app from a
+  plain folder (e.g. `C:\Users\<you>`) made `/api/git/branches` answer
+  `400 fatal: not a git repository`, so the panel showed a red error and the
+  commit form stayed dead. `git branches/log/diff` now answer `200` with
+  `isRepo: false` and empty lists, the panel says *非 git 仓库* (with the folder
+  it looked at and the hint to switch workspaces), and checkout/commit reply
+  `409` with a plain sentence. Inside a repository nothing changed.
+
 ## 0.3.25
 
 - Composer toolbar rearranged, left → right: **model** (name only — the brain glyph
