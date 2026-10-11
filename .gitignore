@@ -14,6 +14,10 @@ coverage/
 .omp/
 .claude/
 skills-lock.json
+# Agent-directory copies: the Agent Skills CLI writes one per agent when it is
+# not pinned with `-a pi` (data/, skills/ and ~45 dot-directories).
+data/
+skills/
 
 # Local safety copies of user-supplied art (never committed).
 .assets-backup/
