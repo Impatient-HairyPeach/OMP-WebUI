@@ -411,6 +411,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const contextUsage = omp.state?.contextUsage ?? null;
   const statusColor =
     omp.status === 'ready' ? '#34d399' : omp.status === 'starting' || omp.status === 'connecting' ? '#f59e0b' : '#ef4444';
+  /** omp status chips minus the ones this UI already renders as controls. */
+  const statusChips = omp.statusChips.filter((chip) => !chip.key.startsWith('pi-permission-system'));
 
   // Content hits come from the bridge (real session-log grep), titles filter locally.
   const [contentHits, setContentHits] = useState<Record<string, { snippet: string; hits: number }>>({});
@@ -1579,10 +1581,12 @@ return (
             )}
 
             {/* Status text published by omp extensions (setStatus): one span per chip,
-                each with its own tooltip, so a long value is not cut off mid-number. */}
-            {omp.statusChips.length > 0 && (
+                each with its own tooltip, so a long value is not cut off mid-number.
+                The permission extension's chip repeats the composer's permission
+                control, so it is filtered out here. */}
+            {statusChips.length > 0 && (
               <span className="hidden xl:flex items-center gap-1.5 text-[10px] text-[#71717a] min-w-0">
-                {omp.statusChips.map((chip) => (
+                {statusChips.map((chip) => (
                   <span
                     key={chip.key}
                     className="truncate max-w-[320px] shrink-0"
@@ -1614,19 +1618,6 @@ return (
               </button>
             </div>
 
-            <span className="text-[11px] flex items-center gap-1 shrink-0" style={{ color: statusColor }}>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
-              {omp.status}
-              {approval.mode && (
-                <span
-                  className="font-mono"
-                  style={{ color: approval.mode === 'yolo' ? '#f59e0b' : approval.mode === 'always-ask' ? '#34d399' : '#71717a' }}
-                  title={`omp tools.approvalMode: ${approval.mode}`}
-                >
-                  · {APPROVAL_LABEL[approval.mode]?.[language === 'zh-CN' ? 'zh' : 'en'] ?? approval.mode}
-                </span>
-              )}
-            </span>
           </div>
         </div>
 

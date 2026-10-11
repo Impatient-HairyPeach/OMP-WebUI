@@ -11,6 +11,10 @@ Settings (`v<version> · <build date>`).
   button floated dead centre. The left cluster is now flush left, the
   permission + action cluster is flush right, and everything inside each cluster
   sits 7px apart.
+- Top bar: the two permission readouts are gone (omp's `pi-permission-system`
+  status chip and this UI's `· 全权 (YOLO)` suffix) as is the `● ready` omp-bridge
+  readout. The permission mode still lives where it is actionable — the shield
+  button in the composer toolbar.
 - Git outside a repository is a state, not a failure. Launching the app from a
   plain folder (e.g. `C:\Users\<you>`) made `/api/git/branches` answer
   `400 fatal: not a git repository`, so the panel showed a red error and the
