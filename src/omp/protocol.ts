@@ -24,7 +24,8 @@ export interface OmpContentBlock {
 }
 
 export interface OmpMessage {
-  role: "user" | "assistant" | "toolResult" | "system";
+  /** omp also injects `custom` / `custom_message` entries (a loaded skill, notices). */
+  role: "user" | "assistant" | "toolResult" | "system" | "custom" | "custom_message";
   content?: OmpContentBlock[] | string;
   api?: string;
   provider?: string;

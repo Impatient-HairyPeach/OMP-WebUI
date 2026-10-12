@@ -65,8 +65,9 @@ import {
   saveHiddenProjects,
 } from '../../lib/panelLayout';
 import { renderMarkdown } from '../../lib/miniMarkdown';
+import { parseSkillInjection } from '../../lib/skillInjection';
 import { AssistantBlocks } from '../AssistantBlocks';
-import { fetchApproval, setApproval } from '../../omp/cli';
+import { fetchApproval, savePastedImage, setApproval } from '../../omp/cli';
 import {
   SLASH_CATEGORY_LABEL,
   SLASH_CATEGORY_ORDER,
@@ -548,6 +549,49 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     textareaRef.current?.focus();
   };
 
+  /** Folds the raw SKILL.md that omp injects as a user message. */
+  const [skillOpen, setSkillOpen] = useState<Record<string, boolean>>({});
+
+  /**
+   * One turn = a user prompt plus every assistant message it produced. The turn
+   * header folds the whole turn's work (thinking + tool blocks) at once, which
+   * is what a long agentic turn needs: twelve model calls means twelve blocks,
+   * not twelve separate folds.
+   */
+  const [workOpen, setWorkOpen] = useState<Record<string, boolean>>({});
+  const turnMeta = useMemo(() => {
+    type Turn = { turnId: string; ids: string[]; messages: number; toolCalls: number; streaming: boolean };
+    const meta = new Map<string, { turnId: string; isFirst: boolean; messages: number; toolCalls: number; streaming: boolean }>();
+    let current: Turn | null = null;
+    const flush = () => {
+      if (!current) return;
+      current.ids.forEach((id, index) => {
+        meta.set(id, {
+          turnId: current!.turnId,
+          isFirst: index === 0,
+          messages: current!.messages,
+          toolCalls: current!.toolCalls,
+          streaming: current!.streaming,
+        });
+      });
+      current = null;
+    };
+    for (const msg of transcript) {
+      if (msg.role === 'user') {
+        flush();
+        current = { turnId: msg.id, ids: [], messages: 0, toolCalls: 0, streaming: false };
+        continue;
+      }
+      if (!current) current = { turnId: `lead-${msg.id}`, ids: [], messages: 0, toolCalls: 0, streaming: false };
+      current.messages += 1;
+      current.toolCalls += (msg.blocks ?? []).filter((block) => block.kind === 'tool').length;
+      if (msg.streaming) current.streaming = true;
+      current.ids.push(msg.id);
+    }
+    flush();
+    return meta;
+  }, [transcript]);
+
   const cancelEdit = () => {
     setEditingEntryId(null);
     setInputPrompt('');
@@ -614,6 +658,36 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       onDispatchLog('OVERRIDE', `context: could not read ${unreadable.map((file) => file.name).join(', ')} as text`);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  /**
+   * Paste an image straight into the composer. omp's RPC prompt carries text
+   * only, so the bytes are saved into the workspace and referenced with `@path`;
+   * omp reads image files when they are referenced.
+   */
+  const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(event.clipboardData?.items ?? []);
+    const images = items.filter((item) => item.kind === 'file' && item.type.startsWith('image/'));
+    if (images.length === 0) return;
+    event.preventDefault();
+    for (const item of images) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result ?? ''));
+          reader.onerror = () => reject(reader.error ?? new Error('could not read the pasted image'));
+          reader.readAsDataURL(file);
+        });
+        const saved = await savePastedImage(dataUrl);
+        setInputPrompt((prev) => `${prev}${prev && !prev.endsWith(' ') ? ' ' : ''}@${saved.relative} `);
+        onDispatchLog('INFO', `composer.paste: saved ${saved.relative} (${Math.round(saved.bytes / 1024)} KB) and referenced it with @`);
+      } catch (error) {
+        onDispatchLog('OVERRIDE', `composer.paste failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    textareaRef.current?.focus();
   };
 
   const removeAttachedFile = (id: string) => {
@@ -1001,9 +1075,82 @@ return (
     <div
       className={`select-text text-[13.5px] leading-[1.7] ${msg.pending ? 'opacity-70' : ''} ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
     >
+      {!isUser && turnMeta.get(msg.id)?.isFirst && (() => {
+        const turn = turnMeta.get(msg.id)!;
+        const open = turn.streaming || workOpen[turn.turnId] === true;
+        return (
+          <button
+            type="button"
+            onClick={() => setWorkOpen((prev) => ({ ...prev, [turn.turnId]: !open }))}
+            aria-expanded={open}
+            title={
+              open
+                ? language === 'zh-CN'
+                  ? '折叠这一轮的全部思考与工具调用'
+                  : 'Fold this turn’s thinking and tool calls'
+                : language === 'zh-CN'
+                ? '展开这一轮的全部思考与工具调用'
+                : 'Expand this turn’s thinking and tool calls'
+            }
+            className="mb-1.5 flex items-center gap-1.5 px-2 py-1 rounded border border-[#27272a] bg-[#121215] text-[10px] font-mono text-[#71717a] hover:text-[#a1a1aa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+          >
+            {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            <span>{language === 'zh-CN' ? '处理详情' : 'turn details'}</span>
+            <span className="text-[#52525b]">·</span>
+            <span>
+              {turn.messages} {language === 'zh-CN' ? '条消息' : turn.messages === 1 ? 'message' : 'messages'}
+            </span>
+            <span className="text-[#52525b]">·</span>
+            <span>
+              {turn.toolCalls} {language === 'zh-CN' ? '次工具调用' : turn.toolCalls === 1 ? 'tool call' : 'tool calls'}
+            </span>
+          </button>
+        );
+      })()}
       {isUser ? (
-        /* Whatever was typed goes out verbatim. */
-        <p className="whitespace-pre-wrap">{msg.content}</p>
+        (() => {
+          const skill = parseSkillInjection(msg.content);
+          if (!skill) {
+            /* Whatever was typed goes out verbatim. */
+            return <p className="whitespace-pre-wrap">{msg.content}</p>;
+          }
+          const open = skillOpen[msg.id] === true;
+          const lines = skill.body ? skill.body.split('\n').length : 0;
+          const size = `${(skill.body.length / 1024).toFixed(1)} KB`;
+          return (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setSkillOpen((prev) => ({ ...prev, [msg.id]: !open }))}
+                aria-expanded={open}
+                title={
+                  open
+                    ? language === 'zh-CN'
+                      ? '收起技能原文'
+                      : 'Hide the skill source'
+                    : language === 'zh-CN'
+                    ? '展开技能原文'
+                    : 'Show the skill source'
+                }
+                className="flex items-center gap-1.5 px-2 py-1 rounded border border-[#27272a] bg-[#121215] text-[10px] font-mono text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+              >
+                {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                <span>{language === 'zh-CN' ? '已加载技能' : 'skill loaded'}</span>
+                <span className="text-[var(--accent)]">{skill.name}</span>
+                <span className="text-[#52525b]">·</span>
+                <span>{lines} {language === 'zh-CN' ? '行' : 'lines'}</span>
+                <span className="text-[#52525b]">·</span>
+                <span>{size}</span>
+              </button>
+              {open && (
+                <pre className="max-h-[320px] overflow-auto p-2 rounded border border-[#1e1e24] bg-[#09090b] text-[10px] leading-[1.5] font-mono text-[#a1a1aa] whitespace-pre-wrap break-words">
+                  {skill.body}
+                </pre>
+              )}
+              {skill.rest && <p className="whitespace-pre-wrap">{skill.rest}</p>}
+            </div>
+          );
+        })()
       ) : (msg.blocks ?? []).length > 0 ? (
         /* pi-web's model: thinking / text / tool blocks in the
            order omp produced them. Copy stays markdown source. */
@@ -1011,6 +1158,11 @@ return (
           blocks={msg.blocks ?? []}
           streaming={msg.streaming}
           zh={language === 'zh-CN'}
+          hideWork={(() => {
+            const turn = turnMeta.get(msg.id);
+            if (!turn) return false;
+            return !(turn.streaming || workOpen[turn.turnId] === true);
+          })()}
           metrics={
             msg.streaming
               ? {
@@ -2163,6 +2315,7 @@ return (
                   setInputPrompt(e.target.value);
                   void refreshCompletion(e.target.value, e.target.selectionStart ?? e.target.value.length);
                 }}
+                onPaste={(event) => void handlePaste(event)}
                 onKeyDown={(e) => {
                   if (completion) {
                     if (e.key === 'Tab') {

@@ -5,6 +5,7 @@
  * order — the same model pi-web uses, so reasoning never gets reordered against
  * the answers and tool calls it produced.
  */
+import { isSkillInjection } from "../lib/skillInjection";
 import type { ChatMessage, MessageBlock } from "../types";
 import type { OmpContentBlock, OmpMessage, OmpSessionEntry, OmpToolExecution } from "./protocol";
 
@@ -211,6 +212,19 @@ export function transcriptToChatMessages(messages: OmpMessage[], entries?: OmpSe
   messages.forEach((message, messageIndex) => {
     const entryId = entryIds[messageIndex];
     if (message.role === "toolResult") return;
+
+    // A loaded skill arrives as a `custom` message. It is not the model's output,
+    // and rendering it as one printed the entire SKILL.md into the chat, so it
+    // joins the user side where the view folds it into a chip.
+    if ((message.role === "custom" || message.role === "custom_message") && isSkillInjection(blockText(message.content, "text"))) {
+      out.push({
+        id: fallbackId("skill", message.timestamp, out.length),
+        role: "user",
+        content: blockText(message.content, "text"),
+        timestamp: clockOf(message.timestamp),
+      });
+      return;
+    }
 
     if (message.role === "user" || message.role === "system") {
       out.push({

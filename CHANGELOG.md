@@ -3,6 +3,29 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.36
+
+- **A turn's work folds as one block.** A long agentic turn is a dozen model
+  calls, so it used to be a dozen thinking folds and a dozen tool rows, all
+  open. Each turn now carries one header above the answer:
+  `处理详情 · 3 条消息 · 5 次工具调用`, collapsed by default and expanding to
+  every thinking and tool block of that turn at once. While a turn is streaming
+  the work stays visible, so progress is never hidden behind a fold.
+- **A loaded skill no longer dumps its file into the chat.** omp hands a skill to
+  the model as an injected message (a `custom` entry, either
+  `<skill name="…">…</skill>` from the session log or
+  `[IMPORTANT: User invoked the "…" skill …] … User: <prompt>` over RPC), and the
+  transcript rendered it as assistant output: the whole SKILL.md, thousands of
+  characters, in the conversation. It is now a user-side chip:
+  `已加载技能 ponytail · 106 行 · 5.8 KB`, collapsed, expanding to the skill body,
+  with the prompt the user actually typed kept visible next to it.
+- **Paste an image into the composer.** The composer had no paste handling at
+  all. A pasted image is now saved into the workspace
+  (`.omp-studio/pastes/paste-<stamp>.png`, git-ignored) and inserted as an
+  `@path` reference, because omp's RPC prompt carries text only and omp reads
+  image files when they are referenced. Verified: a pasted PNG landed on disk and
+  the composer received `@.omp-studio/pastes/paste-….png`.
+
 ## 0.3.35
 
 - README: a screenshot gallery for the panels. Both panels in place around the

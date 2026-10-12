@@ -2846,6 +2846,39 @@ function parseNotebook(buffer: Buffer): {
 }
 
 /**
+ * Save an image pasted into the composer. It lands in the workspace so the
+ * prompt can reference it with `@path` (the omp RPC prompt carries text only,
+ * and omp reads images when they are referenced).
+ */
+app.post("/api/fs/paste", (req, res) => {
+  const dataUrl = String(req.body?.dataUrl || "");
+  const match = dataUrl.match(/^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) {
+    res.status(400).json({ error: "expected a base64 image data URL" });
+    return;
+  }
+  const bytes = Buffer.from(match[2], "base64");
+  if (bytes.length > 12 * 1024 * 1024) {
+    res.status(400).json({ error: "image too large (12 MB max)" });
+    return;
+  }
+  const ext = match[1].toLowerCase() === "jpeg" ? "jpg" : match[1].toLowerCase();
+  try {
+    const root = path.resolve(workspace);
+    const dir = path.join(root, ".omp-studio", "pastes");
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const file = path.join(dir, `paste-${stamp}.${ext}`);
+    writeFileSync(file, bytes);
+    const relative = path.relative(root, file).replace(/\\/g, "/");
+    emit("log", { level: "info", message: `composer.paste: ${relative} (${bytes.length} bytes)` });
+    res.json({ ok: true, path: file, relative, bytes: bytes.length });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/**
  * Save a cropped/annotated image the preview produced. The crop lands inside the
  * workspace under `.omp-studio/annotations/`, so the agent can be pointed at it
  * with a normal `@path` reference and will find a real file.

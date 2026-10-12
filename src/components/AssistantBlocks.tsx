@@ -21,6 +21,8 @@ interface AssistantBlocksProps {
   blocks: MessageBlock[];
   streaming?: boolean;
   zh: boolean;
+  /** True while the turn's work (thinking + tool blocks) is folded away. */
+  hideWork?: boolean;
   /** Live generation figures shown above the blocks while the turn is streaming. */
   metrics?: { rate?: number | null; rateIsEstimate?: boolean; outputTokens?: number | null } | null;
   onInsertCommand?: (command: string) => void;
@@ -221,10 +223,18 @@ const AssistantBlocksView: React.FC<AssistantBlocksProps> = ({
   blocks,
   streaming,
   zh,
+  hideWork = false,
   metrics,
   onInsertCommand,
 }) => {
   const groups = useMemo(() => groupBlocks(blocks), [blocks]);
+  /* Folded turn: keep what the user came for (the answer text) and drop the
+     thinking/tool machinery, which the turn header accounts for. */
+  const visible = useMemo(
+    () => (hideWork ? groups.filter((group) => group.kind === 'text') : groups),
+    [groups, hideWork]
+  );
+  const hiddenWork = hideWork ? groups.length - visible.length : 0;
   if (groups.length === 0) return null;
   const rate = typeof metrics?.rate === 'number' ? metrics.rate : null;
   const tokens = typeof metrics?.outputTokens === 'number' ? metrics.outputTokens : null;
@@ -244,7 +254,7 @@ const AssistantBlocksView: React.FC<AssistantBlocksProps> = ({
           {tokens !== null && tokens > 0 && <span>↑ {compactTokens(tokens)}</span>}
         </div>
       )}
-      {groups.map((group) => {
+      {visible.map((group) => {
         if (group.kind === 'thinking') {
           return <ThinkingBlock key={`think-${group.run.id}`} run={group.run} zh={zh} defaultOpen={false} streaming={streaming} />;
         }
@@ -254,6 +264,11 @@ const AssistantBlocksView: React.FC<AssistantBlocksProps> = ({
         // Markdown only for what is actually on screen.
         return <MarkdownBlock key={`text-${group.block.id}`} text={group.block.text} />;
       })}
+      {hiddenWork > 0 && visible.length === 0 && (
+        <p className="text-[11px] text-[#52525b] italic">
+          {zh ? '（这一轮没有文本输出，展开处理详情查看步骤）' : '(no text output this turn; expand the details above)'}
+        </p>
+      )}
     </div>
   );
 };

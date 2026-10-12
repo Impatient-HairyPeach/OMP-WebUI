@@ -212,6 +212,10 @@ export const checkOmpUpdate = (force = false) => postJson<OmpUpdateStatus>("/api
 /** Run `omp update`; the bridge stops the session first and restarts it afterwards. */
 export const installOmpUpdate = (force = false) => postJson<OmpUpdateResult>("/api/omp/update", { action: "update", force });
 
+/** Save an image pasted into the composer, returning its workspace path. */
+export const savePastedImage = (dataUrl: string) =>
+  postJson<{ ok: boolean; path: string; relative: string; bytes: number }>("/api/fs/paste", { dataUrl });
+
 /** Save a cropped region of an image into the workspace for an @ reference. */
 export const saveImageCrop = (path: string, dataUrl: string) =>
   postJson<{ ok: boolean; path: string; relative: string; bytes: number }>("/api/fs/annotate", { path, dataUrl });
