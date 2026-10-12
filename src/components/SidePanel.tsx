@@ -19,6 +19,8 @@ import {
   FilePlus,
   Folder,
   FolderGit2,
+  MessagesSquare,
+  CornerDownLeft,
   FolderOpen,
   GitBranch,
   GitCommit,
@@ -46,6 +48,7 @@ import {
   fetchPlugins,
   fetchSkills,
   fetchWorkspaceFiles,
+  sendSideChat,
   setExtensionEnabled,
   setProjectScope,
   type GitDiffFile,
@@ -59,7 +62,7 @@ import { SIDE_PANEL } from '../lib/panelLayout';
 import { renderMarkdown } from '../lib/miniMarkdown';
 import type { FileDiffItem, LogEntry } from '../types';
 
-export type SidePanelTab = 'files' | 'diffs' | 'extensions' | 'tasks' | 'git';
+export type SidePanelTab = 'sidechat' | 'files' | 'diffs' | 'extensions' | 'tasks' | 'git';
 
 interface SidePanelProps {
   isOpen: boolean;
@@ -112,6 +115,34 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [diffFiles, setDiffFiles] = useState<GitDiffFile[]>([]);
   const [diffError, setDiffError] = useState<string | null>(null);
 
+  // --- side chat tab: ephemeral omp runs, never the real conversation ---
+  const [sideMessages, setSideMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string; error?: boolean; ms?: number }>>([]);
+  const [sideInput, setSideInput] = useState('');
+  const [sideBusy, setSideBusy] = useState(false);
+  const [sideTools, setSideTools] = useState(false);
+
+  const runSideChat = async () => {
+    const text = sideInput.trim();
+    if (!text || sideBusy) return;
+    setSideInput('');
+    setSideMessages((prev) => [...prev, { role: 'user', text }]);
+    setSideBusy(true);
+    try {
+      const result = await sendSideChat(text, sideTools);
+      setSideMessages((prev) => [
+        ...prev,
+        { role: 'assistant', text: result.ok ? result.reply : result.error ?? 'failed', error: !result.ok, ms: result.ms },
+      ]);
+    } catch (error) {
+      setSideMessages((prev) => [
+        ...prev,
+        { role: 'assistant', text: error instanceof Error ? error.message : String(error), error: true },
+      ]);
+    } finally {
+      setSideBusy(false);
+    }
+  };
+
   // --- git tab ---
   const [commitMessage, setCommitMessage] = useState('');
   const [commitOutput, setCommitOutput] = useState<string | null>(null);
@@ -163,6 +194,19 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     return () => window.clearTimeout(timer);
   }, [searchQuery]);
 
+  /** Ask the OS file manager to show a file (the bridge only reveals known paths). */
+  const revealPath = async (target: string) => {
+    try {
+      await fetch('/api/reveal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: target }),
+      });
+    } catch {
+      // Revealing is a convenience; a failure needs no dialog.
+    }
+  };
+
   /** git badge per path, straight from the working-tree diff. */
   const gitStatusByPath = useMemo(() => {
     const map: Record<string, string> = {};
@@ -185,6 +229,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           truncated: false,
           lines: 0,
           relative: entryPath,
+          encoding: 'binary',
+          binary: true,
         });
         setViewerMode('preview');
         setFileError(null);
@@ -279,6 +325,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
   const rowClass = 'group flex h-6 items-center gap-1.5 rounded px-1.5 text-[12px] transition-colors cursor-pointer';
   const tabs: Array<{ id: SidePanelTab; label: string; icon: React.ReactNode; badge?: number }> = [
+    { id: 'sidechat', label: t.sideChatTab, icon: <MessagesSquare className="w-3.5 h-3.5" /> },
     { id: 'files', label: zh ? '文件' : 'Files', icon: <FileCode className="w-3.5 h-3.5" /> },
     { id: 'diffs', label: zh ? '改动' : 'Diffs', icon: <FilePlus className="w-3.5 h-3.5" />, badge: diffs.length },
     { id: 'extensions', label: zh ? '扩展' : 'Extras', icon: <Puzzle className="w-3.5 h-3.5" /> },
@@ -317,7 +364,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         </div>
 
         {/* Tab strip */}
-        <div className="flex items-center gap-0.5 px-1.5 h-8 border-b shrink-0" style={{ borderColor: theme.border }}>
+        <div className="flex items-center gap-0.5 px-1.5 h-8 border-b shrink-0 overflow-x-auto" style={{ borderColor: theme.border }}>
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -326,7 +373,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 type="button"
                 onClick={() => onTabChange(tab.id)}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex items-center gap-1 px-2 h-6 rounded text-[11px] transition-colors cursor-pointer ${
+                className={`flex shrink-0 items-center gap-1 px-2 h-6 rounded text-[11px] whitespace-nowrap transition-colors cursor-pointer ${
                   isActive ? 'font-semibold' : 'text-[#71717a] hover:text-[#fafafa] hover:bg-[#18181b]'
                 }`}
                 style={isActive ? { backgroundColor: `${accentColor}1f`, color: accentColor } : undefined}
@@ -405,7 +452,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       </div>
                     )}
                     <span className="text-[9px] font-mono text-[#52525b]">
-                      {isImageFile ? openFile.language.toUpperCase() : `${formatSize(openFile.size)} · ${openFile.lines} ${zh ? '行' : 'lines'}`}
+                      {isImageFile
+                        ? openFile.language.toUpperCase()
+                        : `${formatSize(openFile.size)} · ${openFile.lines} ${zh ? '行' : 'lines'}${
+                            openFile.encoding && openFile.encoding !== 'utf-8' ? ` · ${openFile.encoding.toUpperCase()}` : ''
+                          }`}
                     </span>
                     <button
                       type="button"
@@ -418,7 +469,24 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   </div>
                 </div>
                 <div className="flex-1 min-h-0 overflow-auto">
-                  {isImageFile && viewerMode === 'preview' ? (
+                  {openFile.binary && !isImageFile ? (
+                    <div className="p-4 flex flex-col items-center justify-center gap-2 text-center text-[11px] text-[#71717a] min-h-full">
+                      <FileCode className="w-5 h-5 text-[#52525b]" />
+                      <span>
+                        {zh
+                          ? '二进制文件，无法以文本预览'
+                          : 'Binary file: nothing to show as text'}
+                      </span>
+                      <span className="font-mono text-[10px] text-[#52525b]">{formatSize(openFile.size)}</span>
+                      <button
+                        type="button"
+                        onClick={() => void revealPath(openFile.path)}
+                        className="px-2 py-1 rounded border border-[#27272a] bg-[#121215] text-[#a1a1aa] hover:text-[#fafafa] transition-colors cursor-pointer active:translate-y-px"
+                      >
+                        {zh ? '在资源管理器中显示' : 'Show in file manager'}
+                      </button>
+                    </div>
+                  ) : isImageFile && viewerMode === 'preview' ? (
                     <div className="p-3 flex items-center justify-center bg-[#09090b] min-h-full">
                       <img
                         src={`/api/fs/raw?path=${encodeURIComponent(openFile.path)}`}
@@ -721,6 +789,93 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         )}
 
         {/* ============================== GIT ============================== */}
+        {/* ========================= SIDE CHAT ========================= */}
+        {activeTab === 'sidechat' && (
+          <div className="flex-1 min-h-0 flex flex-col font-mono text-xs">
+            <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b" style={{ borderColor: theme.border }}>
+              <label className="flex items-center gap-1.5 text-[10px] text-[#71717a] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sideTools}
+                  onChange={(event) => setSideTools(event.target.checked)}
+                  className="accent-[#a78bfa]"
+                />
+                {zh ? '允许工具（默认关闭）' : 'allow tools (off by default)'}
+              </label>
+              <button
+                type="button"
+                onClick={() => setSideMessages([])}
+                disabled={sideMessages.length === 0}
+                className="text-[10px] text-[#71717a] hover:text-[#fafafa] transition-colors cursor-pointer disabled:opacity-40"
+              >
+                {zh ? '清空' : 'clear'}
+              </button>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-2">
+              {sideMessages.length === 0 && (
+                <div className="p-2.5 rounded border text-[10px] text-[#71717a]" style={{ borderColor: theme.border }}>
+                  {t.sideChatEmpty}
+                </div>
+              )}
+              {sideMessages.map((entry, index) => (
+                <div key={index} className={entry.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                  <div
+                    className={`max-w-[92%] rounded px-2 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap break-words border ${
+                      entry.role === 'user'
+                        ? 'bg-[#18181b] border-[#27272a] text-[#fafafa]'
+                        : entry.error
+                        ? 'bg-[#ef4444]/10 border-[#ef4444]/40 text-[#f87171]'
+                        : 'bg-[#121215] border-[#27272a] text-[#d4d4d8]'
+                    }`}
+                  >
+                    {entry.text}
+                    {entry.role === 'assistant' && entry.ms !== undefined && !entry.error && (
+                      <span className="block text-[9px] text-[#52525b] mt-1">{entry.ms} ms</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {sideBusy && (
+                <div className="flex items-center gap-1.5 text-[10px] text-[#71717a]">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {zh ? 'omp 正在回答（独立进程，不影响当前会话）' : 'omp is answering (separate process, your session is untouched)'}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t p-2" style={{ borderColor: theme.border }}>
+              <textarea
+                rows={2}
+                value={sideInput}
+                onChange={(event) => setSideInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    void runSideChat();
+                  }
+                }}
+                placeholder={t.sideChatPlaceholder}
+                className="w-full p-2 rounded bg-[#121215] border border-[#27272a] text-[11px] text-[#fafafa] placeholder-[#52525b] focus:outline-none focus:border-[#a78bfa] resize-none"
+              />
+              <div className="flex items-center justify-between gap-2 mt-1.5">
+                <span className="text-[9px] text-[#52525b]">
+                  {zh ? '每次提问 = 一次独立 omp 调用，不写入会话日志' : 'each message is one standalone omp run, not written to the session log'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void runSideChat()}
+                  disabled={!sideInput.trim() || sideBusy}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40 active:translate-y-px"
+                >
+                  {sideBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <CornerDownLeft className="w-3 h-3" />}
+                  {t.sideChatSend}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'git' && (
           <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-3 font-mono text-xs">
             <div className="p-2.5 rounded border flex items-center justify-between gap-2" style={{ borderColor: theme.border }}>

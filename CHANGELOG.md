@@ -3,6 +3,38 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.33
+
+- **Settings no longer start a new conversation.** Toggling a skill or extension
+  (global or per project), enabling/disabling a skill, changing the model scope
+  or the approval mode restarts the omp child so it picks up the new flags, and
+  that restart dropped the session: `restartChild({})` cleared the resume path,
+  so every switch began a fresh chat. The bridge now asks the running child for
+  the session file it is writing (a fresh session has no `--resume` path yet) and
+  resumes it, so the transcript survives the restart. Verified: 2 messages before
+  a project-scope toggle, 2 after, same session file.
+- **File preview decodes instead of garbling.** The viewer read every file as
+  UTF-8, which turned the usual Windows workspace mix into noise: registry hives
+  and archives showed as text, Notepad's UTF-16 files showed as CJK salad, and
+  GBK files from Chinese tools showed as mojibake. The bridge now detects the
+  encoding (UTF-8 with or without BOM, UTF-16LE/BE, GBK fallback), reports
+  `binary` for files with NUL bytes and says so in the panel instead of printing
+  junk, and `/api/fs/raw` labels text as `text/plain; charset=utf-8` instead of
+  `application/octet-stream`.
+- **Side chat in the right panel.** The tab promised by the panel tooltip now
+  exists: each message is one standalone omp run (`-p --no-session`), so scratch
+  questions and prompt drafts never touch the session log. Tools are off unless
+  the toggle is on, replies show their latency, and the panel says what it is
+  doing.
+- **Your own prompts are editable, like the omp terminal.** The message action
+  row (copy / edit / resend / quote) was hidden until hover, which made editing
+  look missing; it is now always visible. The pencil pre-fills the composer and
+  sending branches the session at that turn and re-runs it, and editing works
+  while a turn is running too (the running turn is aborted first).
+- Project files: bilingual README (English + 中文), Apache-2.0 `LICENSE`, package
+  metadata, brand art moved to `assets/brand/`, README screenshots under
+  `assets/screenshots/`, and the AI Studio scaffolding file removed.
+
 ## 0.3.32
 
 - Settings → Providers has a **custom endpoints** panel: it edits the file omp

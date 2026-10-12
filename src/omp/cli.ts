@@ -212,6 +212,18 @@ export const checkOmpUpdate = (force = false) => postJson<OmpUpdateStatus>("/api
 /** Run `omp update`; the bridge stops the session first and restarts it afterwards. */
 export const installOmpUpdate = (force = false) => postJson<OmpUpdateResult>("/api/omp/update", { action: "update", force });
 
+/** One ephemeral omp run for the side chat (`--no-session`, tools opt-in). */
+export interface SideChatReply {
+  ok: boolean;
+  ms: number;
+  reply: string;
+  error?: string;
+  tools: boolean;
+}
+
+export const sendSideChat = (message: string, tools = false) =>
+  postJson<SideChatReply>("/api/side-chat", { message, tools });
+
 /** Custom endpoints from omp's own `models.yml` (the file it actually reads). */
 export interface CustomEndpointModel {
   id: string;
@@ -395,6 +407,10 @@ export interface WorkspaceFile {
   truncated: boolean;
   lines: number;
   relative: string;
+  /** Decoding the bridge used: utf-8, utf-8 bom, utf-16le/be, gbk, latin1, binary. */
+  encoding?: string;
+  /** True for files with no text to show (images, archives, registry hives, …). */
+  binary?: boolean;
 }
 
 /** One directory of the workspace (file explorer). */

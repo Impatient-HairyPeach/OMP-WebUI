@@ -290,10 +290,30 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
 }
 
 /** Switch the child to a cwd/resume pair and wait until it reports ready. */
+/** The session file the running child is writing, read from its own state. A
+ *  fresh session has no `--resume` path yet, so this is the only way to keep it
+ *  across a restart. */
+async function currentSessionFile(): Promise<string | null> {
+  if (resumePath && existsSync(resumePath)) return resumePath;
+  try {
+    const response = await sendCommand({ type: "get_state" }, 10_000);
+    const data = response.data as { sessionFile?: string } | undefined;
+    if (data?.sessionFile && existsSync(data.sessionFile)) return data.sessionFile;
+  } catch {
+    // The child may already be gone; the caller falls back to whatever it had.
+  }
+  return resumePath;
+}
+
 async function restartChild(next: { cwd?: string; resume?: string | null }) {
+  // A settings change restarts the child so omp picks up new flags (skills,
+  // extensions, model scope, approval mode). That restart must keep the
+  // conversation: ask the running child which session file it owns before
+  // stopping it, unless the caller explicitly asked for another session.
+  const keep = next.resume === undefined ? await currentSessionFile() : next.resume;
   stopChild();
   if (next.cwd !== undefined) workspace = next.cwd;
-  resumePath = next.resume ?? null;
+  resumePath = keep ?? null;
   sessionUsageCache = null;
   startChild();
   await awaitReady();
@@ -1249,6 +1269,90 @@ app.post("/api/cli", (req, res) => {
 });
 
 /** Import a skill from GitHub by cloning it into the agents skills directory omp discovers. */
+/**
+ * Side chat: one ephemeral omp run per message (`-p`, `--no-session`), so a
+ * scratch question or a prompt draft never touches the real conversation. Tools
+ * stay off unless the caller asks for them.
+ */
+let sideChatChain: Promise<unknown> = Promise.resolve();
+
+app.post("/api/side-chat", async (req, res) => {
+  const message = String(req.body?.message || "").trim();
+  const tools = req.body?.tools === true;
+  if (!message) {
+    res.status(400).json({ error: "a message is required" });
+    return;
+  }
+  const run = async () => {
+    const command = resolveOmpCommand();
+    const started = Date.now();
+    const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(
+        command.file,
+        [
+          ...command.args,
+          "-p",
+          message,
+          "--no-session",
+          ...(tools ? [] : ["--no-tools"]),
+          "--no-extensions",
+          "--no-skills",
+          "--no-rules",
+          "--no-lsp",
+          "--max-time",
+          "180",
+          "--cwd",
+          workspace,
+        ],
+        { cwd: workspace, env: childEnv(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }
+      );
+      let stdout = "";
+      let stderr = "";
+      const keep = (current: string, chunk: Buffer) => (current + chunk.toString()).slice(-400_000);
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout = keep(stdout, chunk);
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr = keep(stderr, chunk);
+      });
+      const timer = setTimeout(() => child.kill(), 200_000);
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ code: code ?? 1, stdout, stderr });
+      });
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        resolve({ code: 1, stdout, stderr: `${stderr}\n${error.message}` });
+      });
+    });
+    const ms = Date.now() - started;
+    // Print mode writes the answer to stdout and status lines to stderr.
+    const reply = result.stdout.trim();
+    const failure = result.code !== 0 || !reply;
+    const detail = `${result.stdout}\n${result.stderr}`
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .find((line) => /(^|\s)(4\d\d|5\d\d)\s|type=[A-Za-z]|not found|unauthorized|invalid|refused|rate limit|timed? ?out/i.test(line));
+    emit("log", {
+      level: failure ? "warn" : "info",
+      message: `side-chat: ${message.slice(0, 40)} -> ${failure ? `failed (${detail ?? `exit ${result.code}`})` : `ok in ${ms}ms`}`,
+    });
+    return { ok: !failure, ms, reply, error: failure ? detail ?? `exit ${result.code}` : undefined, tools };
+  };
+  // One side run at a time: each one is its own omp process.
+  const queued = sideChatChain.then(run, run);
+  sideChatChain = queued.then(
+    () => {},
+    () => {}
+  );
+  try {
+    res.json(await queued);
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
+  }
+});
+
 /** Refresh one provider's catalog (`omp models refresh <provider>`) and report
  *  what appeared: providers publish new model ids without an omp release. */
 app.post("/api/omp/models/refresh", async (req, res) => {
@@ -2501,6 +2605,42 @@ app.get("/api/fs/raw", (req, res) => {
   }
 });
 
+/**
+ * Decode a workspace file for the preview.
+ *
+ * Windows workspaces are full of files this viewer used to garble: registry
+ * hives, PNGs and archives read as text, UTF-16 files from Notepad, and GBK
+ * text from Chinese tools. Detect instead of guessing:
+ *   BOM -> that encoding; NUL byte -> binary; strict UTF-8 -> utf-8;
+ *   otherwise GBK (the usual non-UTF-8 case on a Chinese Windows box).
+ */
+function decodeText(bytes: Buffer): { text: string; encoding: string; binary: boolean } {
+  if (bytes.length === 0) return { text: "", encoding: "utf-8", binary: false };
+  const bom = (kind: string, slice: number, decoder: string) => {
+    try {
+      return { text: new TextDecoder(decoder).decode(bytes.subarray(slice)), encoding: kind, binary: false };
+    } catch {
+      return { text: bytes.subarray(slice).toString("latin1"), encoding: "latin1", binary: false };
+    }
+  };
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return bom("utf-8 bom", 3, "utf-8");
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return bom("utf-16le", 2, "utf-16le");
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return bom("utf-16be", 2, "utf-16be");
+  // A NUL in the first 8 KiB means binary (text files never carry one).
+  const probe = bytes.subarray(0, 8192);
+  if (probe.includes(0)) return { text: "", encoding: "binary", binary: true };
+  try {
+    return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), encoding: "utf-8", binary: false };
+  } catch {
+    // Not valid UTF-8: GBK covers the overwhelming majority of such files here.
+    try {
+      return { text: new TextDecoder("gbk").decode(bytes), encoding: "gbk", binary: false };
+    } catch {
+      return { text: bytes.toString("latin1"), encoding: "latin1", binary: false };
+    }
+  }
+}
+
 /** Reveal one omp/bridge file in the OS file manager (never an arbitrary path). */
 const REVEALABLE = new Set<string>();
 app.post("/api/reveal", (req, res) => {
@@ -2550,7 +2690,13 @@ function mimeOf(file: string): string {
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
   };
-  return table[ext] ?? "application/octet-stream";
+  if (table[ext]) return table[ext];
+  // Text has to be labelled as text: `application/octet-stream` made the browser
+  // treat a .md/.ts preview as a download or as garbage.
+  if (/^\.(md|markdown|txt|log|json|jsonc|ya?ml|toml|ini|cfg|conf|env|csv|tsv|xml|html?|css|scss|less|jsx?|mjs|cjs|tsx?|py|rb|go|rs|java|kt|swift|c|h|cpp|hpp|cs|php|sh|bash|zsh|ps1|bat|cmd|sql|graphql|diff|patch|srt|vtt)$/i.test(ext)) {
+    return "text/plain; charset=utf-8";
+  }
+  return "application/octet-stream";
 }
 
 /** Directory listing for the file explorer; paths are confined to the workspace. */
@@ -2605,7 +2751,26 @@ app.get("/api/fs/file", (req, res) => {
       res.status(400).json({ error: "not a file" });
       return;
     }
-    const raw = readFileSync(resolved, "utf8");
+    const bytes = readFileSync(resolved);
+    const decoded = decodeText(bytes);
+    if (decoded.binary) {
+      // Honest answer for a binary file: no text to show, and the UI says so.
+      res.json({
+        path: resolved,
+        name: path.basename(resolved),
+        size: stat.size,
+        modified: stat.mtime.toISOString(),
+        language: path.extname(resolved).replace('.', '') || 'binary',
+        encoding: "binary",
+        binary: true,
+        content: "",
+        truncated: false,
+        lines: 0,
+        relative: path.relative(workspace, resolved).replace(/\\/g, "/"),
+      });
+      return;
+    }
+    const raw = decoded.text;
     const truncated = raw.length > limit;
     res.json({
       path: resolved,
@@ -2613,6 +2778,8 @@ app.get("/api/fs/file", (req, res) => {
       size: stat.size,
       modified: stat.mtime.toISOString(),
       language: path.extname(resolved).replace('.', '') || 'text',
+      encoding: decoded.encoding,
+      binary: false,
       content: truncated ? raw.slice(0, limit) : raw,
       truncated,
       lines: raw.split('\n').length,

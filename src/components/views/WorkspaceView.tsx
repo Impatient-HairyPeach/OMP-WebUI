@@ -741,6 +741,16 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     const trimmed = inputPrompt.trim();
     if (!trimmed && attachedFiles.length === 0) return;
 
+    if (editingEntryId && omp.isStreaming) {
+      // Editing an earlier turn while one is running: stop it, then branch from
+      // the edited turn. Steering would append to the wrong conversation.
+      setEditingEntryId(null);
+      onDispatchLog('INFO', 'prompt.edit: stopping the running turn, then branching');
+      void omp.abort().then(() => omp.branchAndPrompt([attachmentBlock, trimmed].filter(Boolean).join('\n\n')));
+      setInputPrompt('');
+      setAttachedFiles([]);
+      return;
+    }
     if (omp.isStreaming) {
       if (!trimmed) return;
       onDispatchLog('INFO', `agent.${steerOrQueueMode}: ${trimmed.slice(0, 48)}`);
@@ -1025,7 +1035,7 @@ return (
 
       {/* Turn actions — the omp transcript is append-only, so no delete */}
       {!isUser && (
-        <div className="mt-2.5 pt-2 border-t border-[#1e1e24] flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        <div className="mt-2.5 pt-2 border-t border-[#1e1e24] flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-60 hover:opacity-100 focus-within:opacity-100 transition-opacity">
           <button
             type="button"
             onClick={() => handleCopyMessage(msg.id, msg.content)}
@@ -1083,7 +1093,7 @@ return (
 
   {/* Your own message: actions sit under the bubble, not inside it */}
   {isUser && !msg.pending && (
-    <div className="mt-1 flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <div className="mt-1 flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-60 hover:opacity-100 focus-within:opacity-100 transition-opacity">
       <button
         type="button"
         onClick={() => handleCopyMessage(msg.id, msg.content)}
@@ -1101,7 +1111,13 @@ return (
         type="button"
         onClick={() => handleStartEdit(msg)}
         disabled={!anchored}
-        title={anchorTitle ?? (language === 'zh-CN' ? '编辑并从此处分支重发' : 'Edit & resend from here')}
+        title={
+          anchored
+            ? language === 'zh-CN'
+              ? '编辑这条指令：发送后从该轮分叉并重新执行（同 omp 终端）'
+              : 'Edit this prompt: sending branches the session here and re-runs it (like the omp terminal)'
+            : anchorTitle ?? (language === 'zh-CN' ? '编辑并从此处分支重发' : 'Edit & resend from here')
+        }
         className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
       >
         <Pencil className="w-3.5 h-3.5 text-[#a78bfa]" />

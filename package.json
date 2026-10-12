@@ -1,7 +1,28 @@
 {
   "name": "omp-studio",
   "private": true,
-  "version": "0.3.32",
+  "version": "0.3.33",
+  "description": "Browser workspace for the local omp coding agent: real sessions, tools, files, models and skills.",
+  "license": "Apache-2.0",
+  "author": "Shang-1999",
+  "homepage": "https://github.com/Shang-1999/OMP-WebUI#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shang-1999/OMP-WebUI.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Shang-1999/OMP-WebUI/issues"
+  },
+  "keywords": [
+    "omp",
+    "oh-my-pi",
+    "coding-agent",
+    "web-ui",
+    "react",
+    "vite",
+    "express",
+    "mcp"
+  ],
   "type": "module",
   "bin": {
     "omp-studio": "bin/omp-studio.mjs"
