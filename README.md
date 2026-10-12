@@ -5,8 +5,8 @@
 <h1 align="center">OMP WebUI</h1>
 
 <p align="center">
-  <em>A browser workspace for the local <a href="https://github.com/can1357/oh-my-pi"><code>omp</code></a> coding agent: real sessions, real tools, real files.</em><br />
-  <em>把本机 <code>omp</code> 编码智能体搬进浏览器：真实会话、真实工具调用、真实文件。</em>
+  <em>The web UI for the local <a href="https://github.com/can1357/oh-my-pi"><code>omp</code></a> coding agent.</em><br />
+  <em><code>omp</code> 编码智能体的 Web 界面。</em>
 </p>
 
 <p align="center">
@@ -47,7 +47,8 @@ It exists because the terminal is great for the agent and awkward for everything
 | **Skills** | Scan a git repository with the Agent Skills CLI, pick from what it ships, install into the project or user scope, install from the Skillshare registry through `omp skill install`, author a `SKILL.md`, enable/disable globally or per project, uninstall |
 | **Extensions** | Installed omp plugins with their real state, global and per-project switches, plugin install from npm or git |
 | **Git** | Branches, checkout, commits, recent log, uncommitted files with status chips and inline patches. A workspace that is not a repository says so instead of failing |
-| **Files** | Workspace tree, text preview with encoding detection (UTF-8, UTF-16, GBK), an honest notice for binary files, diffs panel for the working tree |
+| **Files** | Workspace tree; previews for text (encoding detection: UTF-8, UTF-16, GBK), Markdown, images, PDF, CSV/TSV tables, `.xlsx`/`.xls`/`.xlsb`/`.ods` workbooks, `.docx`/`.odt` documents, `.pptx` slides and `.ipynb` notebooks; an honest notice for binary and legacy Office files; diffs panel for the working tree |
+| **Review notes** | Quote a highlight (`@file:12-18`), a paragraph, a slide or a notebook cell, or circle a region on an image — write what should change, collect notes across files, send them as one prompt |
 | **Console** | Event stream with real bridge round-trip ping, plus MCP, bash, PowerShell and debugger tabs |
 | **Settings** | Theme palettes including omp's own midnight palette, accent, density, fonts, UI language (zh/en), omp version check and update, approval mode, security overview, MCP servers, project config |
 
@@ -98,11 +99,7 @@ browser ──HTTP/SSE──> server.ts (Express) ──stdin/stdout JSON──>
 * `/api/events` streams omp's frames (SSE) and the bridge's own log lines to the UI.
 * The bridge spawns `omp --mode rpc-ui`, forwards commands, and adds the flags omp needs for the project scope (`--skills=`, `--no-extensions`).
 * A settings change restarts the child with the **same session file** (`--resume`), so toggling a skill never loses the conversation.
-* Every panel reads the real thing: `usage.db` for billing, `models.db` for catalogs, the session `.jsonl` for metrics, `git` for the repository surfaces.
-
-### Real data only
-
-There is no fixture data left in the app. Every number, list and file in the UI comes from omp or your filesystem. If a source is unavailable, the panel says so instead of inventing content.
+* Panels read omp's files directly: `usage.db` for billing, `models.db` for catalogs, the session `.jsonl` for metrics, and `git` for the repository surfaces.
 
 ### Development
 
@@ -189,11 +186,7 @@ omp-studio           # 服务 dist/，omp 使用你启动命令时所在的目�
 * `/api/events` 用 SSE 把 omp 的帧和桥接自己的日志推给前端。
 * 桥接启动 `omp --mode rpc-ui`，转发命令，并补上项目作用域需要的参数（`--skills=`、`--no-extensions`）。
 * 设置变化会重启子进程并**续接同一个会话文件**（`--resume`），所以切换技能不会丢对话。
-* 每个面板都读真实来源：计费读 `usage.db`，模型目录读 `models.db`，指标读会话 `.jsonl`，仓库相关直接调 `git`。
-
-### 只有真实数据
-
-应用里已经没有任何 fixture 数据：界面上的每个数字、列表、文件都来自 omp 或你的文件系统。某个来源不可用时，面板会如实说明，而不是编内容。
+* 各面板直接读 omp 的文件：计费读 `usage.db`，模型目录读 `models.db`，指标读会话 `.jsonl`，仓库相关调 `git`。
 
 ### 开发
 

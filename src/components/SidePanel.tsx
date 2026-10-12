@@ -8,7 +8,7 @@
  *   terminal — the live omp event stream (the same lines the bridge emits)
  *   git      — real branch / changed files / commits / commit form
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
@@ -48,6 +48,7 @@ import {
   fetchPlugins,
   fetchSkills,
   fetchWorkspaceFiles,
+  saveImageCrop,
   sendSideChat,
   setExtensionEnabled,
   setProjectScope,
@@ -79,6 +80,44 @@ const formatSize = (bytes: number): string => {
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${bytes} B`;
 };
+
+/** Rendered text has no markup; both sides of a best-effort match go through this. */
+function stripMarkup(text: string): string {
+  return text.replace(/[`*_>#|[\]()]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Viewer subtitle: what the file is and how much of it there is, never `undefined 行`. */
+function fileMeta(file: WorkspaceFile, rows: number, zh: boolean): string {
+  const size = formatSize(file.size);
+  if (/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(file.name)) return `${file.language.toUpperCase()} · ${size}`;
+  const parts = [size];
+  if (file.kind === 'table' || file.kind === 'sheet') parts.push(`${rows} ${zh ? '行' : 'rows'}`);
+  else if (file.kind === 'slides') parts.push(`${file.slides?.length ?? 0} ${zh ? '页' : 'slides'}`);
+  else if (file.kind === 'notebook') parts.push(`${file.cells?.length ?? 0} ${zh ? '单元格' : 'cells'}`);
+  else if (file.kind === 'pdf') parts.push('PDF');
+  else if (typeof file.lines === 'number' && file.lines > 0) parts.push(`${file.lines} ${zh ? '行' : 'lines'}`);
+  if (file.encoding && file.kind !== 'pdf' && file.encoding !== 'utf-8') parts.push(file.encoding.toUpperCase());
+  return parts.join(' · ');
+}
+
+/** mammoth output is HTML from your own file: keep structure, drop anything executable. */
+function sanitizeDocHtml(html: string): string {
+  return html
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*\/?>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/(href|src)\s*=\s*(["'])\s*javascript:[^"']*\2/gi, '$1="#"');
+}
+
+/** One review note: a quoted passage (or image region) plus what should change. */
+interface FileNote {
+  id: string;
+  file: string;
+  /** `12` or `12-18` when the quote could be anchored to lines, else empty. */
+  range: string;
+  snippet: string;
+  comment: string;
+}
 
 /** Ask the composer to insert a workspace path (decoupled on purpose). */
 function insertMention(text: string): void {
@@ -194,6 +233,251 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     return () => window.clearTimeout(timer);
   }, [searchQuery]);
 
+  const [activeSheet, setActiveSheet] = useState(0);
+  const [selectedCells, setSelectedCells] = useState<[number | null, number | null]>([null, null]);
+  /** Review notes gathered while reading a file: quoted text plus the comment on it. */
+  const [annotations, setAnnotations] = useState<FileNote[]>([]);
+  /** The selection a note is being written for, and where its box sits on screen. */
+  const [pendingSnippet, setPendingSnippet] = useState<{ range: string; snippet: string } | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [selectionBar, setSelectionBar] = useState<{ top: number; left: number } | null>(null);
+  const [imageBox, setImageBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [imageDrag, setImageDrag] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [imageNote, setImageNote] = useState('');
+  const [cropBusy, setCropBusy] = useState(false);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const imageFrameRef = useRef<HTMLDivElement | null>(null);
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const dragRect = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  /** Where a note's box opens: below the selection, clamped into the viewport. */
+  const openAnnotate = (range: string, snippet: string, rect: { top: number; left: number }) => {
+    setPendingSnippet({ range, snippet: snippet.slice(0, 1500) });
+    setNoteDraft('');
+    setSelectionBar({
+      top: Math.max(Math.min(rect.top + 18, window.innerHeight - 200), 8),
+      left: Math.max(Math.min(rect.left, window.innerWidth - 300), 8),
+    });
+  };
+
+  const closeAnnotate = () => {
+    setPendingSnippet(null);
+    setNoteDraft('');
+    setSelectionBar(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  /**
+   * Line range a snippet belongs to. The source view carries `data-line` anchors;
+   * a rendered document, notebook or Markdown view has none, so the text is
+   * searched in the file's content instead of quoting a bare filename.
+   *
+   * The match is best-effort: rendered text loses its markup (`omp-studio` reads
+   * as omp-studio), so both sides are stripped of punctuation and the first few
+   * words decide the line. The quote travels with the note, so a wrong guess is
+   * visible to the reader and to the agent.
+   */
+  const resolveRange = (snippet: string): string => {
+    const lines = (openFile?.content ?? '').split('\n');
+    const words = stripMarkup(snippet.split('\n')[0] ?? '')
+      .split(' ')
+      .filter((word) => word.length > 2)
+      .slice(0, 4);
+    if (words.length < 2 || lines.length === 0) return '';
+    let index = -1;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = stripMarkup(lines[i]);
+      if (words.every((word) => line.includes(word))) {
+        index = i;
+        break;
+      }
+    }
+    if (index < 0) return '';
+    const last = Math.min(index + snippet.split('\n').length, lines.length);
+    return last > index + 1 ? `${index + 1}-${last}` : `${index + 1}`;
+  };
+
+  /** The highlight (or the paragraph/code block clicked) becomes a quotable selection. */
+  const captureSelection = (event?: React.MouseEvent) => {
+    if (!openFile) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) {
+      const text = selection.toString().trim();
+      if (text.length >= 2) {
+        const range = selection.getRangeAt(0);
+        const lineOf = (node: Node | null): number | null => {
+          let element = node instanceof Element ? node : node?.parentElement ?? null;
+          while (element) {
+            const line = element.getAttribute?.('data-line');
+            if (line) return Number(line);
+            element = element.parentElement;
+          }
+          return null;
+        };
+        const from = lineOf(range.startContainer);
+        const to = lineOf(range.endContainer);
+        openAnnotate(from ? (to && to !== from ? `${from}-${to}` : `${from}`) : resolveRange(text), text, range.getBoundingClientRect());
+        return;
+      }
+    }
+    // A click without a highlight quotes the block it landed in: that is how a
+    // paragraph of a .docx, a notebook cell or a fenced code block gets quoted.
+    const block = (event?.target as Element | null)?.closest?.('pre, p, li, h1, h2, h3, h4, h5, blockquote, td');
+    const text = block?.textContent?.trim() ?? '';
+    if (block && text.length >= 2 && text.length <= 4000) {
+      openAnnotate(resolveRange(text), text, block.getBoundingClientRect());
+    } else closeAnnotate();
+  };
+
+  const addAnnotation = (comment: string) => {
+    if (!openFile || !pendingSnippet) return;
+    setAnnotations((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        file: openFile.relative,
+        range: pendingSnippet.range,
+        snippet: pendingSnippet.snippet,
+        comment: comment.trim(),
+      },
+    ]);
+    closeAnnotate();
+  };
+
+  const dropAnnotation = (id: string) => setAnnotations((prev) => prev.filter((note) => note.id !== id));
+
+  /** One prompt carrying every note, each pinned to a file (`:lines`) with its quote. */
+  const notesToPrompt = (notes: FileNote[]): string => {
+    if (notes.length === 0) return '';
+    const body = notes
+      .map((note, index) => {
+        const where = note.range ? `@${note.file}:${note.range}` : `@${note.file}`;
+        const quoted = note.snippet ? `\n\`\`\`\n${note.snippet}\n\`\`\`\n` : '\n';
+        return `${index + 1}. ${where}${quoted}${note.comment}`;
+      })
+      .join('\n\n');
+    const heading = zh
+      ? `${notes.length === 1 ? '关于这处内容' : '关于这几处'}，请按批示改：`
+      : `${notes.length === 1 ? 'About this passage' : 'About these passages'}, apply my notes:`;
+    return `${heading}\n\n${body}\n`;
+  };
+
+  /** A point inside the image frame, in CSS pixels relative to the rendered image. */
+  const pointInImage = (event: React.MouseEvent) => {
+    const rect = imageFrameRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return {
+      x: Math.min(Math.max(event.clientX - rect.left, 0), rect.width),
+      y: Math.min(Math.max(event.clientY - rect.top, 0), rect.height),
+    };
+  };
+
+  const startImageDrag = (event: React.MouseEvent) => {
+    const point = pointInImage(event);
+    if (!point) return;
+    event.preventDefault();
+    dragStart.current = point;
+    dragRect.current = { x: point.x, y: point.y, w: 0, h: 0 };
+    setImageBox(null);
+    setImageDrag(dragRect.current);
+  };
+
+  const extendImageDrag = (event: React.MouseEvent) => {
+    const start = dragStart.current;
+    const point = pointInImage(event);
+    if (!start || !point) return;
+    dragRect.current = {
+      x: Math.min(start.x, point.x),
+      y: Math.min(start.y, point.y),
+      w: Math.abs(point.x - start.x),
+      h: Math.abs(point.y - start.y),
+    };
+    setImageDrag(dragRect.current);
+  };
+
+  /** Anything under 8px is a click, not a region. */
+  const endImageDrag = () => {
+    const rect = dragRect.current;
+    dragStart.current = null;
+    dragRect.current = null;
+    setImageDrag(null);
+    if (rect && rect.w >= 8 && rect.h >= 8) setImageBox(rect);
+  };
+
+  // Escape closes the note box without touching the note list.
+  useEffect(() => {
+    if (!pendingSnippet) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeAnnotate();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pendingSnippet]);
+
+  /** Crop the dragged region into the workspace and either quote it or file it as a note. */
+  const quoteImageBox = async (note: string, asNote: boolean) => {
+    if (!openFile || !imageBox || !imageRef.current) return;
+    setCropBusy(true);
+    try {
+      const image = imageRef.current;
+      const scaleX = image.naturalWidth / image.clientWidth;
+      const scaleY = image.naturalHeight / image.clientHeight;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(imageBox.w * scaleX));
+      canvas.height = Math.max(1, Math.round(imageBox.h * scaleY));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('canvas unavailable');
+      context.drawImage(
+        image,
+        Math.round(imageBox.x * scaleX),
+        Math.round(imageBox.y * scaleY),
+        canvas.width,
+        canvas.height,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+      const saved = await saveImageCrop(openFile.path, canvas.toDataURL('image/png'));
+      const region = `圈选区域 x=${Math.round(imageBox.x)} y=${Math.round(imageBox.y)} w=${Math.round(imageBox.w)} h=${Math.round(imageBox.h)}（原图 ${canvas.width}x${canvas.height}px）`;
+      if (asNote) {
+        setAnnotations((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            file: saved.relative,
+            range: '',
+            snippet: '',
+            comment: [note.trim(), `${openFile.relative} 的${region}`].filter(Boolean).join(' · '),
+          },
+        ]);
+      } else {
+        insertMention(`@${saved.relative}（${openFile.relative} 的${region}）${note.trim() ? ` ${note.trim()}` : ''}`);
+      }
+      setImageBox(null);
+      setImageNote('');
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCropBusy(false);
+    }
+  };
+
+  const tableRows = useMemo(() => {
+    if (openFile?.kind === 'sheet') return openFile.sheets?.[activeSheet]?.rows ?? [];
+    return openFile?.rows ?? [];
+  }, [openFile, activeSheet]);
+  const sheetTruncated = openFile?.kind === 'sheet' ? Boolean(openFile.sheets?.[activeSheet]?.truncated) : Boolean(openFile?.truncated);
+
+  /** Quote one cell as an exact, file-anchored reference for the composer. */
+  const quoteTableSelection = (): string => {
+    const [row, column] = selectedCells;
+    if (!openFile || row === null) return '';
+    const value = tableRows[row]?.[column ?? 0] ?? '';
+    const anchor = openFile.kind === 'sheet' ? `${openFile.relative}#${openFile.sheets?.[activeSheet]?.name ?? ''}` : openFile.relative;
+    return `@${anchor} R${row + 1}C${(column ?? 0) + 1}: ${value}`;
+  };
+
   /** Ask the OS file manager to show a file (the bridge only reveals known paths). */
   const revealPath = async (target: string) => {
     try {
@@ -217,8 +501,15 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const openFilePath = useCallback(
     async (entryPath: string) => {
       const name = entryPath.replace(/\\/g, '/').split('/').pop() ?? entryPath;
+      // The tree hands back absolute paths; every quote the panel writes must be
+      // workspace-relative, or the agent gets a path it cannot use as `@…`.
+      const relative =
+        treeRoot && entryPath.startsWith(treeRoot)
+          ? entryPath.slice(treeRoot.length + 1).replace(/\\/g, '/')
+          : entryPath.replace(/\\/g, '/');
       // Images are streamed by the raw endpoint, so no text read is attempted.
       if (/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(name)) {
+        closeAnnotate();
         setOpenFile({
           path: entryPath,
           name,
@@ -228,7 +519,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           content: '',
           truncated: false,
           lines: 0,
-          relative: entryPath,
+          relative,
           encoding: 'binary',
           binary: true,
         });
@@ -239,8 +530,12 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       setFileBusy(true);
       try {
         const file = await fetchFileContent(entryPath);
+        setActiveSheet(0);
+        setSelectedCells([null, null]);
         setOpenFile(file);
-        setViewerMode(/\.(md|markdown)$/i.test(file.name) ? 'preview' : 'source');
+        closeAnnotate();
+        const structured = Boolean(file.kind && file.kind !== 'text' && file.kind !== 'binary');
+        setViewerMode(/\.(md|markdown)$/i.test(file.name) || structured ? 'preview' : 'source');
         setFileError(null);
       } catch (error) {
         setFileError(error instanceof Error ? error.message : String(error));
@@ -248,7 +543,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         setFileBusy(false);
       }
     },
-    []
+    [treeRoot]
   );
 
   const toggleDir = (dirPath: string) => {
@@ -326,7 +621,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const rowClass = 'group flex h-6 items-center gap-1.5 rounded px-1.5 text-[12px] transition-colors cursor-pointer';
   const tabs: Array<{ id: SidePanelTab; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: 'sidechat', label: t.sideChatTab, icon: <MessagesSquare className="w-3.5 h-3.5" /> },
-    { id: 'files', label: zh ? '文件' : 'Files', icon: <FileCode className="w-3.5 h-3.5" /> },
+    { id: 'files', label: zh ? '文件' : 'Files', icon: <FileCode className="w-3.5 h-3.5" />, badge: annotations.length },
     { id: 'diffs', label: zh ? '改动' : 'Diffs', icon: <FilePlus className="w-3.5 h-3.5" />, badge: diffs.length },
     { id: 'extensions', label: zh ? '扩展' : 'Extras', icon: <Puzzle className="w-3.5 h-3.5" /> },
     { id: 'tasks', label: zh ? '任务' : 'Tasks', icon: <ListChecks className="w-3.5 h-3.5" /> },
@@ -451,13 +746,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         ))}
                       </div>
                     )}
-                    <span className="text-[9px] font-mono text-[#52525b]">
-                      {isImageFile
-                        ? openFile.language.toUpperCase()
-                        : `${formatSize(openFile.size)} · ${openFile.lines} ${zh ? '行' : 'lines'}${
-                            openFile.encoding && openFile.encoding !== 'utf-8' ? ` · ${openFile.encoding.toUpperCase()}` : ''
-                          }`}
-                    </span>
+                    <span className="text-[9px] font-mono text-[#52525b]">{fileMeta(openFile, tableRows.length, zh)}</span>
                     <button
                       type="button"
                       onClick={() => insertMention(`@${openFile.relative}`)}
@@ -468,12 +757,160 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     </button>
                   </div>
                 </div>
-                <div className="flex-1 min-h-0 overflow-auto">
-                  {openFile.binary && !isImageFile ? (
+                <div className="flex-1 min-h-0 overflow-auto select-text">
+                  {openFile.kind === 'table' || openFile.kind === 'sheet' ? (
+                    <div className="flex flex-col">
+                      {openFile.kind === 'sheet' && (openFile.sheets?.length ?? 0) > 1 && (
+                        <div className="flex items-center gap-1 px-2 py-1.5 border-b overflow-x-auto" style={{ borderColor: theme.border }}>
+                          {(openFile.sheets ?? []).map((sheet, index) => (
+                            <button
+                              key={sheet.name}
+                              type="button"
+                              onClick={() => setActiveSheet(index)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono whitespace-nowrap cursor-pointer ${
+                                (activeSheet ?? 0) === index ? 'text-[#fafafa]' : 'text-[#71717a] hover:text-[#a1a1aa]'
+                              }`}
+                              style={(activeSheet ?? 0) === index ? { backgroundColor: `${accentColor}1f`, color: accentColor } : undefined}
+                            >
+                              {sheet.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="overflow-auto max-h-[62vh]">
+                        <table className="border-collapse text-[11px] font-mono">
+                          <thead>
+                            <tr>
+                              <th className="sticky left-0 top-0 z-10 bg-[#121215] border border-[#1e1e24] px-1.5 py-0.5 text-[#52525b]" />
+                              {(tableRows[0] ?? []).map((_, column) => (
+                                <th key={column} className="sticky top-0 z-10 bg-[#121215] border border-[#1e1e24] px-1.5 py-0.5 text-[#52525b] font-normal">
+                                  {column + 1}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tableRows.map((row, rowIndex) => (
+                              <tr key={rowIndex} className={selectedCells[0] === rowIndex ? 'bg-[#a78bfa]/10' : undefined}>
+                                <td className="sticky left-0 z-10 bg-[#121215] border border-[#1e1e24] px-1.5 py-0.5 text-right text-[#52525b] select-none">
+                                  {rowIndex + 1}
+                                </td>
+                                {row.map((cell, column) => (
+                                  <td
+                                    key={column}
+                                    onClick={() => setSelectedCells([rowIndex, column])}
+                                    title={cell}
+                                    className={`border border-[#1e1e24] px-1.5 py-0.5 max-w-[320px] truncate cursor-pointer ${
+                                      selectedCells[0] === rowIndex && selectedCells[1] === column ? 'bg-[#a78bfa]/25 text-[#fafafa]' : 'text-[#d4d4d8]'
+                                    }`}
+                                  >
+                                    {cell}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-t text-[10px] text-[#71717a] font-mono" style={{ borderColor: theme.border }}>
+                        <span>
+                          {tableRows.length} {zh ? '行' : 'rows'}
+                          {sheetTruncated ? (zh ? '（已截断）' : ' (truncated)') : ''}
+                          {selectedCells[0] !== null ? ` · ${zh ? '选中' : 'selected'} R${selectedCells[0] + 1}C${(selectedCells[1] ?? 0) + 1}` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => insertMention(quoteTableSelection())}
+                          disabled={selectedCells[0] === null}
+                          className="px-2 py-0.5 rounded border border-[#27272a] bg-[#121215] text-[#a1a1aa] hover:text-[#fafafa] transition-colors cursor-pointer disabled:opacity-40 active:translate-y-px"
+                        >
+                          {zh ? '引用选中单元格' : 'quote selected cell'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : openFile.kind === 'doc' ? (
+                    <div className="px-3 py-2 text-[13px] text-[#e8e8e8] leading-relaxed" onMouseUp={captureSelection}>
+                      {openFile.error ? (
+                        <span className="text-[#f87171] font-mono text-[11px]">{openFile.error}</span>
+                      ) : (
+                        <div className="doc-preview" dangerouslySetInnerHTML={{ __html: sanitizeDocHtml(openFile.html ?? '') }} />
+                      )}
+                    </div>
+                  ) : openFile.kind === 'pdf' ? (
+                    /* The browser's own PDF viewer, on the raw bytes: no parsing here. */
+                    <iframe
+                      src={`/api/fs/raw?path=${encodeURIComponent(openFile.path)}`}
+                      title={openFile.name}
+                      className="w-full min-h-[75vh] border-0 bg-[#09090b]"
+                    />
+                  ) : openFile.kind === 'slides' ? (
+                    <div className="p-2 flex flex-col gap-2">
+                      {(openFile.slides ?? []).length === 0 && (
+                        <div className="px-2 py-3 text-[11px] text-[#52525b]">{zh ? '没有可读的文字内容' : 'No readable text in this deck'}</div>
+                      )}
+                      {(openFile.slides ?? []).map((slide, index) => (
+                        <div key={slide.name} className="rounded border" style={{ borderColor: theme.border }}>
+                          <div className="flex items-center justify-between gap-2 px-2 py-1 border-b" style={{ borderColor: theme.border }}>
+                            <span className="text-[10px] font-mono text-[#a1a1aa]">
+                              {slide.name} · {slide.lines.length} {zh ? '行' : 'lines'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(event) => openAnnotate(`slide ${index + 1}`, slide.lines.join('\n'), event.currentTarget.getBoundingClientRect())}
+                              className="px-1.5 py-0.5 rounded border border-[#27272a] bg-[#121215] text-[10px] text-[#a1a1aa] hover:text-[#fafafa] cursor-pointer"
+                            >
+                              {zh ? '引用本页' : 'Quote slide'}
+                            </button>
+                          </div>
+                          <div className="px-2 py-1.5 text-[12px] leading-[1.5] text-[#d4d4d8] whitespace-pre-wrap">
+                            {slide.lines.join('\n') || (zh ? '（本页只有图形）' : '(graphics only)')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : openFile.kind === 'notebook' ? (
+                    <div className="p-2 flex flex-col gap-2">
+                      {(openFile.cells ?? []).map((cell, index) => (
+                        <div key={index} className="rounded border" style={{ borderColor: theme.border }}>
+                          <div className="flex items-center justify-between gap-2 px-2 py-0.5 border-b" style={{ borderColor: theme.border }}>
+                            <span className="text-[10px] font-mono text-[#71717a]">
+                              [{index + 1}] {cell.kind === 'code' ? openFile.notebookLanguage ?? 'code' : 'markdown'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(event) => openAnnotate(`cell ${index + 1}`, cell.source, event.currentTarget.getBoundingClientRect())}
+                              className="px-1.5 py-0.5 rounded border border-[#27272a] bg-[#121215] text-[10px] text-[#a1a1aa] hover:text-[#fafafa] cursor-pointer"
+                            >
+                              {zh ? '引用本格' : 'Quote cell'}
+                            </button>
+                          </div>
+                          {cell.kind === 'markdown' ? (
+                            <div className="px-2 py-1 text-[12px] text-[#e8e8e8]" onMouseUp={captureSelection}>
+                              {renderMarkdown(cell.source)}
+                            </div>
+                          ) : (
+                            <pre className="px-2 py-1 text-[11px] leading-[1.5] font-mono whitespace-pre-wrap text-[#d4d4d8]" onMouseUp={captureSelection}>
+                              {cell.source}
+                            </pre>
+                          )}
+                          {cell.outputs.map((output, outputIndex) => (
+                            <pre
+                              key={outputIndex}
+                              className="mx-2 mb-1.5 px-1.5 py-1 rounded bg-[#09090b] border border-[#1e1e24] text-[10px] leading-[1.45] font-mono whitespace-pre-wrap text-[#a1a1aa]"
+                            >
+                              {output}
+                            </pre>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  ) : openFile.binary && !isImageFile ? (
                     <div className="p-4 flex flex-col items-center justify-center gap-2 text-center text-[11px] text-[#71717a] min-h-full">
                       <FileCode className="w-5 h-5 text-[#52525b]" />
                       <span>
-                        {zh
+                        {openFile.error
+                          ? openFile.error
+                          : zh
                           ? '二进制文件，无法以文本预览'
                           : 'Binary file: nothing to show as text'}
                       </span>
@@ -487,19 +924,90 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       </button>
                     </div>
                   ) : isImageFile && viewerMode === 'preview' ? (
-                    <div className="p-3 flex items-center justify-center bg-[#09090b] min-h-full">
-                      <img
-                        src={`/api/fs/raw?path=${encodeURIComponent(openFile.path)}`}
-                        alt={openFile.name}
-                        className="max-w-full max-h-full object-contain"
-                      />
+                    <div className="p-3 flex flex-col items-center gap-2 bg-[#09090b] min-h-full">
+                      <div
+                        ref={imageFrameRef}
+                        className="relative inline-block cursor-crosshair select-none"
+                        onMouseDown={startImageDrag}
+                        onMouseMove={extendImageDrag}
+                        onMouseUp={endImageDrag}
+                        onMouseLeave={endImageDrag}
+                      >
+                        <img
+                          ref={imageRef}
+                          src={`/api/fs/raw?path=${encodeURIComponent(openFile.path)}`}
+                          alt={openFile.name}
+                          draggable={false}
+                          className="max-w-full max-h-[70vh] object-contain pointer-events-none"
+                        />
+                        {(imageDrag ?? imageBox) && (
+                          <div
+                            className="absolute border-2 pointer-events-none"
+                            style={{
+                              borderColor: accentColor,
+                              backgroundColor: `${accentColor}33`,
+                              left: (imageDrag ?? imageBox)!.x,
+                              top: (imageDrag ?? imageBox)!.y,
+                              width: (imageDrag ?? imageBox)!.w,
+                              height: (imageDrag ?? imageBox)!.h,
+                            }}
+                          />
+                        )}
+                      </div>
+                      <div className="w-full max-w-[420px] flex flex-col gap-1.5">
+                        <span className="text-[10px] text-[#71717a]">
+                          {imageBox
+                            ? `${zh ? '已圈选' : 'region'} ${Math.round(imageBox.w)}x${Math.round(imageBox.h)}px`
+                            : zh
+                            ? '在图上拖出一个区域，然后写下批示'
+                            : 'Drag a region on the image, then write your note'}
+                        </span>
+                        <textarea
+                          value={imageNote}
+                          onChange={(event) => setImageNote(event.target.value)}
+                          rows={2}
+                          placeholder={zh ? '批示：这块要改什么？' : 'Note: what should change here?'}
+                          className="w-full px-2 py-1 bg-[#121215] border border-[#27272a] rounded text-[11px] text-[#fafafa] placeholder-[#52525b] resize-y focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
+                        />
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={!imageBox || cropBusy}
+                            onClick={() => void quoteImageBox(imageNote, false)}
+                            className="px-2 py-1 rounded border border-[#a78bfa] text-[10px] text-[#a78bfa] hover:bg-[#18181b] cursor-pointer disabled:opacity-40"
+                          >
+                            {cropBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : zh ? '引入输入框' : 'Quote to composer'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!imageBox || cropBusy}
+                            onClick={() => void quoteImageBox(imageNote, true)}
+                            className="px-2 py-1 rounded border border-[#27272a] bg-[#121215] text-[10px] text-[#a1a1aa] hover:text-[#fafafa] cursor-pointer disabled:opacity-40"
+                          >
+                            {zh ? '加到批注' : 'Add as note'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!imageBox}
+                            onClick={() => setImageBox(null)}
+                            className="px-2 py-1 rounded border border-[#27272a] bg-[#121215] text-[10px] text-[#71717a] hover:text-[#fafafa] cursor-pointer disabled:opacity-40"
+                          >
+                            {zh ? '清除圈选' : 'Clear region'}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ) : viewerMode === 'preview' ? (
-                    <div className="px-3 py-2 text-[13px] text-[#e8e8e8]">{renderMarkdown(openFile.content)}</div>
+                    <div className="px-3 py-2 text-[13px] text-[#e8e8e8]" onMouseUp={captureSelection}>
+                      {renderMarkdown(openFile.content)}
+                    </div>
                   ) : (
-                    <pre className="text-[11px] leading-[1.55] font-mono whitespace-pre p-2 text-[#d4d4d8]">
+                    <pre
+                      className="text-[11px] leading-[1.55] font-mono whitespace-pre p-2 text-[#d4d4d8]"
+                      onMouseUp={captureSelection}
+                    >
                       {openFile.content.split('\n').map((line, index) => (
-                        <div key={index} className="flex">
+                        <div key={index} className="flex" data-line={index + 1}>
                           <span className="w-10 shrink-0 text-right pr-2 text-[#52525b] select-none border-r border-[#1e1e24] mr-2">
                             {index + 1}
                           </span>
@@ -561,6 +1069,113 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 {treeRoot && (entriesByDir[treeRoot]?.length ?? 0) === 0 && !fileError && (
                   <div className="px-2 py-3 text-[11px] text-[#52525b]">{zh ? '目录为空' : 'Empty directory'}</div>
                 )}
+              </div>
+            )}
+
+            {/* -------- review notes: every quote gathered while reading, ready to send -------- */}
+            {annotations.length > 0 && (
+              <div className="border-t shrink-0 max-h-[190px] overflow-y-auto px-1.5 py-1.5" style={{ borderColor: theme.border }}>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-[10px] font-medium text-[#a1a1aa]">
+                    {zh ? `批注 ${annotations.length}` : `${annotations.length} notes`}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => insertMention(notesToPrompt(annotations))}
+                      title={zh ? '把每条批示和引用一起放进输入框' : 'Put every note and quote into the composer'}
+                      className="px-1.5 py-0.5 rounded border border-[#a78bfa] text-[10px] text-[#a78bfa] hover:bg-[#18181b] cursor-pointer"
+                    >
+                      {zh ? '发送到输入框' : 'Send to composer'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAnnotations([])}
+                      className="px-1.5 py-0.5 rounded border border-[#27272a] bg-[#121215] text-[10px] text-[#71717a] hover:text-[#fafafa] cursor-pointer"
+                    >
+                      {zh ? '清空' : 'Clear'}
+                    </button>
+                  </div>
+                </div>
+                {annotations.map((note) => (
+                  <div key={note.id} className="mb-1 rounded border px-1.5 py-1 text-[10px]" style={{ borderColor: theme.border }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[#a78bfa] truncate" title={`${note.file}${note.range ? `:${note.range}` : ''}`}>
+                        {note.file}
+                        {note.range ? `:${note.range}` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => dropAnnotation(note.id)}
+                        aria-label={zh ? '删除批注' : 'Delete note'}
+                        className="shrink-0 text-[#52525b] hover:text-[#f87171] cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    {note.snippet && (
+                      <div className="mt-0.5 max-h-[30px] overflow-hidden text-[#71717a] font-mono whitespace-pre-wrap">{note.snippet}</div>
+                    )}
+                    {note.comment && <div className="mt-0.5 text-[#d4d4d8] whitespace-pre-wrap">{note.comment}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* -------- the note box: opens at the selection, quotes it exactly -------- */}
+            {pendingSnippet && selectionBar && openFile && (
+              <div
+                className="fixed z-50 w-[280px] rounded-lg border shadow-2xl p-2 flex flex-col gap-1.5"
+                style={{ top: selectionBar.top, left: selectionBar.left, backgroundColor: theme.cardBg, borderColor: theme.border }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-mono text-[#a78bfa] truncate" title={`${openFile.relative}${pendingSnippet.range ? `:${pendingSnippet.range}` : ''}`}>
+                    {openFile.relative}
+                    {pendingSnippet.range ? `:${pendingSnippet.range}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={closeAnnotate}
+                    aria-label={zh ? '关闭' : 'Close'}
+                    className="p-0.5 text-[#71717a] hover:text-[#fafafa] cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="max-h-[64px] overflow-y-auto rounded bg-[#09090b] border border-[#1e1e24] px-1.5 py-1 text-[10px] font-mono text-[#a1a1aa] whitespace-pre-wrap">
+                  {pendingSnippet.snippet}
+                </div>
+                <textarea
+                  autoFocus
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  rows={2}
+                  placeholder={zh ? '批示：这里要怎么改？' : 'Note: what should change here?'}
+                  className="w-full px-2 py-1 bg-[#121215] border border-[#27272a] rounded text-[11px] text-[#fafafa] placeholder-[#52525b] resize-y focus:outline-none focus:ring-1 focus:ring-[#a78bfa]"
+                />
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => addAnnotation(noteDraft)}
+                    className="flex-1 px-2 py-1 rounded border border-[#a78bfa] text-[10px] text-[#a78bfa] hover:bg-[#18181b] cursor-pointer"
+                  >
+                    {zh ? '加到批注' : 'Add note'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      insertMention(
+                        notesToPrompt([
+                          { id: 'now', file: openFile.relative, range: pendingSnippet.range, snippet: pendingSnippet.snippet, comment: noteDraft.trim() },
+                        ])
+                      );
+                      closeAnnotate();
+                    }}
+                    className="flex-1 px-2 py-1 rounded border border-[#27272a] bg-[#121215] text-[10px] text-[#a1a1aa] hover:text-[#fafafa] cursor-pointer"
+                  >
+                    {zh ? '直接提问' : 'Ask now'}
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -212,6 +212,10 @@ export const checkOmpUpdate = (force = false) => postJson<OmpUpdateStatus>("/api
 /** Run `omp update`; the bridge stops the session first and restarts it afterwards. */
 export const installOmpUpdate = (force = false) => postJson<OmpUpdateResult>("/api/omp/update", { action: "update", force });
 
+/** Save a cropped region of an image into the workspace for an @ reference. */
+export const saveImageCrop = (path: string, dataUrl: string) =>
+  postJson<{ ok: boolean; path: string; relative: string; bytes: number }>("/api/fs/annotate", { path, dataUrl });
+
 /** One ephemeral omp run for the side chat (`--no-session`, tools opt-in). */
 export interface SideChatReply {
   ok: boolean;
@@ -411,6 +415,23 @@ export interface WorkspaceFile {
   encoding?: string;
   /** True for files with no text to show (images, archives, registry hives, …). */
   binary?: boolean;
+  /** How the bridge previews it: a table, a workbook, a document, plain text. */
+  kind?: 'text' | 'markdown' | 'table' | 'sheet' | 'doc' | 'slides' | 'notebook' | 'binary' | 'pdf';
+  /** kind=table: parsed rows and the delimiter that was sniffed. */
+  delimiter?: string;
+  rows?: string[][];
+  /** kind=sheet: one entry per worksheet. */
+  sheets?: Array<{ name: string; rows: string[][]; truncated: boolean }>;
+  /** kind=doc: the converted document HTML. */
+  html?: string;
+  /** kind=slides: one entry per slide, text runs only. */
+  slides?: Array<{ name: string; lines: string[] }>;
+  /** kind=notebook: markdown and code cells with their outputs. */
+  cells?: Array<{ kind: 'markdown' | 'code'; source: string; outputs: string[] }>;
+  /** kind=notebook: the kernel language reported by the file. */
+  notebookLanguage?: string;
+  /** Set when a parser refused or failed; the panel shows it instead of junk. */
+  error?: string;
 }
 
 /** One directory of the workspace (file explorer). */

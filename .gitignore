@@ -21,3 +21,6 @@ skills/
 
 # Local safety copies of user-supplied art (never committed).
 .assets-backup/
+
+# Panel runtime data: image crops the file preview saved for an @ reference.
+.omp-studio/

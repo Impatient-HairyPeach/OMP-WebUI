@@ -3,6 +3,43 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.34
+
+- **The file panel reads the formats a real workspace is made of.** Beyond
+  images, Markdown and text, `/api/fs/file` now previews the files people
+  actually keep next to code: CSV/TSV as a table (delimiter sniffed, and decoded
+  through the same encoding detection as text, so a GBK export from a Chinese
+  tool no longer renders as mojibake), `.xlsx`/`.xlsm`/`.xlsb`/`.xls`/`.ods`
+  workbooks sheet by sheet, `.docx` through mammoth and `.odt` through its own
+  `content.xml`, `.pptx` slide by slide (text runs only), `.ipynb` as markdown
+  and code cells with their outputs, and PDFs in the browser's own viewer via
+  `/api/fs/raw`. Legacy `.doc`/`.ppt`/`.rtf` say what they are and what to do
+  instead of dumping bytes; a parser that fails reports its error in the panel.
+  Verified against generated fixtures: 2-sheet xlsx, a docx round-tripped through
+  mammoth, a 3-slide pptx, an odt with a heading, a notebook with a stream and a
+  traceback output, a one-page PDF, a quoted CSV and a GBK CSV.
+- **Quote and annotate in the preview, like the Codex panel.** Highlight text in
+  the source view (line numbers come from `data-line` anchors, so a quote is
+  `@file:12-18`), or click a paragraph, notebook cell, slide or code block to
+  quote the whole block — a rendered document has no line anchors, so the range
+  is recovered by searching the snippet in the file. A small box opens at the
+  selection: write what should change, then either add it to the note tray or ask
+  straight away. The tray collects every note across files, shows them with their
+  quotes, and `发送到输入框` turns them into one prompt with each `@file:lines`
+  reference and its quoted text.
+- **Circle a region on an image and talk about it.** Drag a rectangle over the
+  rendered image (the panel shows the region while you drag, and an image with
+  `dragstart` blocked), write the note, then either quote the crop into the
+  composer or add it as a note: the crop is written to
+  `.omp-studio/annotations/` and referenced as a real `@path` with its region and
+  pixel size, so the agent can open the exact pixels you drew on. Crops are
+  runtime data, now git-ignored. Verified: a 130x90 CSS-pixel drag on a 1200x800
+  PNG saved a 431x298 crop, and both buttons produced the expected composer text.
+- Also fixed here: the viewer header printed `undefined 行` for structured kinds
+  (it now names the row/slide/cell count), the panel's `select-none` made text
+  impossible to highlight in the viewer, and opening an image left the previous
+  note box floating over it.
+
 ## 0.3.33
 
 - **Settings no longer start a new conversation.** Toggling a skill or extension

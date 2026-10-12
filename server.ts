@@ -10,6 +10,9 @@
  *   POST /api/workspace         -> switch the omp working directory (restarts the child)
  */
 import express from "express";
+import * as XLSX from "xlsx";
+import mammoth from "mammoth";
+import JSZip from "jszip";
 import type { Response } from "express";
 import { execFile, execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
@@ -2641,7 +2644,249 @@ function decodeText(bytes: Buffer): { text: string; encoding: string; binary: bo
   }
 }
 
-/** Reveal one omp/bridge file in the OS file manager (never an arbitrary path). */
+/** RFC 4180-ish CSV/TSV parsing (quotes, embedded newlines, delimiter sniff). */
+function parseDelimited(text: string, maxRows = 500, maxCols = 60): { delimiter: string; rows: string[][]; truncated: boolean } {
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
+  const delimiter = (firstLine.match(/\t/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0) ? "\t" : ",";
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  let truncated = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else quoted = false;
+      } else field += char;
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      continue;
+    }
+    if (char === delimiter) {
+      row.push(field);
+      field = "";
+      continue;
+    }
+    if (char === "\n" || char === "\r") {
+      if (char === "\r" && text[i + 1] === "\n") i += 1;
+      row.push(field);
+      field = "";
+      if (row.some((cell) => cell !== "")) {
+        rows.push(row.slice(0, maxCols));
+        if (rows.length >= maxRows) {
+          truncated = true;
+          break;
+        }
+      }
+      row = [];
+      continue;
+    }
+    field += char;
+  }
+  if (!truncated && (field !== "" || row.length > 0)) {
+    row.push(field);
+    if (row.some((cell) => cell !== "")) rows.push(row.slice(0, maxCols));
+  }
+  return { delimiter, rows, truncated };
+}
+
+/** Workbook preview: every sheet, first rows only. */
+function parseWorkbook(buffer: Buffer): Array<{ name: string; rows: string[][]; truncated: boolean }> {
+  const book = XLSX.read(buffer, { type: "buffer", cellDates: true, sheetStubs: false });
+  const sheets: Array<{ name: string; rows: string[][]; truncated: boolean }> = [];
+  const MAX_ROWS = 300;
+  const MAX_COLS = 40;
+  for (const name of book.SheetNames.slice(0, 10)) {
+    const sheet = book.Sheets[name];
+    if (!sheet) continue;
+    const raw = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, blankrows: false, defval: "" });
+    const rows = raw.slice(0, MAX_ROWS).map((entry) => (entry as unknown[]).slice(0, MAX_COLS).map((cell) => (cell === null || cell === undefined ? "" : String(cell))));
+    sheets.push({ name, rows, truncated: raw.length > MAX_ROWS });
+  }
+  return sheets;
+}
+
+/** .docx -> HTML, with mammoth's own warnings kept out of the payload. */
+async function parseDocx(buffer: Buffer): Promise<{ html: string; truncated: boolean }> {
+  const result = await mammoth.convertToHtml({ buffer });
+  const limit = 400_000;
+  return { html: result.value.length > limit ? result.value.slice(0, limit) : result.value, truncated: result.value.length > limit };
+}
+
+/**
+ * Uniform payload for a structured file the bridge could not turn into a preview
+ * (refused legacy format, corrupt container): the panel shows `error` verbatim
+ * instead of printing the bytes as text.
+ */
+function previewFailure(base: Record<string, unknown>, language: string, error: unknown) {
+  return {
+    ...base,
+    language,
+    kind: "binary" as const,
+    encoding: "binary",
+    binary: true,
+    content: "",
+    truncated: false,
+    lines: 0,
+    error: String(error instanceof Error ? error.message : error),
+  };
+}
+
+/**
+ * Entries of an OOXML/ODF container (pptx, odt, …) whose name matches.
+ *
+ * Ordering is the document's own, not the alphabet's: `slide10.xml` sorts after
+ * `slide9.xml`, so a numeric suffix wins over the string compare.
+ */
+async function readZipEntries(buffer: Buffer, pattern: RegExp, max = 80): Promise<Array<{ name: string; text: string }>> {
+  const zip = await JSZip.loadAsync(buffer);
+  const names = Object.keys(zip.files)
+    .filter((name) => pattern.test(name))
+    .sort((a, b) => {
+      const left = a.match(/(\d+)\.[a-z]+$/i);
+      const right = b.match(/(\d+)\.[a-z]+$/i);
+      if (!left || !right) return a.localeCompare(b);
+      const delta = Number(left[1]) - Number(right[1]);
+      return delta === 0 ? a.localeCompare(b) : delta;
+    })
+    .slice(0, max);
+  const entries: Array<{ name: string; text: string }> = [];
+  for (const name of names) {
+    const file = zip.file(name);
+    if (file) entries.push({ name, text: await file.async("string") });
+  }
+  return entries;
+}
+
+/** `.pptx` -> one entry per slide, text runs only (shapes, notes and media dropped). */
+async function parseSlides(buffer: Buffer): Promise<Array<{ name: string; lines: string[] }>> {
+  const slides = await readZipEntries(buffer, /^ppt\/slides\/slide\d+\.xml$/);
+  return slides.map((slide, index) => {
+    const lines: string[] = [];
+    for (const paragraph of slide.text.split(/<a:p[ >]/).slice(1)) {
+      const runs = [...paragraph.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g)].map((match) => match[1]);
+      const line = runs.join("").trim();
+      if (line) lines.push(line);
+    }
+    return { name: `Slide ${index + 1}`, lines };
+  });
+}
+
+/**
+ * `.odt` -> a small HTML subset.
+ *
+ * Entities are deliberately left encoded: the string goes through
+ * `dangerouslySetInnerHTML`, so decoding `&lt;` here would turn document text
+ * into markup.
+ */
+async function parseOdt(buffer: Buffer): Promise<{ html: string; truncated: boolean }> {
+  const entries = await readZipEntries(buffer, /^content\.xml$/, 1);
+  const xml = entries[0]?.text ?? "";
+  const from = xml.indexOf("<office:text");
+  const body = from >= 0 ? xml.slice(from, xml.indexOf("</office:text")) : xml;
+  const text = body
+    .replace(/<text:line-break\s*\/>/g, "\n")
+    .replace(/<text:s(?:\s[^>]*)?\/>/g, " ")
+    .replace(/<text:tab\s*\/>/g, "\t")
+    .replace(/<text:h\b[^>]*>/g, "\n## ")
+    .replace(/<\/(?:text:h|text:p|text:list-item)>/g, "\n")
+    .replace(/<[^>]*>/g, "");
+  const blocks = text
+    .replace(/[\u0000-\u0008\u000b-\u001f]/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  const html = blocks.map((line) => (line.startsWith("## ") ? `<h3>${line.slice(3)}</h3>` : `<p>${line}</p>`)).join("");
+  const limit = 400_000;
+  return { html: html.length > limit ? html.slice(0, limit) : html, truncated: html.length > limit };
+}
+
+/** Jupyter writes text as a string or as one array entry per line, depending on version. */
+function notebookText(value: unknown): string {
+  if (Array.isArray(value)) return value.join("");
+  return typeof value === "string" ? value : "";
+}
+
+/** `.ipynb` -> cells, so a notebook reads as prose plus code instead of JSON. */
+function parseNotebook(buffer: Buffer): {
+  cells: Array<{ kind: "markdown" | "code"; source: string; outputs: string[] }>;
+  language: string;
+  truncated: boolean;
+} {
+  const book = JSON.parse(buffer.toString("utf8")) as {
+    metadata?: { language_info?: { name?: string }; kernelspec?: { language?: string } };
+    cells?: Array<{ cell_type?: string; source?: string | string[]; outputs?: Array<Record<string, unknown>> }>;
+  };
+  const cells: Array<{ kind: "markdown" | "code"; source: string; outputs: string[] }> = [];
+  for (const cell of book.cells ?? []) {
+    if (cells.length >= 200) break;
+    const kind = cell.cell_type === "code" ? "code" : cell.cell_type === "markdown" ? "markdown" : null;
+    if (!kind) continue;
+    const outputs: string[] = [];
+    for (const output of cell.outputs ?? []) {
+      const stream = notebookText(output.text);
+      const plain = notebookText((output.data as Record<string, unknown> | undefined)?.["text/plain"]);
+      const traceback = notebookText(output.traceback).replace(/\u001b\[[0-9;]*m/g, "").split("\n").slice(-6).join("\n");
+      const rendered = stream || plain || traceback;
+      if (rendered.trim()) outputs.push(rendered.slice(0, 4000));
+    }
+    cells.push({ kind, source: notebookText(cell.source).slice(0, 20_000), outputs });
+  }
+  return {
+    cells,
+    language: book.metadata?.language_info?.name ?? book.metadata?.kernelspec?.language ?? "python",
+    truncated: (book.cells?.length ?? 0) > cells.length,
+  };
+}
+
+/**
+ * Save a cropped/annotated image the preview produced. The crop lands inside the
+ * workspace under `.omp-studio/annotations/`, so the agent can be pointed at it
+ * with a normal `@path` reference and will find a real file.
+ */
+app.post("/api/fs/annotate", (req, res) => {
+  const source = String(req.body?.path || "").trim();
+  const dataUrl = String(req.body?.dataUrl || "");
+  const root = path.resolve(workspace);
+  const resolved = path.resolve(source);
+  if (!source || (resolved !== root && !resolved.startsWith(root + path.sep))) {
+    res.status(403).json({ error: "path outside the workspace" });
+    return;
+  }
+  const match = dataUrl.match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) {
+    res.status(400).json({ error: "expected a base64 PNG data URL" });
+    return;
+  }
+  const bytes = Buffer.from(match[1], "base64");
+  if (bytes.length > 8 * 1024 * 1024) {
+    res.status(400).json({ error: "crop too large (8 MB max)" });
+    return;
+  }
+  try {
+    const dir = path.join(root, ".omp-studio", "annotations");
+    mkdirSync(dir, { recursive: true });
+    // Keep the original file's name (minus its extension) so the reference reads
+    // like the thing it came from: workspace.png -> workspace-<stamp>.png
+    const base = path.basename(resolved).replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "-") || "crop";
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const file = path.join(dir, `${base || "crop"}-${stamp}.png`);
+    writeFileSync(file, bytes);
+    const relative = path.relative(root, file).replace(/\\/g, "/");
+    emit("log", { level: "info", message: `annotation.crop: ${path.basename(resolved)} -> ${relative}` });
+    res.json({ ok: true, path: file, relative, bytes: bytes.length });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/** Reveal one omp/bridge file in the OS file manager (never an arbitrary path). *//** Reveal one omp/bridge file in the OS file manager (never an arbitrary path). */
 const REVEALABLE = new Set<string>();
 app.post("/api/reveal", (req, res) => {
   if (REVEALABLE.size === 0) {
@@ -2736,7 +2981,7 @@ app.get("/api/fs/list", (req, res) => {
 });
 
 /** One text file for the viewer, capped so a huge log cannot stall the browser. */
-app.get("/api/fs/file", (req, res) => {
+app.get("/api/fs/file", async (req, res) => {
   const requested = String(req.query.path || "");
   const root = path.resolve(workspace);
   const resolved = path.resolve(requested);
@@ -2752,6 +2997,92 @@ app.get("/api/fs/file", (req, res) => {
       return;
     }
     const bytes = readFileSync(resolved);
+    const ext = path.extname(resolved).toLowerCase();
+    const base = {
+      path: resolved,
+      name: path.basename(resolved),
+      size: stat.size,
+      modified: stat.mtime.toISOString(),
+      relative: path.relative(workspace, resolved).replace(/\\/g, "/"),
+    };
+    // Structured formats get a real preview: a spreadsheet is a table, not text.
+    if ([".csv", ".tsv", ".tab"].includes(ext)) {
+      // Encoding first: the CSVs on a Windows box are routinely GBK, and reading
+      // them as UTF-8 produced mojibake in the table cells.
+      const decoded = decodeText(bytes);
+      if (decoded.binary) {
+        res.json(previewFailure(base, ext.slice(1), "not a text-delimited file"));
+        return;
+      }
+      const table = parseDelimited(decoded.text);
+      res.json({ ...base, language: ext.slice(1), kind: "table", encoding: decoded.encoding, binary: false, ...table });
+      return;
+    }
+    if ([".xlsx", ".xlsm", ".xlsb", ".xls", ".ods"].includes(ext)) {
+      try {
+        const sheets = parseWorkbook(bytes);
+        res.json({ ...base, language: ext.slice(1), kind: "sheet", encoding: "workbook", binary: false, sheets });
+      } catch (error) {
+        res.json(previewFailure(base, ext.slice(1), error));
+      }
+      return;
+    }
+    if (ext === ".docx") {
+      try {
+        const doc = await parseDocx(bytes);
+        res.json({ ...base, language: "docx", kind: "doc", encoding: "docx", binary: false, html: doc.html, truncated: doc.truncated, lines: 0, content: "" });
+      } catch (error) {
+        res.json(previewFailure(base, "docx", error));
+      }
+      return;
+    }
+    if (ext === ".odt") {
+      try {
+        const doc = await parseOdt(bytes);
+        res.json({ ...base, language: "odt", kind: "doc", encoding: "odt", binary: false, html: doc.html, truncated: doc.truncated, lines: 0, content: "" });
+      } catch (error) {
+        res.json(previewFailure(base, "odt", error));
+      }
+      return;
+    }
+    if ([".pptx", ".pptm"].includes(ext)) {
+      try {
+        const slides = await parseSlides(bytes);
+        res.json({ ...base, language: "pptx", kind: "slides", encoding: "pptx", binary: false, slides, lines: 0, content: "", truncated: false });
+      } catch (error) {
+        res.json(previewFailure(base, "pptx", error));
+      }
+      return;
+    }
+    if (ext === ".ipynb") {
+      try {
+        const book = parseNotebook(bytes);
+        res.json({
+          ...base,
+          language: "ipynb",
+          kind: "notebook",
+          encoding: "notebook",
+          binary: false,
+          cells: book.cells,
+          notebookLanguage: book.language,
+          lines: 0,
+          content: "",
+          truncated: book.truncated,
+        });
+      } catch (error) {
+        res.json(previewFailure(base, "ipynb", error));
+      }
+      return;
+    }
+    if (ext === ".pdf") {
+      // The browser renders PDFs itself; the panel embeds `/api/fs/raw` instead.
+      res.json({ ...base, language: "pdf", kind: "pdf", encoding: "pdf", binary: false, content: "", truncated: false, lines: 0 });
+      return;
+    }
+    if ([".doc", ".ppt", ".rtf"].includes(ext)) {
+      res.json(previewFailure(base, ext.slice(1), `legacy ${ext} is not readable; save it as ${ext === ".ppt" ? ".pptx" : ".docx"} and preview that`));
+      return;
+    }
     const decoded = decodeText(bytes);
     if (decoded.binary) {
       // Honest answer for a binary file: no text to show, and the UI says so.
@@ -2762,11 +3093,11 @@ app.get("/api/fs/file", (req, res) => {
         modified: stat.mtime.toISOString(),
         language: path.extname(resolved).replace('.', '') || 'binary',
         encoding: "binary",
+        kind: "binary",
         binary: true,
         content: "",
         truncated: false,
         lines: 0,
-        relative: path.relative(workspace, resolved).replace(/\\/g, "/"),
       });
       return;
     }
@@ -2778,6 +3109,7 @@ app.get("/api/fs/file", (req, res) => {
       size: stat.size,
       modified: stat.mtime.toISOString(),
       language: path.extname(resolved).replace('.', '') || 'text',
+      kind: /\.(md|markdown)$/i.test(resolved) ? "markdown" : "text",
       encoding: decoded.encoding,
       binary: false,
       content: truncated ? raw.slice(0, limit) : raw,
