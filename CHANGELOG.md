@@ -3,6 +3,15 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.35
+
+- README: a screenshot gallery for the panels. Both panels in place around the
+  conversation, then a 2x3 grid with bilingual captions: the left panel with
+  sessions grouped by project folder, the right panel with CSV/workbook tables,
+  the quote-and-annotate flow with its notes tray, the side chat, the provider
+  quota and model-test view, and the skill scanner. Eight images live in
+  `assets/screenshots/`, all captured from a running session.
+
 ## 0.3.34
 
 - **The file panel reads the formats a real workspace is made of.** Beyond

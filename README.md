@@ -25,6 +25,45 @@
   <img src="assets/screenshots/workspace.png" alt="Chat workspace: streaming transcript, tool blocks, composer, event console" width="900" />
 </p>
 
+<p align="center"><sub>Chat, streaming transcript with thinking and tool blocks, composer, event console. · 对话、含思考与工具块的流式记录、输入区、事件控制台。</sub></p>
+
+<p align="center">
+  <img src="assets/screenshots/panels.png" alt="Both panels in place around the conversation" width="900" />
+</p>
+
+<p align="center"><sub>Both panels in place: sessions on the left, workspace on the right. · 左右面板同时打开：左边会话，右边工作区。</sub></p>
+
+<table align="center">
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/left-panel.png" alt="Left panel: sessions grouped by project folder" width="100%" />
+      <br /><sub>Sessions by project folder, collapsible and removable from the list.<br />按项目文件夹分组的会话，可折叠、可从列表移除。</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/right-panel-table.png" alt="Right panel: CSV and workbook previews as tables" width="100%" />
+      <br /><sub>CSV, TSV and workbooks open as real tables.<br />CSV / TSV / 表格文件按表格打开。</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/right-panel-notes.png" alt="Right panel: quote a passage, note it, send the notes to the chat" width="100%" />
+      <br /><sub>Quote a passage, note it, send the tray to the composer.<br />引用一段、写批注、把托盘发进输入框。</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/side-chat.png" alt="Side chat: standalone omp runs that never touch the session log" width="100%" />
+      <br /><sub>Side chat: standalone omp runs, tools opt-in.<br />辅助对话：独立调用，工具可选。</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/providers.png" alt="Providers: quota windows, model tests, custom endpoints" width="100%" />
+      <br /><sub>Quota windows, per-model tests, custom endpoints.<br />额度窗口、逐模型测试、自定义端点。</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/skills.png" alt="Skills: scan a repository, pick, install" width="100%" />
+      <br /><sub>Scan a skill repository, pick, install.<br />扫描技能仓库、勾选、安装。</sub>
+    </td>
+  </tr>
+</table>
+
 ---
 
 ## English
@@ -51,6 +90,14 @@ It exists because the terminal is great for the agent and awkward for everything
 | **Review notes** | Quote a highlight (`@file:12-18`), a paragraph, a slide or a notebook cell, or circle a region on an image — write what should change, collect notes across files, send them as one prompt |
 | **Console** | Event stream with real bridge round-trip ping, plus MCP, bash, PowerShell and debugger tabs |
 | **Settings** | Theme palettes including omp's own midnight palette, accent, density, fonts, UI language (zh/en), omp version check and update, approval mode, security overview, MCP servers, project config |
+
+### Quote and annotate in the preview
+
+The right panel is not a read-only viewer: highlight text in the source view (or click a line, a paragraph, a notebook cell or a slide) and a small box opens with the anchored reference (`file:lines`) and the quoted text. Write what should change and either ask straight away or drop it in the notes tray; `发送到输入框` turns the whole tray into one prompt with every `@file:lines` reference and its quote. On an image, drag a rectangle: the exact pixels are cropped into `.omp-studio/annotations/` and referenced as a real `@path`, so the agent opens the region you drew on rather than guessing from coordinates.
+
+<p align="center">
+  <img src="assets/screenshots/side-chat.png" alt="Side chat: standalone omp runs that never touch the session log" width="300" />
+</p>
 
 ### Quickstart
 
@@ -138,6 +185,10 @@ OMP WebUI（包名 `omp-studio`）是一个单进程 Web 应用，通过 RPC 驱
 | **文件** | 工作区文件树、带编码探测的文本预览（UTF-8 / UTF-16 / GBK）、二进制文件给出明确提示、工作区改动 diff 面板 |
 | **控制台** | 事件流（真实桥接往返 Ping）、MCP / bash / PowerShell / 调试器页签 |
 | **设置** | 主题色板（含 omp.sh 午夜黑）、强调色、排版密度、字体、界面语言（中/英）、omp 版本检查与更新、审批模式、安全总览、MCP 服务、项目配置 |
+
+### 在预览里引用与批注
+
+右侧面板不是只读预览：在源码里选中一段（或点行号、段落、notebook 单元格、幻灯片）会弹出小浮层，带上锚定引用（`文件:行号`）和选中的原文。写下要改什么，可以直接提问，也可以放进批注托盘；托盘里的「发送到输入框」会把所有批注拼成一条提示，每条都带 `@文件:行号` 与引文。图片上直接拖出一个矩形，那块像素会被真的裁到 `.omp-studio/annotations/` 并以 `@path` 引用 —— 智能体打开的是你圈的那块图，不是靠坐标猜。
 
 ### 快速开始
 
