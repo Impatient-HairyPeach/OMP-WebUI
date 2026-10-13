@@ -48,6 +48,7 @@ import {
   fetchPlugins,
   fetchSkills,
   fetchWorkspaceFiles,
+  convertLegacyDocx,
   saveImageCrop,
   sendSideChat,
   setExtensionEnabled,
@@ -530,6 +531,29 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     }
   };
 
+  /** Convert the open legacy .doc to .docx (LibreOffice) and reopen the result. */
+  const [convertBusy, setConvertBusy] = useState(false);
+  const [convertError, setConvertError] = useState<string | null>(null);
+  const convertDoc = async (file: WorkspaceFile) => {
+    if (convertBusy) return;
+    setConvertBusy(true);
+    setConvertError(null);
+    try {
+      const result = await convertLegacyDocx(file.path);
+      if (result.ok && result.docx) {
+        const sep = file.path.includes('\\') ? '\\' : '/';
+        const dir = file.path.slice(0, file.path.lastIndexOf(sep) + 1);
+        await openFilePath(dir + result.docx.replace(/\//g, sep));
+      } else {
+        setConvertError(result.error || (zh ? '转换失败' : 'conversion failed'));
+      }
+    } catch (error) {
+      setConvertError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setConvertBusy(false);
+    }
+  };
+
   /** git badge per path, straight from the working-tree diff. */
   const gitStatusByPath = useMemo(() => {
     const map: Record<string, string> = {};
@@ -874,6 +898,51 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         <span className="text-[#f87171] font-mono text-[11px]">{openFile.error}</span>
                       ) : (
                         <div className="doc-preview" dangerouslySetInnerHTML={{ __html: sanitizeDocHtml(openFile.html ?? '') }} />
+                      )}
+                    </div>
+                  ) : openFile.kind === 'doctext' ? (
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-2 px-2 py-1.5 border-b text-[10px] font-mono text-[#71717a]" style={{ borderColor: theme.border }}>
+                        <span>{openFile.language?.toUpperCase() ?? 'DOC'}</span>
+                        <span className="text-[#52525b]">·</span>
+                        <span>{openFile.encoding?.toUpperCase() ?? 'TEXT'}</span>
+                        <span className="ml-auto flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => void convertDoc(openFile)}
+                            title={zh ? '用 LibreOffice 转成 .docx 再预览' : 'Convert to .docx with LibreOffice and preview it'}
+                            className="px-2 py-0.5 rounded border border-[#27272a] bg-[#121215] text-[#a1a1aa] hover:text-[#fafafa] transition-colors cursor-pointer"
+                          >
+                            {zh ? '转为 .docx 预览' : 'Save as .docx'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void revealPath(openFile.path)}
+                            className="px-2 py-0.5 rounded border border-[#27272a] bg-[#121215] text-[#a1a1aa] hover:text-[#fafafa] transition-colors cursor-pointer"
+                          >
+                            {zh ? '在资源管理器中显示' : 'Show in folder'}
+                          </button>
+                        </span>
+                      </div>
+                      <pre
+                        className="px-3 py-2 text-[12px] leading-[1.6] font-mono whitespace-pre-wrap text-[#d4d4d8] max-h-[62vh] overflow-auto"
+                        onMouseUp={captureSelection}
+                      >
+                        {openFile.content}
+                      </pre>
+                      {openFile.truncated && (
+                        <div className="px-2 pb-1.5 text-[10px] text-[#71717a]">
+                          {zh ? '（文件过长，仅显示前 200k 字符）' : '(file too long: first 200k characters shown)'}
+                        </div>
+                      )}
+                      {convertBusy && (
+                        <div className="px-2 pb-2 text-[10px] text-[#a1a1aa] flex items-center gap-1.5">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          {zh ? '正在用 LibreOffice 转换…' : 'Converting with LibreOffice…'}
+                        </div>
+                      )}
+                      {convertError && (
+                        <div className="px-2 pb-2 text-[10px] text-[#f87171] whitespace-pre-wrap font-mono">{convertError}</div>
                       )}
                     </div>
                   ) : openFile.kind === 'pdf' ? (

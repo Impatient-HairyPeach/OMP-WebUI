@@ -225,6 +225,11 @@ export const savePastedImage = (dataUrl: string) =>
 export const saveImageCrop = (path: string, dataUrl: string) =>
   postJson<{ ok: boolean; path: string; relative: string; bytes: number }>("/api/fs/annotate", { path, dataUrl });
 
+/** Convert a legacy .doc to .docx through LibreOffice (when installed). */
+export const convertLegacyDocx = (docPath: string) =>
+  postJson<{ ok: boolean; docx?: string; path?: string; error?: string }>("/api/fs/convert-doc", { path: docPath });
+
+
 /** One ephemeral omp run for the side chat (`--no-session`, tools opt-in). */
 export interface SideChatReply {
   ok: boolean;
@@ -427,7 +432,7 @@ export interface WorkspaceFile {
   /** True for files with no text to show (images, archives, registry hives, …). */
   binary?: boolean;
   /** How the bridge previews it: a table, a workbook, a document, plain text. */
-  kind?: 'text' | 'markdown' | 'table' | 'sheet' | 'doc' | 'slides' | 'notebook' | 'binary' | 'pdf';
+  kind?: 'text' | 'markdown' | 'doctext' | 'table' | 'sheet' | 'doc' | 'slides' | 'notebook' | 'binary' | 'pdf';
   /** kind=table: parsed rows and the delimiter that was sniffed. */
   delimiter?: string;
   rows?: string[][];

@@ -23,6 +23,8 @@ interface HeaderProps {
   onOpenSettingsTab?: (tab: SettingsSidebarTab) => void;
   /** Set when the running bridge started from older code than this SPA was built from. */
   staleCode?: { running: string; expected: string; restartHint: string } | null;
+  /** Called when the user clicks the chip: copies the command and hides it until the next launch. */
+  onDismissStaleBridge?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -35,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSidePanel,
   onOpenSettingsTab,
   staleCode = null,
+  onDismissStaleBridge,
 }) => {
   const { theme, accentColor } = useTheme();
   const { t, language } = useI18n();
@@ -82,6 +85,7 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={() => {
               void navigator.clipboard?.writeText(staleCode.restartHint);
+              onDismissStaleBridge?.();
             }}
             title={
               (language === 'zh-CN'

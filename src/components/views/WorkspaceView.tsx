@@ -1174,11 +1174,11 @@ return (
                 </span>
               </>
             )}
-            {turn.streaming && (
+            {turn.streaming && open && (
               <>
                 <span className="text-[#3f3f46]">·</span>
                 <span className="text-[#a78bfa]">
-                  {language === 'zh-CN' ? (open ? '生成中（点此折叠）' : '已折叠，仍在生成') : open ? 'running (click to fold)' : 'folded, still running'}
+                  {language === 'zh-CN' ? '生成中（点此折叠）' : 'running (click to fold)'}
                 </span>
               </>
             )}

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { TopNavTab, SettingsSidebarTab, LogEntry } from './types';
 
 // Components
@@ -128,6 +128,18 @@ export default function App() {
    * so the warning only appears after the mismatch persists for a minute.
    */
   const [staleBridge, setStaleBridge] = useState<{ running: string; expected: string; restartHint: string } | null>(null);
+  /** The bridge launch the user already dismissed: stay hidden until it restarts. */
+  const dismissedCodeId = useRef<string | null>(localStorage.getItem('omp-studio:stale-dismissed'));
+
+  const dismissStaleBridge = useCallback(() => {
+    const current = staleBridge?.running;
+    setStaleBridge(null);
+    if (current) {
+      dismissedCodeId.current = current;
+      localStorage.setItem('omp-studio:stale-dismissed', current);
+    }
+  }, [staleBridge]);
+
   useEffect(() => {
     let cancelled = false;
     let mismatchedSince: number | null = null;
@@ -137,18 +149,23 @@ export default function App() {
         const body = (await res.json()) as { codeId?: string; codeIdNow?: string; restartHint?: string };
         if (cancelled) return;
         const stale = Boolean(body.codeId && body.codeIdNow && body.codeId !== body.codeIdNow);
-        if (stale) {
-          mismatchedSince = mismatchedSince ?? Date.now();
-          if (Date.now() - mismatchedSince > 60_000) {
-            setStaleBridge({
-              running: body.codeId!,
-              expected: body.codeIdNow!,
-              restartHint: body.restartHint ?? 'bun run dev',
-            });
-          }
-        } else {
+        if (!stale) {
           mismatchedSince = null;
           setStaleBridge(null);
+          return;
+        }
+        // Already dismissed for this exact bridge launch: keep it hidden.
+        if (body.codeId === dismissedCodeId.current) {
+          setStaleBridge(null);
+          return;
+        }
+        mismatchedSince = mismatchedSince ?? Date.now();
+        if (Date.now() - mismatchedSince > 5_000) {
+          setStaleBridge({
+            running: body.codeId!,
+            expected: body.codeIdNow!,
+            restartHint: body.restartHint ?? 'bun run dev',
+          });
         }
       } catch {
         // No bridge at all is handled by the session status; nothing to warn about here.
@@ -247,6 +264,7 @@ export default function App() {
         onToggleSidePanel={() => setSidePanelOpen(!sidePanelOpen)}
         onOpenSettingsTab={openSettingsTab}
         staleCode={staleBridge}
+        onDismissStaleBridge={dismissStaleBridge}
       />
 
       {/* Main Container Layout */}

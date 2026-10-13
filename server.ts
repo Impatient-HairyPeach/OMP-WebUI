@@ -12,6 +12,7 @@
 import express from "express";
 import * as XLSX from "xlsx";
 import mammoth from "mammoth";
+import WordExtractor from "word-extractor";
 import JSZip from "jszip";
 import type { Response } from "express";
 import { execFile, execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -3196,9 +3197,11 @@ app.post("/api/reveal", (req, res) => {
       REVEALABLE.add(path.resolve(candidate));
     }
   }
+  const root = path.resolve(workspace);
   const resolved = path.resolve(String(req.body?.path || ""));
-  if (!REVEALABLE.has(resolved)) {
-    res.status(403).json({ error: "path is not one of the omp configuration files" });
+  // Any file inside the agent's workspace, or one of the known omp config files.
+  if (!REVEALABLE.has(resolved) && !(resolved.startsWith(root + path.sep) || resolved === root)) {
+    res.status(403).json({ error: "path is outside the workspace" });
     return;
   }
   if (!existsSync(resolved)) {
@@ -3283,6 +3286,69 @@ app.get("/api/fs/list", (req, res) => {
 });
 
 /** One text file for the viewer, capped so a huge log cannot stall the browser. */
+/** Legacy RTF is mostly plain text with control words; strip them for a preview. */
+function parseRtfText(bytes: Buffer): string {
+  return bytes
+    .toString("latin1")
+    .replace(/\\par[d]?\b/g, "\n")
+    .replace(/\\'[0-9a-fA-F]{2}/g, "")
+    .replace(/\\[a-zA-Z]+-?\d* ?/g, "")
+    .replace(/[{}]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** Locate LibreOffice for on-demand legacy doc conversion (PATH + common installs). */
+function findSoffice(): string | null {
+  const configured = process.platform === "win32" ? "soffice.exe" : "soffice";
+  const fixed = [
+    "C:/Program Files/LibreOffice/program/soffice.exe",
+    "C:/Program Files (x86)/LibreOffice/program/soffice.exe",
+    "/usr/bin/soffice",
+    "/usr/bin/libreoffice",
+    "/opt/homebrew/bin/soffice",
+  ];
+  for (const candidate of fixed) if (existsSync(candidate)) return candidate;
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, configured);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Convert a legacy .doc to .docx so the preview can render it (needs LibreOffice). */
+app.post("/api/fs/convert-doc", (req, res) => {
+  const source = path.resolve(String(req.body?.path || ""));
+  const root = path.resolve(workspace);
+  if (!(source.startsWith(root + path.sep) || source === root)) {
+    res.status(403).json({ error: "path is outside the workspace" });
+    return;
+  }
+  const soffice = findSoffice();
+  if (!soffice) {
+    res.json({ ok: false, error: "LibreOffice 未安装：无法把旧版 .doc 转为 .docx。安装 LibreOffice 后此操作即可用。\n(No LibreOffice found: install it and this conversion will work.)" });
+    return;
+  }
+  const outdir = path.join(root, ".omp-studio", "converted");
+  mkdirSync(outdir, { recursive: true });
+  execFile(
+    soffice,
+    ["--headless", "--convert-to", "docx", "--outdir", outdir, source],
+    { timeout: 120_000, windowsHide: true },
+    (error, _stdout, stderr) => {
+      const name = path.basename(source).replace(/\.[^.]+$/, "") + ".docx";
+      const docx = path.join(outdir, name);
+      if (!error && existsSync(docx)) {
+        emit("log", { level: "info", message: `files: converted ${path.basename(source)} -> ${path.relative(root, docx).replace(/\\/g, "/")}` });
+        res.json({ ok: true, docx: path.relative(root, docx).replace(/\\/g, "/"), path: docx });
+      } else {
+        res.json({ ok: false, error: String(stderr || (error instanceof Error ? error.message : error)).slice(0, 500) });
+      }
+    }
+  );
+});
+
 app.get("/api/fs/file", async (req, res) => {
   const requested = String(req.query.path || "");
   const root = path.resolve(workspace);
@@ -3381,8 +3447,46 @@ app.get("/api/fs/file", async (req, res) => {
       res.json({ ...base, language: "pdf", kind: "pdf", encoding: "pdf", binary: false, content: "", truncated: false, lines: 0 });
       return;
     }
-    if ([".doc", ".ppt", ".rtf"].includes(ext)) {
-      res.json(previewFailure(base, ext.slice(1), `legacy ${ext} is not readable; save it as ${ext === ".ppt" ? ".pptx" : ".docx"} and preview that`));
+    if (ext === ".doc" || ext === ".docm") {
+      // Legacy binary Word: extract the text so it is readable now; a convert
+      // button offers a real .docx when LibreOffice is installed.
+      try {
+        const extractor = new WordExtractor();
+        const parsed = await extractor.extract(bytes);
+        const text = parsed.getBody() ?? "";
+        const truncated = text.length > limit;
+        res.json({
+          ...base,
+          language: "doc",
+          kind: "doctext",
+          encoding: "legacy-doc",
+          binary: false,
+          content: truncated ? text.slice(0, limit) : text,
+          truncated,
+          lines: text.split("\n").length,
+        });
+      } catch (conversionError) {
+        res.json(previewFailure(base, "doc", conversionError instanceof Error ? conversionError.message : String(conversionError)));
+      }
+      return;
+    }
+    if (ext === ".rtf") {
+      const text = parseRtfText(bytes);
+      const truncated = text.length > limit;
+      res.json({
+        ...base,
+        language: "rtf",
+        kind: "doctext",
+        encoding: "rtf",
+        binary: false,
+        content: truncated ? text.slice(0, limit) : text,
+        truncated,
+        lines: text.split("\n").length,
+      });
+      return;
+    }
+    if (ext === ".ppt") {
+      res.json(previewFailure(base, "ppt", "legacy .ppt is not readable; save it as .pptx and preview that"));
       return;
     }
     const decoded = decodeText(bytes);
