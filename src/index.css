@@ -226,12 +226,15 @@
 }
 
 .text-\[\#fafafa\],
-.text-\[\#e4e4e7\] {
+.text-\[\#e4e4e7\],
+.text-\[\#e8e8e8\] {
   color: var(--text) !important;
 }
-.text-\[\#a1a1aa\],
-.text-\[\#d4d4d8\] {
+.text-\[\#a1a1aa\] {
   color: var(--text-muted) !important;
+}
+.text-\[\#d4d4d8\] {
+  color: var(--text) !important;
 }
 .text-\[\#71717a\] {
   color: var(--text-dim) !important;

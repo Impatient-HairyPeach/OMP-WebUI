@@ -3,6 +3,19 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.37
+
+- File preview text is readable on both themes. The viewer wrote hard-coded near-
+  white grays (`#e8e8e8`, `#d4d4d8`) whether the palette was dark or light, so on
+  the light theme the body and code text were invisible on a white panel. Both
+  now route through the palette tokens (`--text`), giving near-black preview text
+  in light mode (measured `rgb(31,35,40)`) and the normal light text in dark mode.
+- Pasting an image into the composer shows it. Previously a pasted image was
+  saved to `.omp-studio/pastes/` and inserted as an `@` reference in the prompt,
+  but nothing visible appeared in the input. Pasted images now show as inline
+  thumbnails above the composer (hover reveals the file name and a remove
+  button); removing one also strips its `@` mention from the prompt.
+
 ## 0.3.36
 
 - **The stale-bridge warning can actually go away now.** It compared the

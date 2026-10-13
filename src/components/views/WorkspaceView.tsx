@@ -188,6 +188,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [pickerBusy, setPickerBusy] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [inputPrompt, setInputPrompt] = useState('');
+  /** Images pasted into the composer: shown as thumbnails and referenced with @ in the prompt. */
+  const [pastedImages, setPastedImages] = useState<Array<{ id: string; relative: string; name: string }>>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   /** Label of the model being switched to, while omp applies it. */
   const [modelSwitching, setModelSwitching] = useState<string | null>(null);
@@ -726,6 +728,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
           reader.readAsDataURL(file);
         });
         const saved = await savePastedImage(dataUrl);
+        setPastedImages((prev) => [
+          ...prev,
+          { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, relative: saved.relative, name: basename(saved.relative) },
+        ]);
         setInputPrompt((prev) => `${prev}${prev && !prev.endsWith(' ') ? ' ' : ''}@${saved.relative} `);
         onDispatchLog('INFO', `composer.paste: saved ${saved.relative} (${Math.round(saved.bytes / 1024)} KB) and referenced it with @`);
       } catch (error) {
@@ -735,6 +741,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     textareaRef.current?.focus();
   };
 
+  const removePastedImage = (id: string, relative: string) => {
+    setPastedImages((prev) => prev.filter((image) => image.id !== id));
+    setInputPrompt((prev) => prev.replace(new RegExp(`@${relative.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'g'), ''));
+  };
+
   const removeAttachedFile = (id: string) => {
     setAttachedFiles((prev) => prev.filter((file) => file.id !== id));
   };
@@ -742,6 +753,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const handleStartNewChat = () => {
     cancelEdit();
     setAttachedFiles([]);
+    setPastedImages([]);
     void omp.newSession();
   };
 
@@ -888,6 +900,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
     setInputPrompt('');
     setAttachedFiles([]);
+    setPastedImages([]);
   };
 
   // ---- Voice: dictation into the composer + omp TTS read-out ----
@@ -2239,6 +2252,31 @@ return (
                   composerBox.dragging ? 'bg-[#a78bfa]/60' : 'bg-[#27272a] hover:bg-[#a78bfa]/50 focus-visible:bg-[#a78bfa]/50'
                 }`}
               />
+              {pastedImages.length > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-[#0c0c0e] border-b border-[#1e1e24] flex-wrap">
+                  {pastedImages.map((image) => (
+                    <span key={image.id} className="relative group">
+                      <img
+                        src={`/api/fs/raw?path=${encodeURIComponent(image.relative)}`}
+                        alt={image.name}
+                        className="h-16 w-auto max-w-[120px] object-contain rounded border border-[#27272a] bg-[#18181b]"
+                      />
+                      <span className="absolute -top-1.5 -right-1.5 text-[9px] text-[#71717a] bg-[#18181b] border border-[#27272a] rounded px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {image.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removePastedImage(image.id, image.relative)}
+                        title={language === 'zh-CN' ? '删除这张图片' : 'Remove this image'}
+                        className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full bg-[#ef4444]/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
               {attachedFiles.length > 0 && (
                 <div className="flex items-center gap-1.5 px-3 py-2 bg-[#0c0c0e] border-b border-[#1e1e24] flex-wrap text-[11px] font-mono">
                   <span className="text-[#71717a] text-[10px] uppercase">Attached Context:</span>
