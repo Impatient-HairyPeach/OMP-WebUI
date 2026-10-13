@@ -192,8 +192,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [pastedImages, setPastedImages] = useState<Array<{ id: string; relative: string; name: string }>>([]);
   /** One quoted context (a reply passage or file annotation) shown as a banner
    *  above the composer; sent silently with the next message, never typed out. */
-  const [pendingQuote, setPendingQuote] = useState<{ label: string; block: string } | null>(null);
-  const pendingQuoteRef = useRef<{ label: string; block: string } | null>(null);
+  const [pendingQuote, setPendingQuote] = useState<{ preview: string; block: string } | null>(null);
+  const pendingQuoteRef = useRef<{ preview: string; block: string } | null>(null);
   pendingQuoteRef.current = pendingQuote;
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   /** Label of the model being switched to, while omp applies it. */
@@ -378,9 +378,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     };
     window.addEventListener('omp:insert-mention', onInsert);
     const onQuote = (event: Event) => {
-      const detail = (event as CustomEvent<{ label?: string; block?: string }>).detail;
+      const detail = (event as CustomEvent<{ preview?: string; block?: string }>).detail;
       if (!detail?.block) return;
-      setPendingQuote({ label: detail.label || (language === 'zh-CN' ? '引用内容' : 'quote'), block: detail.block });
+      setPendingQuote({ preview: detail.preview || detail.block, block: detail.block });
       textareaRef.current?.focus();
     };
     window.addEventListener('omp:insert-quote', onQuote);
@@ -694,7 +694,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const handleQuoteMessage = (content: string) => {
     const quoteSnippet = content.length > 200 ? content.slice(0, 200) + '...' : content;
     setPendingQuote({
-      label: language === 'zh-CN' ? `模型回复：${quoteSnippet.slice(0, 24)}…` : `reply: ${quoteSnippet.slice(0, 24)}…`,
+      preview: quoteSnippet,
       block: `${language === 'zh-CN' ? '引用的回复内容' : 'Quoted reply content'}:\n> ${quoteSnippet}`,
     });
     textareaRef.current?.focus();
@@ -743,7 +743,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     if (!selected) return;
     const quoteSnippet = selected.content.length > 200 ? selected.content.slice(0, 200) + '...' : selected.content;
     setPendingQuote({
-      label: language === 'zh-CN' ? `选中内容：${quoteSnippet.slice(0, 24)}…` : `selected: ${quoteSnippet.slice(0, 24)}…`,
+      preview: quoteSnippet,
       block: `${language === 'zh-CN' ? '引用的选中内容' : 'Quoted selection'}:\n> ${quoteSnippet}`,
     });
     textareaRef.current?.focus();
@@ -2323,17 +2323,20 @@ return (
                 }`}
               />
               {pendingQuote && (
-                <div
-                  className="flex items-center px-3 py-1 bg-[#0c0c0e] border-b border-[#1e1e24]"
-                  title={`${language === 'zh-CN' ? '已引用' : 'quoted'}: ${pendingQuote.label}${language === 'zh-CN' ? '（随下一条一起发送）' : ' (sent with the next message)'}`}
-                >
-                  <Quote className="w-3 h-3 text-[#a78bfa] shrink-0" />
+                <div className="flex items-start gap-1.5 px-3 py-1.5 bg-[#0c0c0e] border-b border-[#1e1e24]">
+                  <Quote className="w-3 h-3 text-[#a78bfa] shrink-0 mt-0.5" />
+                  <div
+                    className="min-w-0 flex-1 max-h-20 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-snug font-mono text-[#a1a1aa]"
+                    title={pendingQuote.preview}
+                  >
+                    {pendingQuote.preview}
+                  </div>
                   <button
                     type="button"
                     onClick={() => setPendingQuote(null)}
                     title={language === 'zh-CN' ? '取消引用' : 'Remove quote'}
                     aria-label={language === 'zh-CN' ? '取消引用' : 'Remove quote'}
-                    className="ml-auto text-[#71717a] hover:text-[#ef4444] transition-colors cursor-pointer"
+                    className="shrink-0 text-[#71717a] hover:text-[#ef4444] transition-colors cursor-pointer mt-0.5"
                   >
                     <X className="w-3 h-3" />
                   </button>

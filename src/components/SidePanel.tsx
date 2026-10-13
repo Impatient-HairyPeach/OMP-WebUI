@@ -127,8 +127,8 @@ function insertMention(text: string): void {
 
 /** Send a quote/annotation as a banner above the composer: the user types their
  *  own question and the quoted context rides along silently on the next send. */
-function insertQuote(label: string, block: string): void {
-  window.dispatchEvent(new CustomEvent('omp:insert-quote', { detail: { label, block } }));
+function insertQuote(preview: string, block: string): void {
+  window.dispatchEvent(new CustomEvent('omp:insert-quote', { detail: { preview, block } }));
 }
 
 export const SidePanel: React.FC<SidePanelProps> = ({
@@ -393,17 +393,20 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const dropAnnotation = (id: string) => setAnnotations((prev) => prev.filter((note) => note.id !== id));
 
   /** One prompt carrying every note, each pinned to a file (`:lines`) with its quote. */
-  const notesToPrompt = (notes: FileNote[]): string => {
-    if (notes.length === 0) return '';
-    const body = notes
+  const notesBody = (notes: FileNote[]): string =>
+    notes
       .map((note, index) => {
         const where = note.range ? `@${note.file}:${note.range}` : `@${note.file}`;
         const quoted = note.snippet ? `\n\`\`\`\n${note.snippet}\n\`\`\`\n` : '\n';
         return `${index + 1}. ${where}${quoted}${note.comment}`;
       })
       .join('\n\n');
+
+  /** One prompt carrying every note, each pinned to a file (`:lines`) with its quote. */
+  const notesToPrompt = (notes: FileNote[]): string => {
+    if (notes.length === 0) return '';
     const heading = zh ? '引用的批示：' : 'Quoted notes:';
-    return `${heading}\n\n${body}\n`;
+    return `${heading}\n\n${notesBody(notes)}\n`;
   };
 
   /** A point inside the image frame, in CSS pixels relative to the rendered image. */
@@ -1195,7 +1198,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => insertQuote(zh ? `批注 ${annotations.length} 条` : `${annotations.length} notes`, notesToPrompt(annotations))}
+                      onClick={() => insertQuote(notesBody(annotations), notesToPrompt(annotations))}
                       title={zh ? '引用全部批示，随下一条一起发送' : 'Quote every note; it rides along with the next message'}
                       className="px-1.5 py-0.5 rounded border border-[#a78bfa] text-[10px] text-[#a78bfa] hover:bg-[#18181b] cursor-pointer"
                     >
@@ -1278,7 +1281,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     type="button"
                     onClick={() => {
                       insertQuote(
-                        zh ? `批注 ${openFile.relative}` : `note on ${openFile.relative}`,
+                        notesBody([
+                          { id: 'now', file: openFile.relative, range: pendingSnippet.range, snippet: pendingSnippet.snippet, comment: noteDraft.trim() },
+                        ]),
                         notesToPrompt([
                           { id: 'now', file: openFile.relative, range: pendingSnippet.range, snippet: pendingSnippet.snippet, comment: noteDraft.trim() },
                         ])
