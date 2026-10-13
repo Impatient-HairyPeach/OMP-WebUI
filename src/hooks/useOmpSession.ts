@@ -21,6 +21,7 @@ import {
   upsertLiveTool,
   type LiveTurn,
 } from "../omp/transcript";
+import { webSlashCommandCatalog } from '../lib/webSlashCommands';
 import type {
   OmpArchivedSession,
   OmpBridgeStatus,
@@ -221,6 +222,14 @@ export function useOmpSession(): OmpSessionApi {
   }, [publishLive]);
   const [queued, setQueued] = useState<{ steering: string[]; followUp: string[] }>({ steering: [], followUp: [] });
   const [slashCommands, setSlashCommands] = useState<OmpSlashCommand[]>([]);
+
+  /** omp's RPC catalog omits its TUI-only builtins (plan, goal, review, …); the
+   *  web catalog fills them in so the palette matches the terminal. omp's own
+   *  entry wins when it advertises the same name. */
+  const mergeSlashCommands = (commands: OmpSlashCommand[]): void => {
+    const own = new Set(commands.map((command) => command.name));
+    setSlashCommands([...commands, ...webSlashCommandCatalog().filter((command) => !own.has(command.name))]);
+  };
   const [logs, setLogs] = useState<OmpLogLine[]>([]);
   const [statusChips, setStatusChips] = useState<Array<{ key: string; text: string }>>([]);
   const [dialogs, setDialogs] = useState<OmpDialogRequest[]>([]);
@@ -304,7 +313,7 @@ export function useOmpSession(): OmpSessionApi {
     const commandData = commandResponse.data as { commands?: OmpSlashCommand[] } | undefined;
     if (modelData?.models) setModels(modelData.models);
     if (levelData?.levels) setThinkingLevels(withAuto(levelData.levels));
-    if (commandData?.commands && commandData.commands.length > 0) setSlashCommands(commandData.commands);
+    if (commandData?.commands && commandData.commands.length > 0) mergeSlashCommands(commandData.commands);
   }, []);
 
   /** omp reports the levels the *active model* supports; `auto` is always valid. */
@@ -503,7 +512,7 @@ export function useOmpSession(): OmpSessionApi {
           break;
         }
         case "available_commands_update": {
-          if (Array.isArray(frame.commands)) setSlashCommands(frame.commands as OmpSlashCommand[]);
+          if (Array.isArray(frame.commands)) mergeSlashCommands(frame.commands as OmpSlashCommand[]);
           break;
         }
         case "model_changed":

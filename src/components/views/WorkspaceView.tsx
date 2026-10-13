@@ -73,6 +73,7 @@ import { renderMarkdown } from '../../lib/miniMarkdown';
 import { parseSkillInjection } from '../../lib/skillInjection';
 import { AssistantBlocks, MarkdownBlock } from '../AssistantBlocks';
 import { SelectionToolbar } from '../SelectionToolbar';
+import { expandWebSlashCommand } from '../../lib/webSlashCommands';
 import { fetchApproval, savePastedImage, setApproval } from '../../omp/cli';
 import {
   SLASH_CATEGORY_LABEL,
@@ -912,6 +913,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
   const handleSubmit = () => {
     const trimmed = inputPrompt.trim();
+    // omp's /plan /goal /review … are TUI-only; turn them into a real prompt.
+    const expanded = expandWebSlashCommand(trimmed);
+    if (expanded.kind === 'usage-error') {
+      setInputPrompt(`${expanded.command} ${expanded.usage}`);
+      textareaRef.current?.focus();
+      return;
+    }
+    const message = expanded.kind === 'expand' ? expanded.prompt : trimmed;
     const quote = pendingQuote;
     setPendingQuote(null);
     if (!trimmed && !quote && attachedFiles.length === 0) return;
@@ -922,7 +931,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       // the edited turn. Steering would append to the wrong conversation.
       setEditingEntryId(null);
       onDispatchLog('INFO', 'prompt.edit: stopping the running turn, then branching');
-      void omp.abort().then(() => omp.branchAndPrompt(withQuote([attachmentBlock, trimmed].filter(Boolean).join('\n\n'))));
+      void omp.abort().then(() => omp.branchAndPrompt(withQuote([attachmentBlock, message].filter(Boolean).join('\n\n'))));
       setInputPrompt('');
       setAttachedFiles([]);
       return;
@@ -930,9 +939,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     if (omp.isStreaming) {
       if (!trimmed) return;
       onDispatchLog('INFO', `agent.${steerOrQueueMode}: ${trimmed.slice(0, 48)}`);
-      void omp.send(withQuote(trimmed), steerOrQueueMode);
+      void omp.send(withQuote(message), steerOrQueueMode);
     } else {
-      const text = withQuote([attachmentBlock, trimmed].filter(Boolean).join('\n\n'));
+      const text = withQuote([attachmentBlock, message].filter(Boolean).join('\n\n'));
       if (editingEntryId) {
         setEditingEntryId(null);
         onDispatchLog('INFO', 'prompt.edit: branching at that turn and re-running');
