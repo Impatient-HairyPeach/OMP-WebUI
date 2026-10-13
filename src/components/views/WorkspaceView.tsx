@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatMessage } from '../../types';
 import type { FileDiffItem } from '../../types';
+import type { MessageBlock } from '../../types';
+
+/** One stable empty array: `msg.blocks ?? []` would mint a new identity on every
+ *  render and defeat AssistantBlocks' memo (full markdown re-parse per render). */
+const EMPTY_BLOCKS: MessageBlock[] = [];
 import type { OmpLogLine, OmpModelOption, OmpSessionSummary } from '../../omp/protocol';
 import {
   AlertTriangle,
@@ -67,6 +72,7 @@ import {
 import { renderMarkdown } from '../../lib/miniMarkdown';
 import { parseSkillInjection } from '../../lib/skillInjection';
 import { AssistantBlocks } from '../AssistantBlocks';
+import { SelectionToolbar } from '../SelectionToolbar';
 import { fetchApproval, savePastedImage, setApproval } from '../../omp/cli';
 import {
   SLASH_CATEGORY_LABEL,
@@ -700,56 +706,39 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     textareaRef.current?.focus();
   };
 
-  /** A piece of an assistant reply the user selected, ready to ask about it. */
-  const [replySelection, setReplySelection] = useState<{ content: string; top: number; left: number } | null>(null);
-  const replySelectionRef = useRef<{ content: string; top: number; left: number } | null>(null);
-  replySelectionRef.current = replySelection;
-
-  /** Mouse-up inside an assistant message: if text is selected, offer to ask about it. */
+  /** Mouse-up inside an assistant message: if text is selected, offer to ask
+   *  about it. The offer is published as an event on purpose — holding it in
+   *  this component's state would re-render the whole transcript on every
+   *  selection (hundreds of ms) and destroy the live selection while the user
+   *  is still dragging. */
   const captureReplySelection = (event: React.MouseEvent<HTMLElement>) => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed) {
-      setReplySelection(null);
-      return;
-    }
-    // Only selections that live inside this message bubble count.
     const bubble = event.currentTarget;
-    const anchor = selection.anchorNode?.parentElement;
-    const focus = selection.focusNode?.parentElement;
-    if (!anchor || !focus || !bubble.contains(anchor) || !bubble.contains(focus)) {
-      setReplySelection(null);
-      return;
-    }
-    const content = selection.toString().trim();
-    if (content.length < 2) {
-      setReplySelection(null);
-      return;
-    }
-    try {
+    window.requestAnimationFrame(() => {
+      const selection = window.getSelection();
+      const content = selection && !selection.isCollapsed ? selection.toString().trim() : '';
+      const anchor = selection?.anchorNode?.parentElement;
+      const focus = selection?.focusNode?.parentElement;
+      const inside = Boolean(anchor && focus && bubble.contains(anchor) && bubble.contains(focus));
+      if (!selection || selection.isCollapsed || !inside || content.length < 2) {
+        window.dispatchEvent(new CustomEvent('omp:reply-selection', { detail: null }));
+        return;
+      }
       const rect = selection.getRangeAt(0).getBoundingClientRect();
-      setReplySelection({
-        content: content.slice(0, 1500),
-        top: Math.max(rect.top - 40, 8),
-        left: Math.max(rect.right - 150, 8),
-      });
-    } catch {
-      setReplySelection(null);
-    }
+      window.dispatchEvent(
+        new CustomEvent('omp:reply-selection', {
+          detail: {
+            content: content.slice(0, 1500),
+            top: rect.top - 40,
+            left: rect.right - 150,
+          },
+        }),
+      );
+    });
   };
 
-  /** Put the selected passage into the composer so the user can ask about it. */
-  const askAboutSelection = () => {
-    const selected = replySelectionRef.current;
-    if (!selected) return;
-    const quoteSnippet = selected.content.length > 200 ? selected.content.slice(0, 200) + '...' : selected.content;
-    setPendingQuote({
-      preview: quoteSnippet,
-      block: `${language === 'zh-CN' ? '引用的选中内容' : 'Quoted selection'}:\n> ${quoteSnippet}`,
-    });
-    textareaRef.current?.focus();
-    setReplySelection(null);
-    window.getSelection()?.removeAllRanges();
-  };
+  /** Ask a running turn about a passage without re-rendering the transcript:
+   *  the selection toolbar publishes `omp:insert-quote`, which the composer
+   *  banner above already listens for. */
 
   // ---- Composer ----
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1302,7 +1291,7 @@ return (
            order omp produced them. Copy stays markdown source. */
         <div className="min-w-0" onMouseUp={captureReplySelection}>
         <AssistantBlocks
-          blocks={msg.blocks ?? []}
+          blocks={msg.blocks ?? EMPTY_BLOCKS}
           streaming={msg.streaming}
           zh={language === 'zh-CN'}
           hideWork={!isWorkOpen(turnMeta.get(msg.id))}
@@ -3010,30 +2999,9 @@ return (
         </div>
       </main>
 
-      {replySelection && (
-        <div
-          className="fixed z-50 flex items-center gap-1.5 px-2 py-1 rounded-lg border shadow-xl font-mono text-[11px]"
-          style={{ top: replySelection.top, left: replySelection.left, backgroundColor: theme.cardBg, borderColor: theme.border }}
-        >
-          <button
-            type="button"
-            onClick={askAboutSelection}
-            title={language === 'zh-CN' ? '提问选中内容（引用后随下一条一起发送）' : 'Ask about the selection (quoted with your next message)'}
-            aria-label={language === 'zh-CN' ? '提问选中内容' : 'Ask about selection'}
-            className="text-[#a78bfa] hover:text-[#fafafa] transition-colors cursor-pointer"
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setReplySelection(null)}
-            className="text-[#71717a] hover:text-[#fafafa] transition-colors cursor-pointer"
-            aria-label={language === 'zh-CN' ? '取消' : 'Dismiss'}
-          >
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-      )}
+      {/* Selection offer for assistant replies: isolated so quoting never
+          re-renders the message list mid-drag. */}
+      <SelectionToolbar />
 
       {/* Workspace picker: browse real folders on this machine */}
       {workspacePickerOpen && (

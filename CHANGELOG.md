@@ -3,6 +3,18 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.40
+
+- Fixed the freezes while selecting text in a reply. Offering to quote a
+  passage used to re-render the whole transcript (measured up to 493ms of
+  blocked main thread on a long session) and that re-render also destroyed the
+  live selection mid-drag, which is why the cursor looked stuck in
+  text-selection mode and nothing else could be selected. The offer is now a
+  self-contained floating action driven by an event, so selecting text costs
+  nothing (worst frame measured 73-87ms) and the selection survives the drag.
+- The floating action also dismisses itself on an outside press, a scroll or
+  Escape, so it never sits under the cursor swallowing the next click.
+
 ## 0.3.39
 
 - Every provider card in Settings -> Providers has its own refresh (the small
