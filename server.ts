@@ -3799,6 +3799,273 @@ app.get("/api/omp/provider-usage", async (req, res) => {
   }
 });
 
+/**
+ * Provider balance probes.
+ *
+ * omp's own `usage` command only knows a fixed set of providers (opencode
+ * zen/go, Codex, z.ai, Kimi Code, Cursor, Cursor-likes, synthetic, ollama), so
+ * every other authenticated provider renders as "omp reports nothing". For the
+ * providers that publish a balance/credit endpoint we ask them directly with
+ * the key from omp's own credential store; the rest get an honest "no public
+ * endpoint" plus their billing page. Keys are never echoed to the client.
+ */
+const AUTH_DB = path.join(OMP_AGENT_DIR, "agent.db");
+
+interface StoredCredential {
+  provider: string;
+  type: string;
+  secret: string;
+  baseUrl?: string;
+}
+
+/** Every enabled credential omp stores, keyed by provider id (lowercase). */
+function readCredentials(): Map<string, StoredCredential> {
+  const out = new Map<string, StoredCredential>();
+  if (!existsSync(AUTH_DB)) return out;
+  try {
+    const db = new DatabaseSync(AUTH_DB, { readOnly: true });
+    try {
+      const rows = db
+        .prepare("select provider, credential_type, data from auth_credentials where disabled_cause is null")
+        .all() as Array<Record<string, unknown>>;
+      for (const row of rows) {
+        const provider = String(row.provider ?? "").toLowerCase();
+        if (!provider) continue;
+        let data: Record<string, unknown> = {};
+        try {
+          data = JSON.parse(String(row.data ?? "{}")) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        const secret = [data.key, data.apiKey, data.access, data.token].find(
+          (value): value is string => typeof value === "string" && value.length > 0,
+        );
+        if (!secret) continue;
+        out.set(provider, { provider, type: String(row.credential_type ?? "api_key"), secret });
+      }
+    } finally {
+      db.close();
+    }
+  } catch {
+    /* unreadable auth store — the caller reports the provider as unknown */
+  }
+  return out;
+}
+
+/** Where to look when a provider exposes no usage API at all. */
+const BILLING_PAGES: Array<[RegExp, string]> = [
+  [/^alibaba-(coding|token)-plan$|^qwen/, "https://home.qwencloud.com/billing/subscription/token-plan-individual"],
+  [/^openai-codex/, "https://chatgpt.com/codex/settings/usage"],
+  [/^opencode(-go|-zen)?$/, "https://opencode.ai/zen"],
+  [/^deepseek/, "https://platform.deepseek.com/usage"],
+  [/^anthropic|^claude/, "https://console.anthropic.com/settings/usage"],
+  [/^openai$/, "https://platform.openai.com/usage"],
+  [/^zai|^z-ai|^glm/, "https://z.ai/manage-apikey/subscription"],
+  [/^kimi|^moonshot/, "https://www.kimi.com/code/console"],
+  [/^cursor/, "https://cursor.com/dashboard?tab=usage"],
+  [/^github-copilot/, "https://github.com/settings/copilot"],
+  [/^google|^gemini|^google-vertex|^google-antigravity/, "https://aistudio.google.com/apikey"],
+  [/^xai/, "https://console.x.ai/team/default/usage"],
+  [/^cline/, "https://app.cline.bot/dashboard"],
+  [/^factory/, "https://app.factory.ai/settings/billing"],
+];
+
+const billingPageFor = (provider: string): string | undefined =>
+  BILLING_PAGES.find(([pattern]) => pattern.test(provider.toLowerCase()))?.[1];
+
+interface ProviderBalance {
+  provider: string;
+  /** true when this provider's own API answered with a usable number. */
+  available: boolean;
+  /** "balance" = money/credits left, "none" = no public endpoint. */
+  kind: "balance" | "none";
+  currency?: string;
+  /** Remaining money/credits, in `currency`. */
+  remaining?: number;
+  /** Granted + topped-up money/credits in the account. */
+  total?: number;
+  granted?: number;
+  toppedUp?: number;
+  /** Amount already spent, when the provider reports it. */
+  used?: number;
+  /** The endpoint that answered, for the "where did this come from" tooltip. */
+  source?: string;
+  billingUrl?: string;
+  note?: string;
+  error?: string;
+  fetchedAt: number;
+}
+
+const num = (value: unknown): number | undefined => {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+/** Ask one provider for its own balance; undefined when we have no probe. */
+async function probeProviderBalance(cred: StoredCredential): Promise<ProviderBalance | undefined> {
+  const provider = cred.provider;
+  const headers = { Authorization: `Bearer ${cred.secret}`, Accept: "application/json" };
+  const get = async (url: string) => {
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`${response.status} ${text.slice(0, 200)}`.trim());
+    return JSON.parse(text) as Record<string, unknown>;
+  };
+  const base = (fallback: string) =>
+    (cred.baseUrl && /^https?:\/\//.test(cred.baseUrl) ? cred.baseUrl : fallback).replace(/\/+$/, "");
+
+  try {
+    if (provider === "deepseek") {
+      const url = `${base("https://api.deepseek.com")}/user/balance`;
+      const payload = await get(url);
+      const info = (Array.isArray(payload.balance_infos) ? payload.balance_infos[0] : undefined) as
+        | Record<string, unknown>
+        | undefined;
+      if (!info) throw new Error("no balance_info in response");
+      const remaining = num(info.total_balance);
+      const granted = num(info.granted_balance);
+      const toppedUp = num(info.topped_up_balance);
+      return {
+        provider,
+        available: remaining !== undefined,
+        kind: "balance",
+        currency: String(info.currency ?? "CNY"),
+        remaining,
+        total: (granted ?? 0) + (toppedUp ?? 0) || undefined,
+        granted,
+        toppedUp,
+        source: url,
+        fetchedAt: Date.now(),
+      };
+    }
+    if (provider === "openrouter") {
+      const url = "https://openrouter.ai/api/v1/credits";
+      const payload = await get(url);
+      const data = (payload.data ?? {}) as Record<string, unknown>;
+      const total = num(data.total_credits);
+      const used = num(data.total_usage);
+      return {
+        provider,
+        available: total !== undefined,
+        kind: "balance",
+        currency: "USD",
+        total,
+        used,
+        remaining: total !== undefined && used !== undefined ? Math.max(0, total - used) : undefined,
+        source: url,
+        fetchedAt: Date.now(),
+      };
+    }
+    if (/^moonshot|^kimi/.test(provider)) {
+      const url = `${base("https://api.moonshot.cn")}/v1/users/me/balance`;
+      const payload = await get(url);
+      const data = (payload.data ?? {}) as Record<string, unknown>;
+      const remaining = num(data.available_balance);
+      const granted = num(data.voucher_balance);
+      const toppedUp = num(data.cash_balance);
+      return {
+        provider,
+        available: remaining !== undefined,
+        kind: "balance",
+        currency: "CNY",
+        remaining,
+        total: (granted ?? 0) + (toppedUp ?? 0) || undefined,
+        granted,
+        toppedUp,
+        source: url,
+        fetchedAt: Date.now(),
+      };
+    }
+    if (/^siliconflow/.test(provider)) {
+      const url = `${base("https://api.siliconflow.cn")}/v1/user/info`;
+      const payload = await get(url);
+      const data = (payload.data ?? {}) as Record<string, unknown>;
+      const remaining = num(data.balance) ?? num(data.totalBalance);
+      return {
+        provider,
+        available: remaining !== undefined,
+        kind: "balance",
+        currency: "CNY",
+        remaining,
+        total: num(data.totalBalance),
+        granted: num(data.chargeBalance),
+        source: url,
+        fetchedAt: Date.now(),
+      };
+    }
+  } catch (error) {
+    return {
+      provider,
+      available: false,
+      kind: "balance",
+      error: String(error instanceof Error ? error.message : error).slice(0, 300),
+      billingUrl: billingPageFor(provider),
+      fetchedAt: Date.now(),
+    };
+  }
+  return undefined;
+}
+
+const balanceCache = new Map<string, { at: number; value: ProviderBalance }>();
+const BALANCE_TTL_MS = 60_000;
+
+async function providerBalance(provider: string, force: boolean): Promise<ProviderBalance> {
+  const key = provider.toLowerCase();
+  const cached = balanceCache.get(key);
+  if (!force && cached && Date.now() - cached.at < BALANCE_TTL_MS) return cached.value;
+  const cred = readCredentials().get(key);
+  let value: ProviderBalance;
+  if (!cred) {
+    value = {
+      provider: key,
+      available: false,
+      kind: "none",
+      note: "no credential stored by omp",
+      billingUrl: billingPageFor(key),
+      fetchedAt: Date.now(),
+    };
+  } else {
+    const probed = await probeProviderBalance(cred);
+    value =
+      probed ??
+      {
+        provider: key,
+        available: false,
+        kind: "none",
+        note: "no public usage endpoint",
+        billingUrl: billingPageFor(key),
+        fetchedAt: Date.now(),
+      };
+  }
+  balanceCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+/** Money/credits left per provider, read from the providers' own APIs. */
+app.get("/api/omp/provider-balance", async (req, res) => {
+  const force = req.query.force === "1";
+  try {
+    if (req.query.all === "1" || req.query.provider === undefined) {
+      const providers = [...readCredentials().keys()];
+      const balances = await Promise.all(providers.map((provider) => providerBalance(provider, force)));
+      res.json({
+        ok: true,
+        authDb: AUTH_DB,
+        balances: Object.fromEntries(balances.map((balance) => [balance.provider, balance])),
+      });
+      return;
+    }
+    const provider = String(req.query.provider).toLowerCase();
+    const balance = await providerBalance(provider, force);
+    res.json({ ok: true, authDb: AUTH_DB, balances: { [provider]: balance } });
+  } catch (error) {
+    res.status(502).json({
+      error: String(error instanceof Error ? error.message : error).slice(0, 1000),
+      code: "balance_unavailable",
+    });
+  }
+});
+
 /** Workspace file list for @-completion (tracked files first, then a shallow walk). */
 app.get("/api/omp/files", async (req, res) => {
   const query = String(req.query.q ?? "").toLowerCase();

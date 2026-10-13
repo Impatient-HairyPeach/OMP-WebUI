@@ -539,6 +539,40 @@ export interface ProviderUsagePayload {
 export const fetchProviderUsage = (force = false) =>
   getJson<ProviderUsagePayload>(`/api/omp/provider-usage${force ? "?force=1" : ""}`);
 
+/** Money/credits left in a provider account, read from the provider's own API. */
+export interface ProviderBalance {
+  provider: string;
+  /** true only when the provider's own API answered with a usable number. */
+  available: boolean;
+  /** "balance" = a money/credit figure, "none" = no public endpoint exists. */
+  kind: "balance" | "none";
+  currency?: string;
+  remaining?: number;
+  total?: number;
+  granted?: number;
+  toppedUp?: number;
+  used?: number;
+  /** The endpoint that answered (for the provenance tooltip). */
+  source?: string;
+  billingUrl?: string;
+  note?: string;
+  error?: string;
+  fetchedAt: number;
+}
+
+export interface ProviderBalancePayload {
+  ok: boolean;
+  authDb?: string;
+  balances: Record<string, ProviderBalance>;
+}
+
+/** Providers whose own API reports a balance (server side, 60s cache). `provider`
+ *  narrows the refresh to a single provider. */
+export const fetchProviderBalances = (force = false, provider?: string) => {
+  const scope = provider ? `provider=${encodeURIComponent(provider)}` : "all=1";
+  return getJson<ProviderBalancePayload>(`/api/omp/provider-balance?${scope}${force ? "&force=1" : ""}`);
+};
+
 export const fetchMcpServers = () => getJson<{ path: string; exists: boolean; servers: OmpMcpServer[]; raw: string }>("/api/omp/mcp");
 
 /** Reveal one of omp's own configuration files in the OS file manager. */

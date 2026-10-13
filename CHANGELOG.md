@@ -3,6 +3,22 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.39
+
+- Every provider card in Settings -> Providers has its own refresh (the small
+  arrow next to the source line): it re-reads omp's quota windows and that
+  provider's balance while it spins. The panel-level refresh still updates
+  everything at once.
+- Providers whose quotas omp already knows are no longer blank. The Codex /
+  OpenAI 30-day window was being dropped by the window parser, so a ChatGPT
+  plan showed nothing; omp's 5-hour, weekly, monthly and 30-day windows all
+  render now.
+- Providers that omp cannot report at all are probed directly instead of
+  staying empty: DeepSeek answers from its own balance endpoint (e.g. ¥48.74
+  left), with OpenRouter, Moonshot and SiliconFlow wired the same way. When a
+  provider publishes no usage API (the Alibaba/Qwen coding plan), the row says
+  so and links to its billing page instead of pretending.
+
 ## 0.3.38
 
 - Quoting works the way you asked. Selecting a passage in an assistant reply

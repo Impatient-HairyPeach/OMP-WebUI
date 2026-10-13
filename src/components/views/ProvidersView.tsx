@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Cpu,
   Database,
+  ExternalLink,
   Globe,
   Layers,
   Loader2,
@@ -26,13 +27,14 @@ import {
   saveCustomEndpoint,
   type CustomEndpoint,
   fetchModelScope,
+  fetchProviderBalances,
   fetchProviderUsage,
   fetchUsage,
   refreshProviderModels,
   setModelScope,
   testProviderModel,
 } from '../../omp/cli';
-import type { OmpModelScope, OmpUsagePayload, ProviderUsageReport } from '../../omp/cli';
+import type { OmpModelScope, OmpUsagePayload, ProviderBalance, ProviderUsageReport } from '../../omp/cli';
 import { ModelsView, fetchModelCatalog } from './ModelsView';
 import type { CatalogModel } from './ModelsView';
 
@@ -44,6 +46,16 @@ const formatCompact = (n?: number): string => {
   if (n >= 1_000_000) return `${parseFloat((n / 1_000_000).toFixed(2))}M`;
   if (n >= 1_000) return `${parseFloat((n / 1_000).toFixed(1))}K`;
   return String(n);
+};
+
+const CURRENCY_SIGN: Record<string, string> = { USD: '$', CNY: '¥', EUR: '€', GBP: '£', JPY: '¥' };
+
+const formatMoney = (n?: number, currency?: string): string => {
+  if (n === undefined || n === null || Number.isNaN(n)) return '-';
+  const sign = CURRENCY_SIGN[(currency ?? '').toUpperCase()] ?? '';
+  const digits = Math.abs(n) > 0 && Math.abs(n) < 1 ? 4 : 2;
+  const body = n.toFixed(digits);
+  return sign ? `${sign}${body}` : `${body}${currency ? ` ${currency}` : ''}`;
 };
 
 const formatCost = (n?: number): string => {
@@ -102,6 +114,10 @@ export const ProvidersView: React.FC = () => {
   const [scope, setScope] = useState<OmpModelScope | null>(null);
   /** Real quota windows reported by omp for the providers that expose them. */
   const [providerUsage, setProviderUsage] = useState<ProviderUsageReport[] | null>(null);
+  /** Balance/credits read from each provider's own API (omp cannot report those). */
+  const [balances, setBalances] = useState<Record<string, ProviderBalance>>({});
+  /** Provider whose own refresh is running. */
+  const [balanceBusy, setBalanceBusy] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'providers' | 'models'>('providers');
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
@@ -183,7 +199,11 @@ export const ProvidersView: React.FC = () => {
   const refreshUsage = async () => {
     setRefreshing(true);
     try {
-      const [billing, quota] = await Promise.allSettled([fetchUsage(), fetchProviderUsage(true)]);
+      const [billing, quota, balance] = await Promise.allSettled([
+        fetchUsage(),
+        fetchProviderUsage(true),
+        fetchProviderBalances(true),
+      ]);
       if (billing.status === 'fulfilled') {
         setUsage(billing.value);
         setLoadError(null);
@@ -192,16 +212,33 @@ export const ProvidersView: React.FC = () => {
       }
       // Quota windows are optional: a provider may simply report none.
       if (quota.status === 'fulfilled') setProviderUsage(quota.value.reports);
+      if (balance.status === 'fulfilled') setBalances(balance.value.balances);
       setRefreshedAt(Date.now());
     } finally {
       setRefreshing(false);
     }
   };
 
+  /** One provider's own refresh: re-read omp's quotas and that provider's balance. */
+  const refreshProvider = async (provider: string) => {
+    setBalanceBusy(provider);
+    try {
+      const [quota, balance] = await Promise.allSettled([
+        fetchProviderUsage(true),
+        fetchProviderBalances(true, provider),
+      ]);
+      if (quota.status === 'fulfilled') setProviderUsage(quota.value.reports);
+      if (balance.status === 'fulfilled') setBalances((prev) => ({ ...prev, ...balance.value.balances }));
+      setRefreshedAt(Date.now());
+    } finally {
+      setBalanceBusy(null);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     void reloadEndpoints();
-    Promise.allSettled([fetchUsage(), fetchModelCatalog(), fetchModelScope(), fetchProviderUsage()]).then(([u, c, s, p]) => {
+    Promise.allSettled([fetchUsage(), fetchModelCatalog(), fetchModelScope(), fetchProviderUsage(), fetchProviderBalances()]).then(([u, c, s, p, b]) => {
       if (cancelled) return;
       if (u.status === 'fulfilled') setUsage(u.value);
       else setLoadError(u.reason instanceof Error ? u.reason.message : String(u.reason));
@@ -211,6 +248,7 @@ export const ProvidersView: React.FC = () => {
       else setLoadError((prev) => prev ?? (s.reason instanceof Error ? s.reason.message : String(s.reason)));
       // Quota windows are optional: a provider simply may not report any.
       setProviderUsage(p.status === 'fulfilled' ? p.value.reports : []);
+      if (b.status === 'fulfilled') setBalances(b.value.balances);
     });
     return () => {
       cancelled = true;
@@ -939,12 +977,39 @@ export const ProvidersView: React.FC = () => {
                         (limit.amount?.usedFraction ?? 0) > (acc?.amount?.usedFraction ?? -1) ? limit : acc,
                       null
                     );
+                    const balance = balances[p.id];
                     if (!worst) {
+                      // omp knows no window for this provider: show its own
+                      // balance when the provider publishes one.
+                      if (balance?.available) {
+                        const spent =
+                          balance.used !== undefined && balance.total !== undefined && balance.total > 0
+                            ? (balance.used / balance.total) * 100
+                            : null;
+                        return (
+                          <>
+                            <div className="text-sm font-semibold text-[#34d399]">
+                              {formatMoney(balance.remaining, balance.currency)}
+                            </div>
+                            <div className="text-[9px] text-[#52525b] mt-0.5 truncate" title={balance.source}>
+                              {spent !== null
+                                ? `${spent.toFixed(0)}% ${zh ? '已用' : 'used'}`
+                                : zh
+                                ? '账户余额'
+                                : 'account balance'}
+                            </div>
+                          </>
+                        );
+                      }
                       return (
                         <>
-                          <div className="text-sm font-semibold text-[#71717a]">: </div>
-                          <div className="text-[9px] text-[#52525b] mt-0.5">
-                            {zh ? 'omp 未报告该提供商的额度' : 'omp reports no quota for this provider'}
+                          <div className="text-sm font-semibold text-[#71717a]">-</div>
+                          <div className="text-[9px] text-[#52525b] mt-0.5 truncate" title={balance?.error ?? balance?.note}>
+                            {balance?.error
+                              ? `${zh ? '余额探测失败' : 'balance probe failed'}: ${balance.error}`
+                              : zh
+                              ? 'omp 未报告，且无公开余额接口'
+                              : 'no omp report and no public balance API'}
                           </div>
                         </>
                       );
@@ -968,6 +1033,61 @@ export const ProvidersView: React.FC = () => {
                   })()}
                 </div>
               </div>
+
+              {/* Where this provider's numbers come from, with its own refresh */}
+              {(() => {
+                const balance = balances[p.id];
+                const busy = balanceBusy === p.id;
+                const hasWindows = (p.usage?.limits?.length ?? 0) > 0;
+                return (
+                  <div className="flex items-center justify-between gap-2 flex-wrap -mt-1">
+                    <span
+                      className="text-[10px] font-mono text-[#52525b] truncate min-w-0"
+                      title={hasWindows ? 'omp usage --json' : balance?.source ?? balance?.billingUrl ?? undefined}
+                    >
+                      {hasWindows
+                        ? zh
+                          ? '来源：omp usage（额度窗口）'
+                          : 'source: omp usage (limit windows)'
+                        : balance?.available
+                        ? `${zh ? '来源' : 'source'}: ${balance.source ?? ''}`
+                        : balance?.error
+                        ? `${zh ? '探测失败' : 'probe failed'}: ${balance.error}`
+                        : balance
+                        ? zh
+                          ? '该提供商没有公开的用量接口'
+                          : 'this provider publishes no usage API'
+                        : zh
+                        ? '读取中…'
+                        : 'loading…'}
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!hasWindows && balance?.billingUrl && (
+                        <a
+                          href={balance.billingUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] cursor-pointer transition-colors"
+                          style={{ borderColor: theme.border, color: theme.mode === 'light' ? '#334155' : '#a1a1aa' }}
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          {zh ? '计费页' : 'Billing'}
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void refreshProvider(p.id)}
+                        disabled={busy}
+                        title={zh ? '刷新该提供商的额度与余额（跳过缓存）' : "Refresh this provider's quota and balance (bypasses the cache)"}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] cursor-pointer transition-colors disabled:opacity-50"
+                        style={{ borderColor: theme.border, color: theme.mode === 'light' ? '#334155' : '#a1a1aa' }}
+                      >
+                        <RefreshCw className={`w-3 h-3 ${busy ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Real quota windows (5h / weekly / monthly / 30d) from omp */}
               {(p.usage?.limits?.length ?? 0) > 0 && (
