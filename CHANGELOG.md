@@ -5,6 +5,14 @@ Settings (`v<version> · <build date>`).
 
 ## 0.3.38
 
+- Quoting works the way you asked. Selecting a passage in an assistant reply
+  (or quoting the whole reply) no longer dumps a quote block plus "关于…，请
+  问：" into the composer. A small banner appears above the composer
+  ("已引用：选中内容…（随下一条一起发送）") with an ✕ to drop it; the quoted
+  context is sent silently with your next message, and you type the question
+  yourself. Same for the file-preview notes: "发送到输入框" now sends the notes
+  as a banner, not as typed text.
+
 - The bridge-code warning now only fires when it is true. It used to compare
   hashes of `server.ts` and treated *any* edit after the process start as
   "stale", which flooded the banner while the file was being edited. Now the

@@ -190,6 +190,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [inputPrompt, setInputPrompt] = useState('');
   /** Images pasted into the composer: shown as thumbnails and referenced with @ in the prompt. */
   const [pastedImages, setPastedImages] = useState<Array<{ id: string; relative: string; name: string }>>([]);
+  /** One quoted context (a reply passage or file annotation) shown as a banner
+   *  above the composer; sent silently with the next message, never typed out. */
+  const [pendingQuote, setPendingQuote] = useState<{ label: string; block: string } | null>(null);
+  const pendingQuoteRef = useRef<{ label: string; block: string } | null>(null);
+  pendingQuoteRef.current = pendingQuote;
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   /** Label of the model being switched to, while omp applies it. */
   const [modelSwitching, setModelSwitching] = useState<string | null>(null);
@@ -372,7 +377,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       textareaRef.current?.focus();
     };
     window.addEventListener('omp:insert-mention', onInsert);
-    return () => window.removeEventListener('omp:insert-mention', onInsert);
+    const onQuote = (event: Event) => {
+      const detail = (event as CustomEvent<{ label?: string; block?: string }>).detail;
+      if (!detail?.block) return;
+      setPendingQuote({ label: detail.label || (language === 'zh-CN' ? '引用内容' : 'quote'), block: detail.block });
+      textareaRef.current?.focus();
+    };
+    window.addEventListener('omp:insert-quote', onQuote);
+    return () => {
+      window.removeEventListener('omp:insert-mention', onInsert);
+      window.removeEventListener('omp:insert-quote', onQuote);
+    };
   }, []);
 
   // Forward every freshly appended omp log line to the bottom terminal.
@@ -677,13 +692,63 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   }, []);
 
   const handleQuoteMessage = (content: string) => {
-    const quoteSnippet = content.length > 80 ? content.slice(0, 80) + '...' : content;
-    const prefix =
-      language === 'zh-CN'
-        ? `> ${quoteSnippet}\n\n关于上述回复，请问：`
-        : `> ${quoteSnippet}\n\nRegarding the response above, `;
-    setInputPrompt(prefix);
+    const quoteSnippet = content.length > 200 ? content.slice(0, 200) + '...' : content;
+    setPendingQuote({
+      label: language === 'zh-CN' ? `模型回复：${quoteSnippet.slice(0, 24)}…` : `reply: ${quoteSnippet.slice(0, 24)}…`,
+      block: `${language === 'zh-CN' ? '引用的回复内容' : 'Quoted reply content'}:\n> ${quoteSnippet}`,
+    });
     textareaRef.current?.focus();
+  };
+
+  /** A piece of an assistant reply the user selected, ready to ask about it. */
+  const [replySelection, setReplySelection] = useState<{ content: string; top: number; left: number } | null>(null);
+  const replySelectionRef = useRef<{ content: string; top: number; left: number } | null>(null);
+  replySelectionRef.current = replySelection;
+
+  /** Mouse-up inside an assistant message: if text is selected, offer to ask about it. */
+  const captureReplySelection = (event: React.MouseEvent<HTMLElement>) => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      setReplySelection(null);
+      return;
+    }
+    // Only selections that live inside this message bubble count.
+    const bubble = event.currentTarget;
+    const anchor = selection.anchorNode?.parentElement;
+    const focus = selection.focusNode?.parentElement;
+    if (!anchor || !focus || !bubble.contains(anchor) || !bubble.contains(focus)) {
+      setReplySelection(null);
+      return;
+    }
+    const content = selection.toString().trim();
+    if (content.length < 2) {
+      setReplySelection(null);
+      return;
+    }
+    try {
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      setReplySelection({
+        content: content.slice(0, 1500),
+        top: Math.max(rect.top - 40, 8),
+        left: Math.max(rect.right - 150, 8),
+      });
+    } catch {
+      setReplySelection(null);
+    }
+  };
+
+  /** Put the selected passage into the composer so the user can ask about it. */
+  const askAboutSelection = () => {
+    const selected = replySelectionRef.current;
+    if (!selected) return;
+    const quoteSnippet = selected.content.length > 200 ? selected.content.slice(0, 200) + '...' : selected.content;
+    setPendingQuote({
+      label: language === 'zh-CN' ? `选中内容：${quoteSnippet.slice(0, 24)}…` : `selected: ${quoteSnippet.slice(0, 24)}…`,
+      block: `${language === 'zh-CN' ? '引用的选中内容' : 'Quoted selection'}:\n> ${quoteSnippet}`,
+    });
+    textareaRef.current?.focus();
+    setReplySelection(null);
+    window.getSelection()?.removeAllRanges();
   };
 
   // ---- Composer ----
@@ -870,14 +935,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
   const handleSubmit = () => {
     const trimmed = inputPrompt.trim();
-    if (!trimmed && attachedFiles.length === 0) return;
+    const quote = pendingQuoteRef.current;
+    setPendingQuote(null);
+    if (!trimmed && !quote && attachedFiles.length === 0) return;
+    const withQuote = (body: string) => [quote?.block, body].filter(Boolean).join('\n\n');
 
     if (editingEntryId && omp.isStreaming) {
       // Editing an earlier turn while one is running: stop it, then branch from
       // the edited turn. Steering would append to the wrong conversation.
       setEditingEntryId(null);
       onDispatchLog('INFO', 'prompt.edit: stopping the running turn, then branching');
-      void omp.abort().then(() => omp.branchAndPrompt([attachmentBlock, trimmed].filter(Boolean).join('\n\n')));
+      void omp.abort().then(() => omp.branchAndPrompt(withQuote([attachmentBlock, trimmed].filter(Boolean).join('\n\n'))));
       setInputPrompt('');
       setAttachedFiles([]);
       return;
@@ -885,9 +953,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     if (omp.isStreaming) {
       if (!trimmed) return;
       onDispatchLog('INFO', `agent.${steerOrQueueMode}: ${trimmed.slice(0, 48)}`);
-      void omp.send(trimmed, steerOrQueueMode);
+      void omp.send(withQuote(trimmed), steerOrQueueMode);
     } else {
-      const text = [attachmentBlock, trimmed].filter(Boolean).join('\n\n');
+      const text = withQuote([attachmentBlock, trimmed].filter(Boolean).join('\n\n'));
       if (editingEntryId) {
         setEditingEntryId(null);
         onDispatchLog('INFO', 'prompt.edit: branching at that turn and re-running');
@@ -1232,6 +1300,7 @@ return (
       ) : (msg.blocks ?? []).length > 0 ? (
         /* pi-web's model: thinking / text / tool blocks in the
            order omp produced them. Copy stays markdown source. */
+        <div className="min-w-0" onMouseUp={captureReplySelection}>
         <AssistantBlocks
           blocks={msg.blocks ?? []}
           streaming={msg.streaming}
@@ -1250,13 +1319,14 @@ return (
           }
           onInsertCommand={insertCommandIntoComposer}
         />
+        </div>
       ) : msg.content === '_(no text output)_' ? (
         <p className="text-[#52525b] italic">
           {language === 'zh-CN' ? '（该轮未返回文本）' : '(no text returned this turn)'}
         </p>
       ) : (
         /* Messages without blocks (imported/mock turns) still render markdown. */
-        <div className="markdown-body min-w-0">{renderMarkdown(msg.content)}</div>
+        <div className="markdown-body min-w-0" onMouseUp={captureReplySelection}>{renderMarkdown(msg.content)}</div>
       )}
 
       {/* Turn actions — the omp transcript is append-only, so no delete */}
@@ -2252,6 +2322,24 @@ return (
                   composerBox.dragging ? 'bg-[#a78bfa]/60' : 'bg-[#27272a] hover:bg-[#a78bfa]/50 focus-visible:bg-[#a78bfa]/50'
                 }`}
               />
+              {pendingQuote && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0c0c0e] border-b border-[#1e1e24] text-[11px] font-mono text-[#a1a1aa] flex-wrap">
+                  <Quote className="w-3 h-3 text-[#a78bfa] shrink-0" />
+                  <span className="truncate max-w-[70%]" title={pendingQuote.label}>
+                    {language === 'zh-CN' ? '已引用：' : 'quoted: '}{pendingQuote.label}
+                  </span>
+                  <span className="text-[#52525b]">{language === 'zh-CN' ? '（随下一条一起发送）' : '(sent with the next message)'}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingQuote(null)}
+                    title={language === 'zh-CN' ? '取消引用' : 'Remove quote'}
+                    className="ml-auto text-[#71717a] hover:text-[#ef4444] transition-colors cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
               {pastedImages.length > 0 && (
                 <div className="flex items-center gap-2 px-3 py-2 bg-[#0c0c0e] border-b border-[#1e1e24] flex-wrap">
                   {pastedImages.map((image) => (
@@ -2918,6 +3006,31 @@ return (
           </div>
         </div>
       </main>
+
+      {replySelection && (
+        <div
+          className="fixed z-50 flex items-center gap-1.5 px-2 py-1 rounded-lg border shadow-xl font-mono text-[11px]"
+          style={{ top: replySelection.top, left: replySelection.left, backgroundColor: theme.cardBg, borderColor: theme.border }}
+        >
+          <button
+            type="button"
+            onClick={askAboutSelection}
+            title={language === 'zh-CN' ? '引用选中的内容并提问' : 'Quote the selection and ask about it'}
+            className="flex items-center gap-1 text-[#a78bfa] hover:text-[#fafafa] transition-colors cursor-pointer"
+          >
+            <MessageSquare className="w-3 h-3" />
+            <span>{language === 'zh-CN' ? '提问选中内容' : 'Ask about selection'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setReplySelection(null)}
+            className="text-[#71717a] hover:text-[#fafafa] transition-colors cursor-pointer"
+            aria-label={language === 'zh-CN' ? '取消' : 'Dismiss'}
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
 
       {/* Workspace picker: browse real folders on this machine */}
       {workspacePickerOpen && (

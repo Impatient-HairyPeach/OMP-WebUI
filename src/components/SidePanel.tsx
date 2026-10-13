@@ -125,6 +125,12 @@ function insertMention(text: string): void {
   window.dispatchEvent(new CustomEvent('omp:insert-mention', { detail: { text } }));
 }
 
+/** Send a quote/annotation as a banner above the composer: the user types their
+ *  own question and the quoted context rides along silently on the next send. */
+function insertQuote(label: string, block: string): void {
+  window.dispatchEvent(new CustomEvent('omp:insert-quote', { detail: { label, block } }));
+}
+
 export const SidePanel: React.FC<SidePanelProps> = ({
   isOpen,
   onClose,
@@ -396,9 +402,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         return `${index + 1}. ${where}${quoted}${note.comment}`;
       })
       .join('\n\n');
-    const heading = zh
-      ? `${notes.length === 1 ? '关于这处内容' : '关于这几处'}，请按批示改：`
-      : `${notes.length === 1 ? 'About this passage' : 'About these passages'}, apply my notes:`;
+    const heading = zh ? '引用的批示：' : 'Quoted notes:';
     return `${heading}\n\n${body}\n`;
   };
 
@@ -1191,8 +1195,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => insertMention(notesToPrompt(annotations))}
-                      title={zh ? '把每条批示和引用一起放进输入框' : 'Put every note and quote into the composer'}
+                      onClick={() => insertQuote(zh ? `批注 ${annotations.length} 条` : `${annotations.length} notes`, notesToPrompt(annotations))}
+                      title={zh ? '引用全部批示，随下一条一起发送' : 'Quote every note; it rides along with the next message'}
                       className="px-1.5 py-0.5 rounded border border-[#a78bfa] text-[10px] text-[#a78bfa] hover:bg-[#18181b] cursor-pointer"
                     >
                       {zh ? '发送到输入框' : 'Send to composer'}
@@ -1273,7 +1277,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      insertMention(
+                      insertQuote(
+                        zh ? `批注 ${openFile.relative}` : `note on ${openFile.relative}`,
                         notesToPrompt([
                           { id: 'now', file: openFile.relative, range: pendingSnippet.range, snippet: pendingSnippet.snippet, comment: noteDraft.trim() },
                         ])
