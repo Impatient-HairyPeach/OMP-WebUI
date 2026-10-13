@@ -2323,16 +2323,16 @@ return (
                 }`}
               />
               {pendingQuote && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0c0c0e] border-b border-[#1e1e24] text-[11px] font-mono text-[#a1a1aa] flex-wrap">
+                <div
+                  className="flex items-center px-3 py-1 bg-[#0c0c0e] border-b border-[#1e1e24]"
+                  title={`${language === 'zh-CN' ? '已引用' : 'quoted'}: ${pendingQuote.label}${language === 'zh-CN' ? '（随下一条一起发送）' : ' (sent with the next message)'}`}
+                >
                   <Quote className="w-3 h-3 text-[#a78bfa] shrink-0" />
-                  <span className="truncate max-w-[70%]" title={pendingQuote.label}>
-                    {language === 'zh-CN' ? '已引用：' : 'quoted: '}{pendingQuote.label}
-                  </span>
-                  <span className="text-[#52525b]">{language === 'zh-CN' ? '（随下一条一起发送）' : '(sent with the next message)'}</span>
                   <button
                     type="button"
                     onClick={() => setPendingQuote(null)}
                     title={language === 'zh-CN' ? '取消引用' : 'Remove quote'}
+                    aria-label={language === 'zh-CN' ? '取消引用' : 'Remove quote'}
                     className="ml-auto text-[#71717a] hover:text-[#ef4444] transition-colors cursor-pointer"
                   >
                     <X className="w-3 h-3" />
@@ -3015,11 +3015,11 @@ return (
           <button
             type="button"
             onClick={askAboutSelection}
-            title={language === 'zh-CN' ? '引用选中的内容并提问' : 'Quote the selection and ask about it'}
-            className="flex items-center gap-1 text-[#a78bfa] hover:text-[#fafafa] transition-colors cursor-pointer"
+            title={language === 'zh-CN' ? '提问选中内容（引用后随下一条一起发送）' : 'Ask about the selection (quoted with your next message)'}
+            aria-label={language === 'zh-CN' ? '提问选中内容' : 'Ask about selection'}
+            className="text-[#a78bfa] hover:text-[#fafafa] transition-colors cursor-pointer"
           >
-            <MessageSquare className="w-3 h-3" />
-            <span>{language === 'zh-CN' ? '提问选中内容' : 'Ask about selection'}</span>
+            <MessageSquare className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
