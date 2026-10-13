@@ -1174,8 +1174,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     entry={entry}
                     depth={0}
                     rowClass={rowClass}
-                    expanded={Boolean(expandedDirs[entry.path])}
-                    childrenEntries={entriesByDir[entry.path]}
+                    expandedDirs={expandedDirs}
+                    entriesByDir={entriesByDir}
                     gitStatus={gitStatusByPath[entry.path.replace(/\\/g, '/')]}
                     onToggle={toggleDir}
                     onOpen={(path) => void openFilePath(path)}
@@ -1754,8 +1754,10 @@ interface TreeRowProps {
   entry: WorkspaceEntry;
   depth: number;
   rowClass: string;
-  expanded: boolean;
-  childrenEntries?: WorkspaceEntry[];
+  /** The panel's tree state, read here rather than passed as a snapshot: a row
+   *  deeper than the first level used to be told "collapsed" forever. */
+  expandedDirs: Record<string, boolean>;
+  entriesByDir: Record<string, WorkspaceEntry[]>;
   gitStatus?: string;
   onToggle: (dirPath: string) => void;
   onOpen: (path: string) => void;
@@ -1772,14 +1774,15 @@ const TreeRow: React.FC<TreeRowProps> = ({
   entry,
   depth,
   rowClass,
-  expanded,
-  childrenEntries,
+  expandedDirs,
+  entriesByDir,
   gitStatus,
   onToggle,
   onOpen,
   onMention,
 }) => {
   const relative = entry.path.replace(/\\/g, '/');
+  const expanded = Boolean(expandedDirs[entry.path]);
   return (
     <>
       <div
@@ -1828,13 +1831,14 @@ const TreeRow: React.FC<TreeRowProps> = ({
       </div>
       {entry.isDir &&
         expanded &&
-        (childrenEntries ?? []).map((child) => (
+        (entriesByDir[entry.path] ?? []).map((child) => (
           <TreeRow
             key={child.path}
             entry={child}
             depth={depth + 1}
             rowClass={rowClass}
-            expanded={false}
+            expandedDirs={expandedDirs}
+            entriesByDir={entriesByDir}
             gitStatus={gitStatus}
             onToggle={onToggle}
             onOpen={onOpen}

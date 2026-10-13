@@ -3,6 +3,14 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.42
+
+- The right panel's file tree expands at any depth. Rows past the first level
+  were rendered with a hardcoded "collapsed" flag and without their own child
+  entries, so a folder inside an already open folder could neither open nor
+  close - clicking it did nothing at all. Each row now reads the panel's own
+  tree state, so nesting works arbitrarily deep (verified four levels down).
+
 ## 0.3.41
 
 - Selection stays cheap by construction: one delegated mouse-up for the whole
