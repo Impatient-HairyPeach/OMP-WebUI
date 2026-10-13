@@ -3,6 +3,18 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.38
+
+- The bridge-code warning now only fires when it is true. It used to compare
+  hashes of `server.ts` and treated *any* edit after the process start as
+  "stale", which flooded the banner while the file was being edited. Now the
+  report comes from the actual API client: the bridge answers unknown routes
+  with `{ code: "unknown_endpoint" }`, and the page shows the warning exactly
+  when one of those calls happens, once per bridge launch (dismissed until a
+  real restart).
+- Revealing a file in Explorer works. `explorer.exe /select,<path>` must be a
+  single argument; it was passed as two and Explorer silently ignored it.
+
 ## 0.3.37
 
 - File preview text is readable on both themes. The viewer wrote hard-coded near-

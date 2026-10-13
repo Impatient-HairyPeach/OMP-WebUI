@@ -167,12 +167,25 @@ export interface OmpConfigPayload {
   paths: Record<string, string>;
 }
 
+/** The bridge answers any unknown /api route with exactly this code. */
+const UNKNOWN_ENDPOINT_CODE = "unknown_endpoint";
+
+/** A route this SPA needs is missing from the running bridge: surface it once. */
+function reportStaleBridge(url: string, method: string): void {
+  try {
+    window.dispatchEvent(new CustomEvent("omp:bridge-stale", { detail: { url, method, at: Date.now() } }));
+  } catch {
+    // Non-browser contexts (e2e) have no window: nothing to surface.
+  }
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
     // The bridge knows *why* (403 outside the workspace, 404 gone): show that
     // sentence instead of a raw URL and a bare status code.
-    const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+    const payload = (await res.json().catch(() => null)) as { error?: string; code?: string } | null;
+    if (payload?.code === UNKNOWN_ENDPOINT_CODE) reportStaleBridge(url, "GET");
     throw new Error(payload?.error || `${url} failed: ${res.status}`);
   }
   return (await res.json()) as T;
@@ -185,7 +198,11 @@ async function postJson<T>(url: string, body: Record<string, unknown>): Promise<
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const payload = (await res.json().catch(() => ({}))) as T & { error?: string };
+  const payload = (await res.json().catch(() => ({}))) as T & { error?: string; code?: string };
+  // A bridge older than this page answers unknown routes with
+  // `{ code: "unknown_endpoint" }`: that is the one true signal that a restart
+  // is needed. Report it once so the UI can say so.
+  if (payload?.code === "unknown_endpoint") reportStaleBridge(url, "POST");
   if (!res.ok) {
     // Callers sometimes need the structured detail (which provider owns a model),
     // not just the sentence, so the payload rides along on the error.

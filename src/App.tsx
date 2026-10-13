@@ -142,40 +142,46 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    let mismatchedSince: number | null = null;
-    const check = async () => {
+
+    /** The one true stale signal: a route this page actually needs is missing. */
+    const onStaleBridge = async () => {
+      if (cancelled) return;
       try {
         const res = await fetch('/api/health', { cache: 'no-store' });
         const body = (await res.json()) as { codeId?: string; codeIdNow?: string; restartHint?: string };
         if (cancelled) return;
-        const stale = Boolean(body.codeId && body.codeIdNow && body.codeId !== body.codeIdNow);
-        if (!stale) {
-          mismatchedSince = null;
-          setStaleBridge(null);
-          return;
-        }
         // Already dismissed for this exact bridge launch: keep it hidden.
-        if (body.codeId === dismissedCodeId.current) {
-          setStaleBridge(null);
-          return;
-        }
-        mismatchedSince = mismatchedSince ?? Date.now();
-        if (Date.now() - mismatchedSince > 5_000) {
-          setStaleBridge({
-            running: body.codeId!,
-            expected: body.codeIdNow!,
-            restartHint: body.restartHint ?? 'bun run dev',
-          });
-        }
+        if (body.codeId && body.codeId === dismissedCodeId.current) return;
+        setStaleBridge({
+          running: body.codeId ?? '?',
+          expected: body.codeIdNow ?? 'newer',
+          restartHint: body.restartHint ?? 'bun run dev',
+        });
       } catch {
         // No bridge at all is handled by the session status; nothing to warn about here.
       }
     };
-    void check();
-    const timer = window.setInterval(() => void check(), 30_000);
+    window.addEventListener('omp:bridge-stale', onStaleBridge);
+
+    // Once the user restarts, the bridge reports a fresh fingerprint: clear the
+    // banner and re-arm, so a genuinely old bridge warns again later.
+    const timer = window.setInterval(async () => {
+      try {
+        const res = await fetch('/api/health', { cache: 'no-store' });
+        const body = (await res.json()) as { codeId?: string; codeIdNow?: string };
+        if (cancelled || !body.codeId) return;
+        if (body.codeId === dismissedCodeId.current || body.codeId === body.codeIdNow) {
+          dismissedCodeId.current = null;
+          setStaleBridge(null);
+        }
+      } catch {
+        // No bridge at all is handled by the session status; nothing to warn about here.
+      }
+    }, 30_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      window.removeEventListener('omp:bridge-stale', onStaleBridge);
     };
   }, []);
 

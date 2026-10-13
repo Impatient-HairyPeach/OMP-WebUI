@@ -89,8 +89,8 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             title={
               (language === 'zh-CN'
-                ? `正在运行的桥接进程启动早于最近一次代码改动（启动时 ${staleCode.running}，现在是 ${staleCode.expected}）：新接口会返回 unknown bridge endpoint。重启桥接生效，若前端是构建版需先 bun run build：`
-                : `The running bridge started before the latest code change (started ${staleCode.running}, now ${staleCode.expected}), so new routes answer "unknown bridge endpoint". Restart the bridge (rebuild first when serving a built copy):`) +
+                ? `桥接缺少本页面要用的接口（unknown bridge endpoint，桥接指纹 ${staleCode.running} vs 当前 ${staleCode.expected}）。重启桥接生效（构建版还需先 bun run build）：`
+                : `The bridge lacks an endpoint this page needs ("unknown bridge endpoint"; bridge fingerprint ${staleCode.running} vs ${staleCode.expected}). Restart it (rebuild first when serving a built copy):`) +
               `\n${staleCode.restartHint}\n` +
               (language === 'zh-CN' ? '（点击复制该命令）' : '(click to copy the command)')
             }

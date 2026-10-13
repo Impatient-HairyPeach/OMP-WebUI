@@ -3209,7 +3209,9 @@ app.post("/api/reveal", (req, res) => {
     return;
   }
   const reveal = process.platform === "win32"
-    ? { file: "explorer.exe", args: ["/select,", resolved] }
+    // `explorer.exe` wants `/select,C:\path` as ONE token; split it into two
+    // args and Explorer ignores the request silently.
+    ? { file: "explorer.exe", args: [`/select,${resolved}`] }
     : process.platform === "darwin"
     ? { file: "open", args: ["-R", resolved] }
     : { file: "xdg-open", args: [path.dirname(resolved)] };
