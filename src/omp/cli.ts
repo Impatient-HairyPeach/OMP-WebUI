@@ -169,7 +169,12 @@ export interface OmpConfigPayload {
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url} failed: ${res.status}`);
+  if (!res.ok) {
+    // The bridge knows *why* (403 outside the workspace, 404 gone): show that
+    // sentence instead of a raw URL and a bare status code.
+    const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error || `${url} failed: ${res.status}`);
+  }
   return (await res.json()) as T;
 }
 
@@ -248,7 +253,9 @@ export interface CustomEndpoint {
 }
 
 export const fetchCustomEndpoints = () =>
-  getJson<{ path: string; warning?: string; providers: CustomEndpoint[] }>("/api/omp/custom-providers");
+  getJson<{ path: string; warning?: string; duplicateRoots: number; providers: CustomEndpoint[] }>(
+    "/api/omp/custom-providers"
+  );
 
 /** Save (create or replace) or delete one endpoint; the bridge restarts omp. */
 export const saveCustomEndpoint = (body: {

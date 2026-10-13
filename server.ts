@@ -35,33 +35,123 @@ const SESSION_ROOT = process.env.OMP_SESSION_ROOT || path.join(homedir(), ".omp"
 const ARCHIVE_ROOT = process.env.OMP_ARCHIVE_ROOT || path.join(path.dirname(SESSION_ROOT), "archive", "sessions");
 
 let workspace = process.env.OMP_CWD || process.cwd();
-let resumePath: string | null = process.env.OMP_RESUME || null;
+/** Where the next fresh session should start (a workspace switch before any session exists). */
+let pendingCwd: string | null = null;
 
 // ---------------------------------------------------------------- rpc bridge
 type Json = Record<string, any>;
+type ChildStatus = "stopped" | "starting" | "ready" | "exited";
 
 const sseClients = new Set<Response>();
-const frameLog: Json[] = [];
-let child: ChildProcessWithoutNullStreams | null = null;
-let childStatus: "stopped" | "starting" | "ready" | "exited" = "stopped";
 let lastExit: string | null = null;
-const pending = new Map<string, { resolve: (frame: Json) => void; timer: NodeJS.Timeout }>();
-const chunkBuffers = new Map<string, { parts: Buffer[]; received: number; count: number }>();
-const readyWaiters = new Set<() => void>();
-let readyChild: ChildProcessWithoutNullStreams | null = null;
-let launchArgs: string[] = [];
-let restartChain: Promise<void> = Promise.resolve();
 let rpcId = 0;
+
+/**
+ * One omp child **per open conversation**.
+ *
+ * The bridge used to own a single child and kill it on every session switch, so
+ * opening another conversation aborted whatever turn was running. Now a child is
+ * created per session and stays alive in the background; `activeKey` is only the
+ * session the HTTP surface speaks for. Frames carry their `sessionKey`, so the
+ * SPA can ignore the conversations it is not showing.
+ */
+interface OmpRunner {
+  /** Opaque, stable id for the browser (never reused, never re-keyed). */
+  id: string;
+  /** `--cwd` of this child; also the folder its file explorer/git view opens. */
+  cwd: string;
+  /** `--resume` target; null while the session is fresh. */
+  resume: string | null;
+  /** The log omp reports for this child (a fresh session learns it from state). */
+  sessionFile: string | null;
+  status: ChildStatus;
+  child: ChildProcessWithoutNullStreams | null;
+  readyChild: ChildProcessWithoutNullStreams | null;
+  pendingReady: Set<() => void>;
+  pending: Map<string, { resolve: (frame: Json) => void; timer: NodeJS.Timeout }>;
+  chunkBuffers: Map<string, { parts: Buffer[]; received: number; count: number }>;
+  launchArgs: string[];
+  /** Frames replayed to a browser that (re)connects to this conversation. */
+  frames: Json[];
+  /** A turn is in flight (`agent_start` … `session_settled`). */
+  busy: boolean;
+  lastUsedAt: number;
+}
+
+const runners = new Map<string, OmpRunner>();
+let activeKey: string | null = null;
+/** Each child is a whole agent process, so the pool is bounded. */
+const MAX_RUNNERS = 4;
+let runnerSeq = 0;
+/** Settings changes restart children; the chain keeps those restarts serialized. */
+let restartChain: Promise<void> = Promise.resolve();
+
+function createRunner(next: { cwd: string; resume: string | null }): OmpRunner {
+  return {
+    id: `omp-${++runnerSeq}`,
+    cwd: next.cwd,
+    resume: next.resume,
+    sessionFile: next.resume,
+    status: "stopped",
+    child: null,
+    readyChild: null,
+    pendingReady: new Set(),
+    pending: new Map(),
+    chunkBuffers: new Map(),
+    launchArgs: [],
+    frames: [],
+    busy: false,
+    lastUsedAt: Date.now(),
+  };
+}
+
+function activeRunner(): OmpRunner | null {
+  return activeKey ? runners.get(activeKey) ?? null : null;
+}
+
+/** The log of the conversation that is on screen (omp may not have written it yet). */
+function activeSessionFile(): string | null {
+  const runner = activeRunner();
+  return runner ? runner.sessionFile ?? runner.resume : null;
+}
+
+/** Whichever child owns that log — the one that must not be moved or deleted. */
+function findBySession(file: string): OmpRunner | undefined {
+  const target = path.resolve(file);
+  for (const runner of runners.values()) {
+    if (runner.resume && path.resolve(runner.resume) === target) return runner;
+    if (runner.sessionFile && path.resolve(runner.sessionFile) === target) return runner;
+  }
+  return undefined;
+}
+
+/** Make one conversation the one the HTTP surface (and the browser) talks to. */
+function setActive(runner: OmpRunner) {
+  activeKey = runner.id;
+  runner.lastUsedAt = Date.now();
+  workspace = runner.cwd;
+  emitSession();
+}
+
+function emitSession() {
+  const runner = activeRunner();
+  emit("session", {
+    sessionKey: runner?.id ?? null,
+    workspace: runner?.cwd ?? pendingCwd ?? workspace,
+    resumePath: activeSessionFile(),
+    status: runner?.status ?? "stopped",
+  });
+}
 
 function emit(event: string, payload: unknown) {
   const line = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
   for (const res of sseClients) res.write(line);
 }
 
-function broadcastFrame(frame: Json) {
-  frameLog.push(frame);
-  if (frameLog.length > 400) frameLog.shift();
-  emit("frame", frame);
+function broadcastFrame(runner: OmpRunner, frame: Json) {
+  runner.frames.push(frame);
+  if (runner.frames.length > 400) runner.frames.shift();
+  emit("frame", { ...frame, sessionKey: runner.id });
 }
 
 function decodeBase64(data: unknown): Buffer {
@@ -69,14 +159,14 @@ function decodeBase64(data: unknown): Buffer {
 }
 
 /** Protocol v2 splits oversized frames into `rpc_chunk` pieces; reassemble before dispatch. */
-function reassembleChunk(frame: Json): Json | null {
+function reassembleChunk(runner: OmpRunner, frame: Json): Json | null {
   const id = String(frame.chunkId);
-  const slot = chunkBuffers.get(id) ?? { parts: [], received: 0, count: Number(frame.count) || 1 };
+  const slot = runner.chunkBuffers.get(id) ?? { parts: [], received: 0, count: Number(frame.count) || 1 };
   slot.parts[Number(frame.index)] = decodeBase64(frame.data);
   slot.received += 1;
-  chunkBuffers.set(id, slot);
+  runner.chunkBuffers.set(id, slot);
   if (slot.received < slot.count) return null;
-  chunkBuffers.delete(id);
+  runner.chunkBuffers.delete(id);
   try {
     return JSON.parse(Buffer.concat(slot.parts).toString("utf8"));
   } catch {
@@ -84,18 +174,35 @@ function reassembleChunk(frame: Json): Json | null {
   }
 }
 
-function handleFrame(frame: Json) {
+function handleFrame(runner: OmpRunner, frame: Json) {
   if (frame.type === "rpc_chunk") {
-    const whole = reassembleChunk(frame);
+    const whole = reassembleChunk(runner, frame);
     if (!whole) return;
     frame = whole;
   }
   if (frame.type === "ready") {
-    childStatus = "ready";
-    readyChild = child;
-    emit("status", { status: childStatus, ready: frame, workspace, resumePath });
-    for (const resolve of readyWaiters) resolve();
-    readyWaiters.clear();
+    runner.status = "ready";
+    runner.readyChild = runner.child;
+    emit("status", {
+      status: runner.status,
+      ready: frame,
+      sessionKey: runner.id,
+      workspace: runner.cwd,
+      resumePath: runner.sessionFile ?? runner.resume,
+    });
+    for (const resolve of runner.pendingReady) resolve();
+    runner.pendingReady.clear();
+    // A fresh session has no `--resume` path yet; omp knows which log it writes.
+    void rememberSessionFile(runner);
+  }
+  if (frame.type === "agent_start") {
+    runner.busy = true;
+    // The log exists from the first prompt on: learn it so the list can mark it.
+    void rememberSessionFile(runner);
+  }
+  if (frame.type === "session_settled" || frame.type === "prompt_result") {
+    runner.busy = false;
+    void rememberSessionFile(runner);
   }
   if (frame.type === "extension_ui_request") {
     const method = String(frame.method ?? "");
@@ -105,17 +212,17 @@ function handleFrame(frame: Json) {
     }
   }
   if (frame.type === "response" && typeof frame.id === "string") {
-    const waiter = pending.get(frame.id);
+    const waiter = runner.pending.get(frame.id);
     if (waiter) {
-      pending.delete(frame.id);
+      runner.pending.delete(frame.id);
       clearTimeout(waiter.timer);
       waiter.resolve(frame);
     }
   }
-  broadcastFrame(frame);
+  broadcastFrame(runner, frame);
 }
 
-function wireChild(proc: ChildProcessWithoutNullStreams) {
+function wireChild(runner: OmpRunner, proc: ChildProcessWithoutNullStreams) {
   let buffered = "";
   proc.stdout.setEncoding("utf8");
   proc.stdout.on("data", (input: string) => {
@@ -126,7 +233,7 @@ function wireChild(proc: ChildProcessWithoutNullStreams) {
       buffered = buffered.slice(nl + 1);
       if (line) {
         try {
-          handleFrame(JSON.parse(line));
+          handleFrame(runner, JSON.parse(line));
         } catch {
           emit("log", { level: "warn", message: `unparsed frame: ${line.slice(0, 400)}` });
         }
@@ -144,11 +251,12 @@ function wireChild(proc: ChildProcessWithoutNullStreams) {
     lastExit = `exit ${code ?? `signal ${signal}`}`;
     console.log(`[omp] ${lastExit}`);
     // A restart may already have replaced this process; only the current child owns the state.
-    if (child !== proc) return;
-    childStatus = "exited";
-    readyChild = null;
-    child = null;
-    emit("status", { status: childStatus, exit: lastExit, workspace });
+    if (runner.child !== proc) return;
+    runner.status = "exited";
+    runner.readyChild = null;
+    runner.child = null;
+    runner.busy = false;
+    emit("status", { status: runner.status, exit: lastExit, sessionKey: runner.id, workspace: runner.cwd });
     emit("log", { level: "warn", message: `omp rpc process ended (${lastExit})` });
   });
   proc.on("error", (err) => {
@@ -175,6 +283,21 @@ const RESTART_HINT = (() => {
   return "bun run dev";
 })();
 
+/** The code fingerprint at request time: a bridge process started before the
+ *  last edit reports a different codeId, which is exactly the stale state. */
+let codeIdNowCache: { at: number; value: string } | null = null;
+function serverCodeIdNow(): string {
+  const now = Date.now();
+  if (codeIdNowCache && now - codeIdNowCache.at < 5_000) return codeIdNowCache.value;
+  try {
+    const value = createHash("sha1").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex").slice(0, 12);
+    codeIdNowCache = { at: now, value };
+    return value;
+  } catch {
+    return SERVER_CODE_ID;
+  }
+}
+
 const SERVER_CODE_ID = (() => {
   try {
     return createHash("sha1").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex").slice(0, 12);
@@ -200,53 +323,59 @@ function resolveOmpCommand(): { file: string; args: string[] } {
   return { file: configured, args: [] };
 }
 
-function startChild() {
-  if (child) return;
+function startChild(runner: OmpRunner) {
+  if (runner.child) return;
   if (!pluginCatalogCache) void installedPluginEntries();
-  childStatus = "starting";
-  emit("status", { status: childStatus, workspace, resumePath });
-  const args = ["--mode", "rpc-ui", "--cwd", workspace];
-  if (resumePath) args.push("--resume", resumePath);
+  runner.status = "starting";
+  emit("status", {
+    status: runner.status,
+    sessionKey: runner.id,
+    workspace: runner.cwd,
+    resumePath: runner.sessionFile ?? runner.resume,
+  });
+  const args = ["--mode", "rpc-ui", "--cwd", runner.cwd];
+  if (runner.resume) args.push("--resume", runner.resume);
   // This project's opt-outs are applied with omp's own flags.
   args.push(...projectScopeArgs());
   args.push(...OMP_ARGS);
   const target = resolveOmpCommand();
-  launchArgs = [...target.args, ...args];
-  const proc = spawn(target.file, launchArgs, {
-    cwd: workspace,
+  runner.launchArgs = [...target.args, ...args];
+  const proc = spawn(target.file, runner.launchArgs, {
+    cwd: runner.cwd,
     env: childEnv(),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   }) as ChildProcessWithoutNullStreams;
   if (!proc.stdout || !proc.stdin) {
     emit("log", { level: "error", message: `could not spawn ${OMP_BIN}: stdio unavailable` });
-    childStatus = "exited";
+    runner.status = "exited";
     return;
   }
-  child = proc;
-  wireChild(proc);
-  sendCommand({ type: "negotiate_protocol", protocolVersion: 2 }, 5000).catch(() => {});
-  console.log(`[omp] spawn ${target.file} ${[...target.args, ...args].join(" ")} (cwd ${workspace})`);
+  runner.child = proc;
+  wireChild(runner, proc);
+  sendCommand({ type: "negotiate_protocol", protocolVersion: 2 }, 5000, runner).catch(() => {});
+  console.log(`[omp] spawn ${target.file} ${[...target.args, ...args].join(" ")} (cwd ${runner.cwd})`);
   emit("log", {
     level: "info",
-    message: `omp ${args.join(" ")} (cwd ${workspace}${resumePath ? `, resume ${path.basename(resumePath)}` : ", fresh session"})`,
+    message: `omp ${args.join(" ")} (cwd ${runner.cwd}${runner.resume ? `, resume ${path.basename(runner.resume)}` : ", fresh session"})`,
   });
 }
 
-function stopChild() {
-  const proc = child;
-  child = null;
-  readyChild = null;
-  if (childStatus !== "exited") childStatus = "stopped";
-  // Anything still waiting on the old process will never be answered.
-  for (const waiter of pending.values()) {
+function stopChild(runner: OmpRunner) {
+  const proc = runner.child;
+  runner.child = null;
+  runner.readyChild = null;
+  runner.busy = false;
+  if (runner.status !== "exited") runner.status = "stopped";
+  // Anything still waiting on this process will never be answered.
+  for (const waiter of runner.pending.values()) {
     clearTimeout(waiter.timer);
     waiter.resolve({ type: "response", command: "", success: false, error: "omp session restarted" });
   }
-  pending.clear();
-  chunkBuffers.clear();
+  runner.pending.clear();
+  runner.chunkBuffers.clear();
   if (!proc) return;
-  console.log("[omp] stopping session process");
+  console.log(`[omp] stopping session process (${path.basename(runner.sessionFile ?? runner.cwd)})`);
   try {
     proc.stdin.end();
   } catch {
@@ -260,29 +389,29 @@ function stopChild() {
 }
 
 /** Readiness is per process: a stale `ready` from a previous child must not satisfy a restart. */
-function awaitReady(timeoutMs = 30000) {
+function awaitReady(runner: OmpRunner, timeoutMs = 30000) {
   const { promise, resolve } = Promise.withResolvers<void>();
-  const target = child;
-  if (target && readyChild === target) {
+  const target = runner.child;
+  if (target && runner.readyChild === target) {
     resolve();
     return promise;
   }
   let timer: NodeJS.Timeout;
   const settle = () => {
     clearTimeout(timer);
-    readyWaiters.delete(settle);
+    runner.pendingReady.delete(settle);
     resolve();
   };
   timer = setTimeout(() => {
-    readyWaiters.delete(settle);
-    emit("log", { level: "warn", message: "timed out waiting for omp to report ready" });
+    runner.pendingReady.delete(settle);
+    emit("log", { level: "warn", message: `timed out waiting for omp to report ready (${path.basename(runner.sessionFile ?? runner.cwd)})` });
     resolve();
   }, timeoutMs);
-  readyWaiters.add(settle);
+  runner.pendingReady.add(settle);
   return promise;
 }
 
-/** Restarts are serialized: concurrent session switches must not kill each other's child. */
+/** Restarts are serialized: concurrent settings changes must not kill each other's child. */
 function enqueue<T>(task: () => Promise<T>): Promise<T> {
   const run = restartChain.then(task);
   restartChain = run.then(
@@ -292,34 +421,120 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** Switch the child to a cwd/resume pair and wait until it reports ready. */
-/** The session file the running child is writing, read from its own state. A
- *  fresh session has no `--resume` path yet, so this is the only way to keep it
- *  across a restart. */
-async function currentSessionFile(): Promise<string | null> {
-  if (resumePath && existsSync(resumePath)) return resumePath;
+/**
+ * The session file a running child is writing, read from its own state. A fresh
+ * session has no `--resume` path yet, so this is the only way to learn it (and to
+ * keep the conversation across a settings restart).
+ */
+async function currentSessionFile(runner: OmpRunner): Promise<string | null> {
+  if (runner.sessionFile && existsSync(runner.sessionFile)) return runner.sessionFile;
+  if (runner.resume && existsSync(runner.resume)) return runner.resume;
   try {
-    const response = await sendCommand({ type: "get_state" }, 10_000);
+    const response = await sendCommand({ type: "get_state" }, 10_000, runner);
     const data = response.data as { sessionFile?: string } | undefined;
     if (data?.sessionFile && existsSync(data.sessionFile)) return data.sessionFile;
   } catch {
     // The child may already be gone; the caller falls back to whatever it had.
   }
-  return resumePath;
+  return runner.sessionFile ?? runner.resume;
 }
 
-async function restartChild(next: { cwd?: string; resume?: string | null }) {
-  // A settings change restarts the child so omp picks up new flags (skills,
-  // extensions, model scope, approval mode). That restart must keep the
-  // conversation: ask the running child which session file it owns before
-  // stopping it, unless the caller explicitly asked for another session.
-  const keep = next.resume === undefined ? await currentSessionFile() : next.resume;
-  stopChild();
-  if (next.cwd !== undefined) workspace = next.cwd;
-  resumePath = keep ?? null;
+/** omp's own state names the log it is writing: remember it for this conversation. */
+function adoptStateFile(runner: OmpRunner, response: Json) {
+  const file = (response.data as { sessionFile?: unknown } | undefined)?.sessionFile;
+  if (typeof file !== "string" || !file || !existsSync(file) || runner.sessionFile === file) return;
+  runner.sessionFile = file;
+  if (runner.resume === null) runner.resume = file;
+  // The list is the only place the browser learns which conversations are open.
+  emit("sessions_changed", { reason: "session-file" });
+  // The conversation on screen just learned its own log: say so (highlight, metrics).
+  if (runner === activeRunner()) emitSession();
+}
+
+/** Ask the child which log it writes (a fresh session has no `--resume` yet). */
+async function rememberSessionFile(runner: OmpRunner) {
+  try {
+    adoptStateFile(runner, await sendCommand({ type: "get_state" }, 10_000, runner));
+  } catch {
+    // The child may already be gone; the file is learned on the next turn.
+  }
+}
+
+/** Restart one child (settings changed) and wait until it reports ready again. */
+async function restartRunner(runner: OmpRunner, next: { cwd?: string; resume?: string | null } = {}) {
+  // That restart must keep the conversation: ask the running child which session
+  // file it owns before stopping it, unless the caller explicitly asked for
+  // another session.
+  const keep = next.resume === undefined ? await currentSessionFile(runner) : next.resume;
+  stopChild(runner);
+  if (next.cwd !== undefined) runner.cwd = next.cwd;
+  runner.resume = keep ?? null;
+  runner.sessionFile = keep ?? null;
+  runner.frames.length = 0;
+  if (runner === activeRunner()) workspace = runner.cwd;
   sessionUsageCache = null;
-  startChild();
-  await awaitReady();
+  startChild(runner);
+  await awaitReady(runner);
+}
+
+/** Every open conversation restarts, so each child picks up the new flags. */
+async function restartChildren() {
+  await Promise.all([...runners.values()].map((runner) => restartRunner(runner)));
+}
+
+/**
+ * Attach lookup for `/api/session/open`: a fresh conversation only learns its own
+ * log once omp has written it, so ask the children that have not reported one yet
+ * before starting a second child on the same file (two writers, one log).
+ */
+async function findRunnerForSession(file: string): Promise<OmpRunner | undefined> {
+  const known = findBySession(file);
+  if (known) return known;
+  const target = path.resolve(file);
+  for (const runner of runners.values()) {
+    if (runner.sessionFile) continue;
+    await rememberSessionFile(runner);
+    if (runner.sessionFile && path.resolve(runner.sessionFile) === target) return runner;
+  }
+  return undefined;
+}
+
+/**
+ * The child for one conversation: attach to the one already running it — that is
+ * what keeps a turn alive while the user looks at another session — or start it.
+ */
+async function openRunner(next: { cwd: string; resume: string | null }): Promise<OmpRunner> {
+  const existing = next.resume ? await findRunnerForSession(next.resume) : undefined;
+  if (existing) {
+    if (existing.child && existing.readyChild === existing.child) return existing;
+    if (!existing.child) startChild(existing);
+    await awaitReady(existing);
+    return existing;
+  }
+  const runner = createRunner(next);
+  runners.set(runner.id, runner);
+  startChild(runner);
+  await awaitReady(runner);
+  pruneRunners();
+  return runner;
+}
+
+/** Each child is a full agent process: drop the oldest idle conversation past the cap. */
+function pruneRunners() {
+  if (runners.size <= MAX_RUNNERS) return;
+  const idle = [...runners.values()]
+    .filter((runner) => runner !== activeRunner() && !runner.busy && runner.pending.size === 0)
+    .sort((a, b) => a.lastUsedAt - b.lastUsedAt);
+  while (runners.size > MAX_RUNNERS && idle.length > 0) {
+    const runner = idle.shift()!;
+    stopChild(runner);
+    runners.delete(runner.id);
+    emit("log", {
+      level: "info",
+      message: `sessions: closed idle conversation ${path.basename(runner.sessionFile ?? runner.cwd)} (at most ${MAX_RUNNERS} stay open)`,
+    });
+    emit("sessions_changed", { reason: "pruned" });
+  }
 }
 
 // ---------------------------------------------------------------- omp cli: version, updates, scopes
@@ -567,19 +782,21 @@ async function writeOmpArray(key: string, values: string[]): Promise<void> {
   else await runOmpCli(["config", "set", key, JSON.stringify(values)], { timeoutMs: 30_000 });
 }
 
-function sendCommand(command: Json, timeoutMs = 120000): Promise<Json> {
+/** One RPC command for one conversation; defaults to the session on screen. */
+function sendCommand(command: Json, timeoutMs = 120000, runner: OmpRunner | null = activeRunner()): Promise<Json> {
   const { promise, resolve } = Promise.withResolvers<Json>();
-  if (!child || !child.stdin.writable) {
+  const proc = runner?.child;
+  if (!runner || !proc || !proc.stdin.writable) {
     resolve({ type: "response", command: command.type, success: false, error: "omp rpc process is not running" });
     return promise;
   }
   const id = command.id || `web-${++rpcId}`;
   const timer = setTimeout(() => {
-    pending.delete(id);
+    runner.pending.delete(id);
     resolve({ type: "response", command: command.type, success: false, error: `timeout waiting for ${command.type}` });
   }, timeoutMs);
-  pending.set(id, { resolve, timer });
-  child.stdin.write(`${JSON.stringify({ ...command, id })}\n`);
+  runner.pending.set(id, { resolve, timer });
+  proc.stdin.write(`${JSON.stringify({ ...command, id })}\n`);
   return promise;
 }
 
@@ -597,6 +814,10 @@ interface SessionSummary {
   live: boolean;
   /** The session this bridge is currently running. */
   current: boolean;
+  /** A child of this bridge has the session open (it may still be working). */
+  running: boolean;
+  /** That child is mid-turn. */
+  busy: boolean;
 }
 
 function readHead(file: string, bytes = 65536): string {
@@ -749,6 +970,7 @@ function collectFiles(root: string, suffix: string, depth = 0): string[] {
 function scanSessions(limit = 400): SessionSummary[] {
   const out: SessionSummary[] = [];
   const now = Date.now();
+  const activeFile = activeSessionFile();
   for (const full of collectSessionFiles()) {
     let mtime: number;
     let size: number;
@@ -760,11 +982,14 @@ function scanSessions(limit = 400): SessionSummary[] {
       continue;
     }
     const fallbackId = path.basename(full).replace(/\.jsonl$/, "");
+    const runner = findBySession(full);
     out.push({
       path: full,
       ...summarizeSessionFile(full, fallbackId, mtime, size),
       live: now - mtime < 90000,
-      current: Boolean(resumePath) && path.resolve(resumePath as string) === path.resolve(full),
+      current: Boolean(activeFile) && path.resolve(activeFile as string) === path.resolve(full),
+      running: Boolean(runner?.child),
+      busy: Boolean(runner?.busy),
     });
   }
   out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
@@ -834,8 +1059,8 @@ function scanArchived(limit = 400): ArchivedSession[] {
 
 /** A session an agent may still be appending to must not be moved or deleted. */
 function assertNotLive(file: string) {
-  if (resumePath && path.resolve(resumePath) === path.resolve(file)) {
-    throw new Error("this is the session the bridge is currently running — open another session first");
+  if (findBySession(file)?.child) {
+    throw new Error("this conversation is open in the bridge right now — open another session first");
   }
   const age = Date.now() - statSync(file).mtimeMs;
   if (age < 120000) {
@@ -888,19 +1113,30 @@ const app = express();
 app.use(express.json({ limit: "32mb" }));
 
 app.get("/api/health", (_req, res) => {
+  const runner = activeRunner();
   res.json({
     ok: true,
-    status: childStatus,
-    // Fingerprint of the code this process started with (see vite.config.ts).
+    status: runner?.status ?? "stopped",
+    // Fingerprint of the code this process started with, and the same file now:
+    // `codeId !== codeIdNow` means this bridge predates the latest edit/rebuild.
     codeId: SERVER_CODE_ID,
+    codeIdNow: serverCodeIdNow(),
     // How to start a bridge that serves the current source.
     restartHint: RESTART_HINT,
     workspace,
-    resumePath,
+    resumePath: activeSessionFile(),
+    sessionKey: runner?.id ?? null,
     ompBin: OMP_BIN,
     exit: lastExit,
     sessionRoot: SESSION_ROOT,
     archiveRoot: ARCHIVE_ROOT,
+    openSessions: [...runners.values()].map((entry) => ({
+      sessionKey: entry.id,
+      cwd: entry.cwd,
+      sessionFile: entry.sessionFile,
+      status: entry.status,
+      busy: entry.busy,
+    })),
   });
 });
 
@@ -911,8 +1147,19 @@ app.get("/api/events", (req, res) => {
     Connection: "keep-alive",
     "X-Accel-Buffering": "no",
   });
-  res.write(`event: hello\ndata: ${JSON.stringify({ status: childStatus, workspace })}\n\n`);
-  for (const frame of frameLog.slice(-120)) res.write(`event: frame\ndata: ${JSON.stringify(frame)}\n\n`);
+  const runner = activeRunner();
+  const hello = {
+    status: runner?.status ?? "stopped",
+    sessionKey: runner?.id ?? null,
+    workspace,
+    resumePath: activeSessionFile(),
+  };
+  res.write(`event: hello\ndata: ${JSON.stringify(hello)}\n\n`);
+  // Only the session on screen is replayed: the others keep running, and their
+  // frames belong to a transcript this browser is not showing.
+  for (const frame of (runner?.frames ?? []).slice(-120)) {
+    res.write(`event: frame\ndata: ${JSON.stringify({ ...frame, sessionKey: runner?.id ?? null })}\n\n`);
+  }
   sseClients.add(res);
   const heartbeat = setInterval(() => res.write(": ping\n\n"), 20000);
   req.on("close", () => {
@@ -945,15 +1192,20 @@ app.get("/api/sessions/search", (req, res) => {
   res.json({ query, matches: searchSessions(query) });
 });
 
-function sessionSnapshot() {
+function sessionSnapshot(runner: OmpRunner) {
   return {
-    workspace,
-    resumePath,
-    status: childStatus,
+    sessionKey: runner.id,
+    workspace: runner.cwd,
+    resumePath: runner.sessionFile ?? runner.resume,
+    status: runner.status,
   };
 }
 
-/** Point the single omp child at an existing session file (resume) or a fresh one. */
+/**
+ * Open an existing session: attach to the child already running it (so a turn in
+ * flight is never interrupted) or start one. The conversation that was on screen
+ * keeps its process — switching is not closing.
+ */
 app.post("/api/session/open", async (req, res) => {
   const requested = String(req.body?.path || "");
   const resolved = path.resolve(requested);
@@ -986,25 +1238,23 @@ app.post("/api/session/open", async (req, res) => {
   }
   const summary = scanSessions().find((s) => path.resolve(s.path) === resolved);
   const cwd = summary?.cwd && existsSync(summary.cwd) ? summary.cwd : workspace;
-  // The restart and the transcript reads must not be interleaved with another session switch,
-  // otherwise the child is killed mid-read and the UI shows an empty transcript.
   try {
-    const payload = await enqueue(async () => {
-      await restartChild({ cwd, resume: resolved });
-      const [state, messages, entries, branches] = await Promise.all([
-        sendCommand({ type: "get_state" }, 20000),
-        sendCommand({ type: "get_messages" }, 20000),
-        sendCommand({ type: "get_entries" }, 20000),
-        sendCommand({ type: "get_branch_messages" }, 20000),
-      ]);
-      return {
-        ...sessionSnapshot(),
-        state: state.data ?? null,
-        messages: messages.data?.messages ?? [],
-        entries: entries.data?.entries ?? [],
-        branches: branches.data?.messages ?? [],
-      };
-    });
+    const runner = await openRunner({ cwd, resume: resolved });
+    setActive(runner);
+    const [state, messages, entries, branches] = await Promise.all([
+      sendCommand({ type: "get_state" }, 20000, runner),
+      sendCommand({ type: "get_messages" }, 20000, runner),
+      sendCommand({ type: "get_entries" }, 20000, runner),
+      sendCommand({ type: "get_branch_messages" }, 20000, runner),
+    ]);
+    adoptStateFile(runner, state);
+    const payload = {
+      ...sessionSnapshot(runner),
+      state: state.data ?? null,
+      messages: messages.data?.messages ?? [],
+      entries: entries.data?.entries ?? [],
+      branches: branches.data?.messages ?? [],
+    };
     res.json(payload);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
@@ -1113,7 +1363,7 @@ function readSessionUsage(requested?: string | null): SessionUsage {
   /* A brand-new session has no `--resume` path on the bridge, but omp's
      `get_state` reports the file it just created, so the UI passes it along.
      Only paths inside the session root are honoured. */
-  let file = resumePath;
+  let file = activeSessionFile();
   if (requested) {
     const resolved = path.resolve(requested);
     if (resolved.startsWith(path.resolve(SESSION_ROOT) + path.sep) && resolved.endsWith(".jsonl") && existsSync(resolved)) {
@@ -1162,21 +1412,24 @@ app.get("/api/session/usage", (req, res) => {
 
 app.get("/api/session/current", async (_req, res) => {
   try {
-    const payload = await enqueue(async () => {
-      const [state, messages, entries, branches] = await Promise.all([
-        sendCommand({ type: "get_state" }, 20000),
-        sendCommand({ type: "get_messages" }, 20000),
-        sendCommand({ type: "get_entries" }, 20000),
-        sendCommand({ type: "get_branch_messages" }, 20000),
-      ]);
-      return {
-        ...sessionSnapshot(),
-        state: state.data ?? null,
-        messages: messages.data?.messages ?? [],
-        entries: entries.data?.entries ?? [],
-        branches: branches.data?.messages ?? [],
-      };
-    });
+    const runner = activeRunner();
+    if (!runner) {
+      res.status(409).json({ error: "no conversation is open" });
+      return;
+    }
+    const [state, messages, entries, branches] = await Promise.all([
+      sendCommand({ type: "get_state" }, 20000, runner),
+      sendCommand({ type: "get_messages" }, 20000, runner),
+      sendCommand({ type: "get_entries" }, 20000, runner),
+      sendCommand({ type: "get_branch_messages" }, 20000, runner),
+    ]);
+    const payload = {
+      ...sessionSnapshot(runner),
+      state: state.data ?? null,
+      messages: messages.data?.messages ?? [],
+      entries: entries.data?.entries ?? [],
+      branches: branches.data?.messages ?? [],
+    };
     res.json(payload);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
@@ -1184,18 +1437,18 @@ app.get("/api/session/current", async (_req, res) => {
 });
 
 app.post("/api/session/new", async (req, res) => {
-  const cwd = String(req.body?.cwd || workspace).trim();
+  const cwd = String(req.body?.cwd || pendingCwd || workspace).trim();
   if (!existsSync(cwd)) {
     res.status(400).json({ error: `directory not found: ${cwd}` });
     return;
   }
   try {
-    const payload = await enqueue(async () => {
-      await restartChild({ cwd, resume: null });
-      const state = await sendCommand({ type: "get_state" }, 20000);
-      return { ...sessionSnapshot(), state: state.data ?? null, messages: [], entries: [], branches: [] };
-    });
-    res.json(payload);
+    const runner = await openRunner({ cwd, resume: null });
+    pendingCwd = null;
+    setActive(runner);
+    const state = await sendCommand({ type: "get_state" }, 20000, runner);
+    adoptStateFile(runner, state);
+    res.json({ ...sessionSnapshot(runner), state: state.data ?? null, messages: [], entries: [], branches: [] });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -1214,7 +1467,6 @@ app.post("/api/sessions/delete", (req, res) => {
     return;
   }
   unlinkSync(resolved);
-  if (resumePath && path.resolve(resumePath) === resolved) resumePath = null;
   res.json({ ok: true, sessions: scanSessions(), archived: scanArchived() });
 });
 
@@ -1222,7 +1474,6 @@ app.post("/api/sessions/delete", (req, res) => {
 app.post("/api/sessions/archive", (req, res) => {
   try {
     const { key } = archiveSession(String(req.body?.path || ""));
-    if (resumePath && path.resolve(String(req.body?.path || "")) === path.resolve(resumePath)) resumePath = null;
     res.json({ ok: true, key, sessions: scanSessions(), archived: scanArchived() });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
@@ -1238,14 +1489,19 @@ app.post("/api/sessions/restore", (req, res) => {
   }
 });
 
-app.post("/api/workspace", async (req, res) => {
+/**
+ * Point the agent at another folder on this machine. The running conversation is
+ * not killed: the caller starts a fresh session there (which is what the picker
+ * does), and the previous one keeps its child until the pool needs the slot.
+ */
+app.post("/api/workspace", (req, res) => {
   const next = String(req.body?.cwd || "").trim();
   if (!next || !existsSync(next)) {
     res.status(400).json({ error: `directory not found: ${next}` });
     return;
   }
-  await restartChild({ cwd: next, resume: null });
-  res.json({ ok: true, workspace });
+  pendingCwd = next;
+  res.json({ ok: true, workspace: next, sessionKey: activeRunner()?.id ?? null });
 });
 
 /** omp subcommands the UI may run; keeps the bridge from becoming a generic shell. */
@@ -1436,7 +1692,7 @@ app.post("/api/omp/models/add", async (req, res) => {
     allowed.add(selector);
     const next = universe.filter((candidate) => allowed.has(candidate));
     await writeOmpArray("enabledModels", next.length === universe.length ? [] : next);
-    await enqueue(() => restartChild({}));
+    await enqueue(restartChildren);
     emit("log", { level: "info", message: `models.add: ${selector} (enabled${refreshed ? ", catalog refreshed" : ""})` });
     res.json({ ok: true, selector, refreshed, name: known.name ?? known.id, restarted: true });
   } catch (error) {
@@ -1562,11 +1818,15 @@ interface CustomProvider {
 }
 
 /** Parse the subset of models.yml this panel owns; anything else is preserved. */
-function parseModelsYml(text: string): { providers: CustomProvider[]; header: string[]; unparsed: string[] } {
+function parseModelsYml(text: string): { providers: CustomProvider[]; header: string[]; unparsed: string[]; duplicateRoots: number } {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const providers: CustomProvider[] = [];
   const header: string[] = [];
   const unparsed: string[] = [];
+  // A repeated `providers:` root is invalid enough that omp drops every custom
+  // provider (it saw the file as one key overridden). Count them so the panel can
+  // say what happened and one save merges them back into one root.
+  const duplicateRoots = Math.max(0, lines.filter((line) => /^providers:\s*$/.test(line)).length - 1);
   let current: CustomProvider | null = null;
   let model: CustomModel | null = null;
   const scalar = (raw: string): string => {
@@ -1584,8 +1844,9 @@ function parseModelsYml(text: string): { providers: CustomProvider[]; header: st
       model = null;
       continue;
     }
+    if (/^providers:\s*$/.test(line)) continue;
     if (!current) {
-      if (line.trim() && !/^providers:\s*$/.test(line)) header.push(line);
+      if (line.trim()) header.push(line);
       continue;
     }
     // A model block starts at this indent whether or not one is already open.
@@ -1624,7 +1885,7 @@ function parseModelsYml(text: string): { providers: CustomProvider[]; header: st
     if (/^ {4,}\S/.test(line)) current.extra.push(line);
     else unparsed.push(line);
   }
-  return { providers, header, unparsed };
+  return { providers, header, unparsed, duplicateRoots };
 }
 
 /** Quote only when a plain scalar would be ambiguous, so the file stays readable. */
@@ -1651,14 +1912,19 @@ function renderModelsYml(providers: CustomProvider[], header: string[]): string 
   return `${out.join("\n")}\n`;
 }
 
-function readModelsFile(): { providers: CustomProvider[]; raw: string; warning?: string } {
-  if (!existsSync(modelsFile())) return { providers: [], raw: "" };
+function readModelsFile(): { providers: CustomProvider[]; raw: string; warning?: string; duplicateRoots: number } {
+  if (!existsSync(modelsFile())) return { providers: [], raw: "", duplicateRoots: 0 };
   const raw = readFileSync(modelsFile(), "utf8");
   try {
     const parsed = parseModelsYml(raw);
-    return { providers: parsed.providers, raw, warning: parsed.unparsed.length > 0 ? `${parsed.unparsed.length} line(s) outside the managed shape were left untouched` : undefined };
+    return {
+      providers: parsed.providers,
+      raw,
+      duplicateRoots: parsed.duplicateRoots,
+      warning: parsed.unparsed.length > 0 ? `${parsed.unparsed.length} line(s) outside the managed shape were left untouched` : undefined,
+    };
   } catch (error) {
-    return { providers: [], raw, warning: error instanceof Error ? error.message : String(error) };
+    return { providers: [], raw, duplicateRoots: 0, warning: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -1667,10 +1933,11 @@ const maskKey = (key: string) => (key ? `${key.slice(0, 6)}…${key.slice(-4)} (
 
 app.get("/api/omp/custom-providers", (_req, res) => {
   try {
-    const { providers, warning } = readModelsFile();
+    const { providers, warning, duplicateRoots } = readModelsFile();
     res.json({
       path: modelsFile(),
       warning,
+      duplicateRoots,
       providers: providers.map((provider) => ({
         name: provider.name,
         baseUrl: provider.baseUrl,
@@ -1740,7 +2007,7 @@ app.post("/api/omp/custom-providers", async (req, res) => {
     }
     writeFileSync(modelsFile(), renderModelsYml(keep, header), "utf8");
     // omp resolves providers at startup.
-    await enqueue(() => restartChild({}));
+    await enqueue(restartChildren);
     emit("log", { level: "info", message: `models.endpoint: ${action} ${name} in ${modelsFile()} (session restarted)` });
     res.json({ ok: true, path: modelsFile(), providers: keep.map((provider) => provider.name), restarted: true });
   } catch (error) {
@@ -2015,7 +2282,7 @@ app.post("/api/skills/create", async (req, res) => {
   try {
     mkdirSync(dir, { recursive: true });
     writeFileSync(file, `${frontMatter}\n${body}\n`, "utf8");
-    await enqueue(() => restartChild({}));
+    await enqueue(restartChildren);
     emit("log", { level: "info", message: `skill.create: ${name} -> ${file}` });
     res.json({ ok: true, name, path: file, global });
   } catch (error) {
@@ -2318,17 +2585,19 @@ app.post("/api/git/commit", async (req, res) => {
 const approvalLog: Array<{ at: string; method: string; title: string }> = [];
 
 app.get("/api/security/overview", (_req, res) => {
+  const runner = activeRunner();
+  const argv = runner?.launchArgs ?? [];
   res.json({
     workspace,
     launch: {
       ompBin: OMP_BIN,
-      argv: launchArgs,
+      argv,
       sessionCwd: workspace,
-      resumePath,
-      toolsDisabled: launchArgs.includes("--no-tools"),
-      ptyDisabled: launchArgs.includes("--no-pty"),
-      lspDisabled: launchArgs.includes("--no-lsp"),
-      autoApprove: launchArgs.includes("--auto-approve"),
+      resumePath: activeSessionFile(),
+      toolsDisabled: argv.includes("--no-tools"),
+      ptyDisabled: argv.includes("--no-pty"),
+      lspDisabled: argv.includes("--no-lsp"),
+      autoApprove: argv.includes("--auto-approve"),
     },
     approvals: approvalLog.slice(-50),
     approvalCount: approvalLog.length,
@@ -2510,7 +2779,7 @@ app.post("/api/skills/enable", async (req, res) => {
   try {
     toggleSkillFrontMatter(file, enabled);
     // omp reads skills at session start.
-    await enqueue(() => restartChild({}));
+    await enqueue(restartChildren);
     emit("log", { level: "info", message: `skill.enable: ${name} -> ${enabled ? "on" : "off"}` });
     res.json({ ok: true, name, enabled, restarted: true, path: file });
   } catch (error) {
@@ -2591,7 +2860,7 @@ app.get("/api/fs/raw", (req, res) => {
   const root = path.resolve(workspace);
   const resolved = path.resolve(requested);
   if (!requested || (resolved !== root && !resolved.startsWith(root + path.sep))) {
-    res.status(403).json({ error: "path outside the workspace" });
+    res.status(403).json({ error: `path is outside the agent's workspace (${root})` });
     return;
   }
   try {
@@ -2889,7 +3158,7 @@ app.post("/api/fs/annotate", (req, res) => {
   const root = path.resolve(workspace);
   const resolved = path.resolve(source);
   if (!source || (resolved !== root && !resolved.startsWith(root + path.sep))) {
-    res.status(403).json({ error: "path outside the workspace" });
+    res.status(403).json({ error: `path is outside the agent's workspace (${root})` });
     return;
   }
   const match = dataUrl.match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
@@ -2983,7 +3252,7 @@ app.get("/api/fs/list", (req, res) => {
   const root = path.resolve(workspace);
   const resolved = path.resolve(requested);
   if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-    res.status(403).json({ error: "path outside the workspace" });
+    res.status(403).json({ error: `path is outside the agent's workspace (${root})` });
     return;
   }
   try {
@@ -3019,7 +3288,7 @@ app.get("/api/fs/file", async (req, res) => {
   const root = path.resolve(workspace);
   const resolved = path.resolve(requested);
   if (!requested || (resolved !== root && !resolved.startsWith(root + path.sep))) {
-    res.status(403).json({ error: "path outside the workspace" });
+    res.status(403).json({ error: `path is outside the agent's workspace (${root})` });
     return;
   }
   const limit = Math.min(Math.max(Number(req.query.limit ?? 200_000) || 200_000, 1000), 1_000_000);
@@ -3190,10 +3459,11 @@ app.post("/api/omp/update", async (req, res) => {
       return;
     }
     const output = await enqueue(async () => {
-      stopChild();
+      // The binary is being replaced: every open conversation has to come down.
+      for (const runner of runners.values()) stopChild(runner);
       const result = await runOmpCli(["update", ...(force ? ["--force"] : [])], { timeoutMs: 600_000 });
-      startChild();
-      await awaitReady();
+      for (const runner of runners.values()) startChild(runner);
+      await Promise.all([...runners.values()].map((runner) => awaitReady(runner)));
       return result;
     });
     ompUpdateCache = null;
@@ -3202,10 +3472,11 @@ app.post("/api/omp/update", async (req, res) => {
     emit("log", { level: "info", message: `omp update finished (${version ?? "unknown version"})` });
     res.json({ ok: true, version, output: output.slice(-4000), status });
   } catch (error) {
-    // The session must come back even when the update itself failed.
-    if (!child) {
-      startChild();
-      await awaitReady().catch(() => {});
+    // The conversations must come back even when the update itself failed.
+    const stopped = [...runners.values()].filter((runner) => !runner.child);
+    if (stopped.length > 0) {
+      for (const runner of stopped) startChild(runner);
+      await Promise.all(stopped.map((runner) => awaitReady(runner))).catch(() => {});
     }
     ompVersionCache = null;
     res.status(500).json({
@@ -3230,7 +3501,7 @@ app.post("/api/extensions/scope", async (req, res) => {
     await runOmpCli(["plugin", enabled ? "enable" : "disable", name, "--json"], { timeoutMs: 60_000 });
     pluginCatalogCache = null;
     await installedPluginEntries();
-    await enqueue(() => restartChild({}));
+    await enqueue(restartChildren);
     emit("log", { level: "info", message: `extension.global: ${name} ${enabled ? "on" : "off"}` });
     res.json({ ok: true, name, enabled, restarted: true });
   } catch (error) {
@@ -3264,7 +3535,7 @@ app.post("/api/omp/approval", async (req, res) => {
     await runOmpCli(["config", "set", "tools.approvalMode", mode], { timeoutMs: 30_000 });
     const applied = await readOmpConfigValue("tools.approvalMode");
     // omp reads its settings at startup.
-    await enqueue(() => restartChild({}));
+    await enqueue(restartChildren);
     emit("log", { level: "info", message: `tools.approvalMode: ${mode} (session restarted)` });
     res.json({ ok: true, mode: isApprovalMode(applied) ? applied : mode, restarted: true });
   } catch (error) {
@@ -3334,7 +3605,7 @@ app.post("/api/omp/models/scope", async (req, res) => {
 
     const next = await readOmpScope();
     // omp resolves the model catalog at startup.
-    await enqueue(() => restartChild({}));
+    await enqueue(restartChildren);
     emit("log", {
       level: "info",
       message:
@@ -3377,7 +3648,7 @@ app.post("/api/project/scope", async (req, res) => {
     pluginCatalogCache = null;
     await installedPluginEntries();
     // The flags are applied when the agent starts.
-    await enqueue(() => restartChild({}));
+    await enqueue(restartChildren);
     emit("log", {
       level: "info",
       message: `project.scope: ${kind} ${name} ${enabled ? "enabled here" : "disabled here"}`,
@@ -3473,7 +3744,10 @@ serveFrontend()
   .then(async () => {
     // Project-pinned extensions need their entry paths before the first spawn.
     await installedPluginEntries();
-    startChild();
+    const runner = createRunner({ cwd: workspace, resume: process.env.OMP_RESUME || null });
+    runners.set(runner.id, runner);
+    setActive(runner);
+    startChild(runner);
     app.listen(PORT, HOST, () => {
       console.log(`OMP Studio: http://localhost:${PORT}/  (omp: ${OMP_BIN}, cwd: ${workspace})`);
     });
@@ -3484,6 +3758,6 @@ serveFrontend()
   });
 
 process.on("SIGINT", () => {
-  stopChild();
+  for (const runner of runners.values()) stopChild(runner);
   process.exit(0);
 });

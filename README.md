@@ -143,16 +143,16 @@ browser ──HTTP/SSE──> server.ts (Express) ──stdin/stdout JSON──>
 ```
 
 * One Express process hosts both the SPA and ~54 JSON endpoints; the dev server mounts Vite as middleware, production serves `dist/`.
-* `/api/events` streams omp's frames (SSE) and the bridge's own log lines to the UI.
-* The bridge spawns `omp --mode rpc-ui`, forwards commands, and adds the flags omp needs for the project scope (`--skills=`, `--no-extensions`).
-* A settings change restarts the child with the **same session file** (`--resume`), so toggling a skill never loses the conversation.
+* `/api/events` streams omp's frames (SSE) and the bridge's own log lines to the UI. Every frame carries the `sessionKey` of the conversation it belongs to.
+* The bridge keeps **one `omp --mode rpc-ui` child per open conversation**, forwards commands, and adds the flags omp needs for the project scope (`--skills=`, `--no-extensions`). Opening another conversation attaches to (or starts) its own child, so a turn that is running keeps running; the pool is bounded at four children, oldest idle first.
+* A settings change restarts every open child with its **same session file** (`--resume`), so toggling a skill never loses a conversation.
 * Panels read omp's files directly: `usage.db` for billing, `models.db` for catalogs, the session `.jsonl` for metrics, and `git` for the repository surfaces.
 
 ### Development
 
 ```bash
 bun run lint         # tsc --noEmit
-bun run test:e2e     # 18 bridge checks against a running dev server
+bun run test:e2e     # 26 bridge checks against a running dev server
 bun run build        # production SPA into dist/
 ```
 

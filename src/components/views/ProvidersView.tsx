@@ -116,7 +116,7 @@ export const ProvidersView: React.FC = () => {
   const [providerMessage, setProviderMessage] = useState<Record<string, string>>({});
   const [catalogBusy, setCatalogBusy] = useState<string | null>(null);
   /** Custom endpoints from omp's models.yml (providers omp would not ship). */
-  const [endpoints, setEndpoints] = useState<{ path: string; warning?: string; providers: CustomEndpoint[] } | null>(null);
+  const [endpoints, setEndpoints] = useState<{ path: string; warning?: string; duplicateRoots: number; providers: CustomEndpoint[] } | null>(null);
   const [endpointForm, setEndpointForm] = useState<{ name: string; baseUrl: string; api: string; apiKey: string; models: string }>({
     name: '',
     baseUrl: '',
@@ -742,6 +742,20 @@ export const ProvidersView: React.FC = () => {
                 : 'omp reads custom compatible endpoints (OpenAI / Anthropic / Google-protocol gateways, Ollama, vLLM…) from this YAML. Saving restarts the session; fields this app does not manage are preserved verbatim.'}
             </p>
 
+            {endpoints && endpoints.duplicateRoots > 0 && (
+              <div className="p-2 rounded border border-[#ef4444]/40 bg-[#ef4444]/10 text-[10px] text-[#f87171] space-y-1">
+                <div>
+                  {zh
+                    ? `models.yml 里有 ${endpoints.duplicateRoots + 1} 个 providers: 根键（重复）。YAML 会取后一个，omp 因此把所有自定义提供商都当成失效 —— 上面列表里可能什么都连不上。`
+                    : `models.yml repeats the providers: root key ${endpoints.duplicateRoots + 1} times. YAML keeps one of them, so omp drops every custom provider and nothing above can connect.`}
+                </div>
+                <div className="text-[#a1a1aa]">
+                  {zh
+                    ? '点一次「保存端点」就会把它们合并成一个根键，再重启会话即可生效。'
+                    : 'One "Save endpoint" merges them into a single root; the session restart applies it.'}
+                </div>
+              </div>
+            )}
             {endpoints?.warning && (
               <div className="p-2 rounded border border-[#f59e0b]/40 bg-[#f59e0b]/10 text-[10px] text-[#f59e0b]">{endpoints.warning}</div>
             )}

@@ -34,6 +34,68 @@ const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
   return <div className="markdown-body min-w-0">{nodes}</div>;
 });
 
+/**
+ * omp's stream rules inject `<system-reminder>…</system-reminder>` into the
+ * assistant text mid-turn (the time-traveling-rule feature). Its terminal shows
+ * those as an injected-rule card, so they get a collapsed chip here instead of
+ * spilling a raw XML block into the answer.
+ */
+function splitReminders(text: string): Array<{ kind: 'text' | 'reminder'; content: string }> {
+  const parts: Array<{ kind: 'text' | 'reminder'; content: string }> = [];
+  const pattern = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    const before = text.slice(last, match.index ?? 0).trim();
+    if (before) parts.push({ kind: 'text', content: before });
+    parts.push({ kind: 'reminder', content: match[1].trim() });
+    last = (match.index ?? 0) + match[0].length;
+  }
+  const tail = text.slice(last).trim();
+  if (tail) parts.push({ kind: 'text', content: tail });
+  return parts.length > 0 ? parts : [{ kind: 'text', content: text }];
+}
+
+const TextBlock = memo(function TextBlock({ text, zh }: { text: string; zh: boolean }) {
+  const parts = useMemo(() => splitReminders(text), [text]);
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+  return (
+    <div className="space-y-2 min-w-0">
+      {parts.map((part, index) =>
+        part.kind === 'text' ? (
+          <MarkdownBlock key={`md-${index}`} text={part.content} />
+        ) : (
+          <div key={`rem-${index}`} className="min-w-0">
+            <button
+              type="button"
+              onClick={() => setOpen((prev) => ({ ...prev, [index]: !(prev[index] === true) }))}
+              aria-expanded={open[index] === true}
+              title={
+                open[index] === true
+                  ? zh
+                    ? '收起这条中途注入的规则'
+                    : 'Hide this mid-turn rule'
+                  : zh
+                  ? '展开这条中途注入的规则'
+                  : 'Show this mid-turn rule'
+              }
+              className="flex items-center gap-1.5 px-2 py-1 rounded border border-[#f59e0b]/40 bg-[#f59e0b]/10 text-[10px] font-mono text-[#f59e0b] hover:bg-[#f59e0b]/20 transition-colors cursor-pointer"
+            >
+              {open[index] === true ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              <span>{zh ? '系统提醒（中途注入的规则）' : 'system reminder (rule injected mid-turn)'}</span>
+              <span className="text-[#a1a1aa]">· {part.content.split('\n').length} {zh ? '行' : 'lines'}</span>
+            </button>
+            {open[index] === true && (
+              <pre className="mt-1.5 max-h-[240px] overflow-auto p-2 rounded border border-[#1e1e24] bg-[#09090b] text-[10px] leading-[1.5] font-mono text-[#a1a1aa] whitespace-pre-wrap break-words">
+                {part.content}
+              </pre>
+            )}
+          </div>
+        )
+      )}
+    </div>
+  );
+});
+
 function compactTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
@@ -262,7 +324,7 @@ const AssistantBlocksView: React.FC<AssistantBlocksProps> = ({
           return <ToolBlock key={`tool-${group.block.id}`} block={group.block} zh={zh} onInsertCommand={onInsertCommand} />;
         }
         // Markdown only for what is actually on screen.
-        return <MarkdownBlock key={`text-${group.block.id}`} text={group.block.text} />;
+        return <TextBlock key={`text-${group.block.id}`} text={group.block.text} zh={zh} />;
       })}
       {hiddenWork > 0 && visible.length === 0 && (
         <p className="text-[11px] text-[#52525b] italic">

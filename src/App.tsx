@@ -76,6 +76,14 @@ export default function App() {
   });
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
+  /* The right panel's file explorer is rooted at the agent's workspace; it and
+     the git surfaces both belong to the project the agent moved into. */
+  useEffect(() => {
+    const onWorkspaceChanged = () => void git.refresh();
+    window.addEventListener('omp:workspace-changed', onWorkspaceChanged);
+    return () => window.removeEventListener('omp:workspace-changed', onWorkspaceChanged);
+  }, [git.refresh]);
+
   /* Anything in the workspace can ask for a right-panel tab (e.g. the task HUD's
      "details" button → 任务). */
   useEffect(() => {
@@ -113,25 +121,33 @@ export default function App() {
   }, []);
 
   /**
-   * A bridge started before this SPA was built serves older routes, so the first
-   * new call would fail with "unknown bridge endpoint". Compare fingerprints
-   * (the bridge reports the one it started with) and offer the restart command.
+   * A bridge process started before the latest edit serves fewer routes than the
+   * current source declares. The bridge reports the fingerprint of the code it
+   * started with and the fingerprint of the same file right now; when they
+   * differ, a restart is needed. Edits in flight change the file continuously,
+   * so the warning only appears after the mismatch persists for a minute.
    */
   const [staleBridge, setStaleBridge] = useState<{ running: string; expected: string; restartHint: string } | null>(null);
   useEffect(() => {
     let cancelled = false;
+    let mismatchedSince: number | null = null;
     const check = async () => {
       try {
         const res = await fetch('/api/health', { cache: 'no-store' });
-        const body = (await res.json()) as { codeId?: string; restartHint?: string };
+        const body = (await res.json()) as { codeId?: string; codeIdNow?: string; restartHint?: string };
         if (cancelled) return;
-        if (body.codeId && body.codeId !== __SERVER_CODE_ID__) {
-          setStaleBridge({
-            running: body.codeId,
-            expected: __SERVER_CODE_ID__,
-            restartHint: body.restartHint ?? 'bun run dev',
-          });
+        const stale = Boolean(body.codeId && body.codeIdNow && body.codeId !== body.codeIdNow);
+        if (stale) {
+          mismatchedSince = mismatchedSince ?? Date.now();
+          if (Date.now() - mismatchedSince > 60_000) {
+            setStaleBridge({
+              running: body.codeId!,
+              expected: body.codeIdNow!,
+              restartHint: body.restartHint ?? 'bun run dev',
+            });
+          }
         } else {
+          mismatchedSince = null;
           setStaleBridge(null);
         }
       } catch {

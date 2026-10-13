@@ -9,6 +9,7 @@
  */
 const BASE = process.argv.includes("--base") ? process.argv[process.argv.indexOf("--base") + 1] : "http://127.0.0.1:3000";
 import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const results = [];
 function check(name, ok, detail = "") {
@@ -87,7 +88,9 @@ check("bridge is running", health.status === 200 && health.body?.ok === true, JS
 
 const workspace = process.env.E2E_CWD || process.cwd();
 const stream = await openStream();
-await api("/api/session/new", { cwd: workspace });
+const firstSession = await api("/api/session/new", { cwd: workspace });
+// Which child of the bridge runs this conversation; every frame carries it.
+const keyA = firstSession.body?.sessionKey;
 // The SSE stream replays the last frames for late joiners; only frames after the
 // restart belong to this run.
 const mark = stream.frames.length;
@@ -146,6 +149,7 @@ if (summary) {
   const roles = (opened.body?.messages ?? []).map((message) => message.role);
   check("resume returns the transcript", roles.length > 0, `${roles.length} messages`);
   check("resume exposes log entry ids for branching", (opened.body?.entries ?? []).some((entry) => entry.type === "message" && entry.id), `${opened.body?.entries?.length} entries`);
+  check("resume attaches to the conversation already running it", opened.body?.sessionKey === keyA, `${opened.body?.sessionKey} vs ${keyA}`);
   const state = await api("/api/commands", { type: "get_branch_messages" });
   check("branch anchors are available", Array.isArray(state.body?.data?.messages), `${state.body?.data?.messages?.length} anchors`);
   const blocked = await api("/api/sessions/delete", { path: summary.path });
@@ -154,7 +158,56 @@ if (summary) {
     blocked.status === 409,
     String(blocked.body?.error ?? blocked.status)
   );
-  // A just-written session is intentionally protected by the API, so the harness removes it itself.
+}
+const outside = await api("/api/sessions/delete", { path: "C:/Windows/system.ini" });
+check("deletion refuses paths outside the session root", outside.status === 400, String(outside.body?.error));
+
+// --- switching conversations must not interrupt a running turn --------------
+// The bridge used to own one child and kill it on every session switch, so
+// opening another conversation aborted the turn that was running.
+await api("/api/commands", { type: "prompt", message: "Count slowly from 1 to 60, one number per line." });
+const started = await stream.until(
+  () => stream.frames.some((frame) => frame.sessionKey === keyA && frame.type === "message_update"),
+  60000
+);
+check("the first conversation streams", started);
+const switchMark = stream.frames.length;
+const second = await api("/api/session/new", { cwd: tmpdir() });
+check(
+  "a second conversation opens with its own child",
+  second.status === 200 && Boolean(second.body?.sessionKey) && second.body.sessionKey !== keyA,
+  `${second.body?.sessionKey} vs ${keyA}`
+);
+const keptStreaming = await stream.until(
+  () => stream.frames.slice(switchMark).some((frame) => frame.sessionKey === keyA && frame.type === "message_update"),
+  30000
+);
+check("the first conversation keeps streaming after the switch", keptStreaming);
+const open = await api("/api/health");
+check(
+  "both conversations stay open in the bridge",
+  (open.body?.openSessions ?? []).filter((entry) => entry.status === "ready").length >= 2,
+  JSON.stringify(open.body?.openSessions ?? [])
+);
+const finished = await stream.until(
+  () =>
+    stream.frames
+      .slice(switchMark)
+      .some((frame) => frame.sessionKey === keyA && frame.type === "prompt_result" && frame.status === "completed"),
+  240000
+);
+check("the first conversation finishes its turn in the background", finished);
+const back = await api("/api/session/open", { path: summary?.path ?? "" });
+check("reopening attaches to the same child", back.body?.sessionKey === keyA, `${back.body?.sessionKey} vs ${keyA}`);
+const lastAssistant = [...(back.body?.messages ?? [])].reverse().find((message) => message.role === "assistant");
+const lastText = (lastAssistant?.content ?? [])
+  .filter((block) => block.type === "text")
+  .map((block) => block.text)
+  .join("\n");
+check("the background turn finished in the transcript", /\b60\b/.test(lastText), `${lastText.length} chars`);
+
+// A just-written session is intentionally protected by the API, so the harness removes it itself.
+if (summary) {
   rmSync(summary.path, { force: true });
   const afterCleanup = await api("/api/sessions");
   check(
@@ -162,8 +215,9 @@ if (summary) {
     !(afterCleanup.body?.sessions ?? []).some((item) => item.id === fresh.body?.data?.sessionId)
   );
 }
-const outside = await api("/api/sessions/delete", { path: "C:/Windows/system.ini" });
-check("deletion refuses paths outside the session root", outside.status === 400, String(outside.body?.error));
+// The second conversation lived in a temp folder: its log goes too.
+const leftover = ((await api("/api/sessions")).body?.sessions ?? []).find((item) => item.cwd === tmpdir());
+if (leftover) rmSync(leftover.path, { force: true });
 
 await stream.close();
 const failed = results.filter((result) => !result.ok);

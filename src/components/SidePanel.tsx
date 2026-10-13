@@ -148,6 +148,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchHits, setSearchHits] = useState<Array<{ path: string; name: string }>>([]);
   const [treeRoot, setTreeRoot] = useState<string | null>(null);
+  /** Root the loaded entries belong to: a different one means another project. */
+  const treeRootRef = useRef<string | null>(null);
   const [viewerMode, setViewerMode] = useState<'source' | 'preview'>('source');
 
   // --- diffs tab ---
@@ -190,23 +192,60 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const notARepo = git.snapshot?.isRepo === false;
 
   const loadDir = useCallback(async (dirPath?: string) => {
+    setFileBusy(true);
     try {
       const listing = await fetchDirEntries(dirPath);
-      setEntriesByDir((prev) => ({ ...prev, [listing.path]: listing.entries }));
-      setTreeRoot((prev) => prev ?? listing.root);
+      if (treeRootRef.current !== null && treeRootRef.current !== listing.root) {
+        /* The agent moved to another project: nothing loaded under the old root
+           belongs in this tree any more (that stale path is what made the panel
+           answer 403 for a folder the bridge no longer serves). */
+        setEntriesByDir({ [listing.path]: listing.entries });
+        setExpandedDirs({});
+        setOpenFile(null);
+        setAnnotations([]);
+        setViewerMode('source');
+      } else {
+        setEntriesByDir((prev) => ({ ...prev, [listing.path]: listing.entries }));
+      }
+      treeRootRef.current = listing.root;
+      setTreeRoot(listing.root);
       setFileError(null);
       return listing;
     } catch (error) {
       setFileError(error instanceof Error ? error.message : String(error));
       return null;
+    } finally {
+      setFileBusy(false);
     }
   }, []);
+
+  /** Reload the root: `fetchDirEntries()` answers for whatever project is active. */
+  const reloadTree = useCallback(() => {
+    // A project switch changes the workspace; drop the previous project's tree,
+    // its expanded folders and any open file, or the explorer keeps showing the
+    // old root and refreshing a stale path answers 403.
+    setEntriesByDir({});
+    setExpandedDirs({});
+    setTreeRoot(null);
+    setOpenFile(null);
+    setFileError(null);
+    setSearchHits([]);
+    setSelectedCells([null, null]);
+    void loadDir();
+  }, [loadDir]);
 
   // Root listing the first time the files tab is shown.
   useEffect(() => {
     if (!isOpen || activeTab !== 'files' || Object.keys(entriesByDir).length > 0) return;
     void loadDir();
   }, [isOpen, activeTab, entriesByDir, loadDir]);
+
+  /* Switching project (another session's folder, the workspace picker) moves the
+     agent, and the explorer is rooted at the agent's workspace: follow it. */
+  useEffect(() => {
+    window.addEventListener('omp:workspace-changed', reloadTree);
+    return () => window.removeEventListener('omp:workspace-changed', reloadTree);
+  }, [reloadTree]);
 
   /* The diffs tab and the git tab render the same working-tree payload; the git
      tab used to render the list without ever loading it, so it always claimed
@@ -695,11 +734,12 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               />
               <button
                 type="button"
-                onClick={() => void loadDir(treeRoot ?? undefined)}
+                onClick={reloadTree}
+                disabled={fileBusy}
                 title={zh ? '重新加载目录' : 'Reload directory'}
-                className="p-1 text-[#71717a] hover:text-[#fafafa] cursor-pointer"
+                className="p-1 text-[#71717a] hover:text-[#fafafa] cursor-pointer disabled:opacity-50"
               >
-                <RefreshCw className="w-3 h-3" />
+                <RefreshCw className={`w-3 h-3 ${fileBusy ? 'animate-spin' : ''}`} />
               </button>
               {openFile && (
                 <button

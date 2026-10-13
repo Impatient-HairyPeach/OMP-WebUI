@@ -5,12 +5,43 @@ Settings (`v<version> · <build date>`).
 
 ## 0.3.36
 
-- **A turn's work folds as one block.** A long agentic turn is a dozen model
-  calls, so it used to be a dozen thinking folds and a dozen tool rows, all
-  open. Each turn now carries one header above the answer:
-  `处理详情 · 3 条消息 · 5 次工具调用`, collapsed by default and expanding to
-  every thinking and tool block of that turn at once. While a turn is streaming
-  the work stays visible, so progress is never hidden behind a fold.
+- **The stale-bridge warning can actually go away now.** It compared the
+  bridge's startup fingerprint against a fingerprint baked into the SPA at build
+  time, so a built SPA plus a bridge started before the last edit warned forever:
+  restarting never rebuilds `dist`, so nothing the user did could satisfy it. The
+  bridge reports both the fingerprint it started with (`codeId`) and the
+  fingerprint of the same file right now (`codeIdNow`); the header warns only
+  when those differ and the mismatch has held for a minute, and the tooltip names
+  the real remedy (restart, rebuild first when serving a built copy).
+- **The file explorer follows a project switch.** The workspace-change handler
+  reset the tree before reloading, so the previous project's root, expanded
+  folders and open file no longer linger and refreshing a stale path no longer
+  answers `403 path outside the workspace`.
+
+- **A turn's work folds as one block, and it folds mid-generation.** A long
+  agentic turn is a dozen model calls, so it used to be a dozen thinking folds
+  and a dozen tool rows, all open. Each turn now carries one header above the
+  answer: `处理详情 · 3 条消息 · 5 次工具调用 · 思考 4 段 · 2.1k 字`, expanding to
+  every thinking and tool block of that turn at once. The header is plain text
+  (no chip, no border) and the work still shows while the turn streams, but the
+  click always wins: a turn that is flooding the answer with reasoning can be
+  folded while it runs, and the header says `已折叠，仍在生成` until it settles.
+- **Switching conversations no longer kills the one that is running.** The
+  bridge owned a single `omp` child and restarted it on every session switch, so
+  opening another conversation aborted whatever turn was in flight. It now keeps
+  **one child per open conversation** (bounded at four, oldest idle first):
+  opening a session attaches to the child already running it, the previous
+  conversation keeps streaming in the background, and the session list marks
+  which conversations are mid-turn. Frames carry their `sessionKey`, so only the
+  conversation on screen reaches the transcript.
+- **The right panel's file explorer follows the project.** It was rooted once and
+  never re-rooted, so after switching project it kept showing the previous
+  folder — and its refresh asked the bridge for a path outside the active
+  workspace, which answered `403`. The tree now re-roots when the agent moves
+  (another project's session, the workspace picker), dropping the old folder's
+  entries and expanded rows, and the refresh button always reloads the project
+  the agent is in. Errors now read `path is outside the agent's workspace (…)`
+  instead of a raw `/api/fs/list?path=… failed: 403`.
 - **A loaded skill no longer dumps its file into the chat.** omp hands a skill to
   the model as an injected message (a `custom` entry, either
   `<skill name="…">…</skill>` from the session log or

@@ -108,6 +108,10 @@ const formatElapsed = (seconds: number): string => {
   return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`;
 };
 
+/** Character counts at a glance: `340` / `2.1k` — never five digits of noise. */
+const compactCount = (value: number): string =>
+  value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+
 /** omp's approval modes, worded the way the agent behaves. */
 /**
  * omp extension status chips this UI deliberately does not show.
@@ -277,6 +281,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     });
   }, [omp.resumePath, omp.sessions, omp.workspace]);
 
+  /* The right panel's file explorer is rooted at the agent's workspace, so it has
+     to hear about a move: another project's session, the workspace picker, or a
+     restart that resumed a session from a different folder. */
+  useEffect(() => {
+    if (!omp.workspace) return;
+    window.dispatchEvent(new CustomEvent('omp:workspace-changed', { detail: { workspace: omp.workspace } }));
+  }, [omp.workspace]);
+
   // The diffs view shows the real working-tree diff of the agent's workspace.
   useEffect(() => {
     if (sessionViewMode !== 'diffs') return;
@@ -308,7 +320,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     setHiddenProjects((prev) => new Set(prev).add(key));
     onDispatchLog('INFO', `sessions: hid project folder from the list (sessions kept on disk)`);
   };
-
   const toggleProjectExpanded = (key: string) => {
     setExpandedProjects((prev) => {
       const next = new Set(prev);
@@ -325,7 +336,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
    * a session must not light anything up.
    */
   const isSessionRunning = (session: OmpSessionSummary): boolean =>
-    session.current ? omp.isStreaming : Boolean(session.live);
+    session.current ? omp.isStreaming : Boolean(session.busy ?? session.live);
 
   useEffect(() => {
     saveSectionOpen('projects', projectsOpen);
@@ -559,9 +570,25 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
    * not twelve separate folds.
    */
   const [workOpen, setWorkOpen] = useState<Record<string, boolean>>({});
+  /**
+   * The turn header's figures: how many messages and tool calls the turn took,
+   * plus how much the model actually thought. Everything here is read from the
+   * transcript omp handed over, so no figure is invented when it is missing.
+   */
+  interface TurnMeta {
+    turnId: string;
+    isFirst: boolean;
+    messages: number;
+    toolCalls: number;
+    /** Thinking blocks (segments) the turn produced. */
+    thinkingBlocks: number;
+    /** Characters of reasoning, so a folded turn still says how much it thought. */
+    thinkingChars: number;
+    streaming: boolean;
+  }
   const turnMeta = useMemo(() => {
-    type Turn = { turnId: string; ids: string[]; messages: number; toolCalls: number; streaming: boolean };
-    const meta = new Map<string, { turnId: string; isFirst: boolean; messages: number; toolCalls: number; streaming: boolean }>();
+    type Turn = Omit<TurnMeta, 'isFirst'> & { ids: string[] };
+    const meta = new Map<string, TurnMeta>();
     let current: Turn | null = null;
     const flush = () => {
       if (!current) return;
@@ -571,6 +598,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
           isFirst: index === 0,
           messages: current!.messages,
           toolCalls: current!.toolCalls,
+          thinkingBlocks: current!.thinkingBlocks,
+          thinkingChars: current!.thinkingChars,
           streaming: current!.streaming,
         });
       });
@@ -579,18 +608,34 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     for (const msg of transcript) {
       if (msg.role === 'user') {
         flush();
-        current = { turnId: msg.id, ids: [], messages: 0, toolCalls: 0, streaming: false };
+        current = { turnId: msg.id, ids: [], messages: 0, toolCalls: 0, thinkingBlocks: 0, thinkingChars: 0, streaming: false };
         continue;
       }
-      if (!current) current = { turnId: `lead-${msg.id}`, ids: [], messages: 0, toolCalls: 0, streaming: false };
+      if (!current) {
+        current = { turnId: `lead-${msg.id}`, ids: [], messages: 0, toolCalls: 0, thinkingBlocks: 0, thinkingChars: 0, streaming: false };
+      }
       current.messages += 1;
-      current.toolCalls += (msg.blocks ?? []).filter((block) => block.kind === 'tool').length;
+      for (const block of msg.blocks ?? []) {
+        if (block.kind === 'tool') current.toolCalls += 1;
+        if (block.kind === 'thinking') {
+          current.thinkingBlocks += 1;
+          current.thinkingChars += block.text.trim().length;
+        }
+      }
       if (msg.streaming) current.streaming = true;
       current.ids.push(msg.id);
     }
     flush();
     return meta;
   }, [transcript]);
+
+  /**
+   * Work is open while a turn streams (progress stays visible) and folded once it
+   * settles. An explicit click always wins — including mid-generation, which is
+   * what a long turn needs when the reasoning floods the answer.
+   */
+  const isWorkOpen = (turn: TurnMeta | undefined): boolean =>
+    turn ? workOpen[turn.turnId] ?? turn.streaming : false;
 
   const cancelEdit = () => {
     setEditingEntryId(null);
@@ -1077,7 +1122,7 @@ return (
     >
       {!isUser && turnMeta.get(msg.id)?.isFirst && (() => {
         const turn = turnMeta.get(msg.id)!;
-        const open = turn.streaming || workOpen[turn.turnId] === true;
+        const open = isWorkOpen(turn);
         return (
           <button
             type="button"
@@ -1092,18 +1137,38 @@ return (
                 ? '展开这一轮的全部思考与工具调用'
                 : 'Expand this turn’s thinking and tool calls'
             }
-            className="mb-1.5 flex items-center gap-1.5 px-2 py-1 rounded border border-[#27272a] bg-[#121215] text-[10px] font-mono text-[#71717a] hover:text-[#a1a1aa] hover:border-[#3f3f46] transition-colors cursor-pointer"
+            className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-mono text-[#71717a] hover:text-[#c4c4cc] transition-colors cursor-pointer"
           >
-            {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-            <span>{language === 'zh-CN' ? '处理详情' : 'turn details'}</span>
-            <span className="text-[#52525b]">·</span>
+            {open ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+            <span className="underline decoration-dotted decoration-[#3f3f46] underline-offset-2">
+              {language === 'zh-CN' ? '处理详情' : 'turn details'}
+            </span>
+            <span className="text-[#3f3f46]">·</span>
             <span>
               {turn.messages} {language === 'zh-CN' ? '条消息' : turn.messages === 1 ? 'message' : 'messages'}
             </span>
-            <span className="text-[#52525b]">·</span>
+            <span className="text-[#3f3f46]">·</span>
             <span>
               {turn.toolCalls} {language === 'zh-CN' ? '次工具调用' : turn.toolCalls === 1 ? 'tool call' : 'tool calls'}
             </span>
+            {turn.thinkingBlocks > 0 && (
+              <>
+                <span className="text-[#3f3f46]">·</span>
+                <span title={language === 'zh-CN' ? '思考段数 · 思考字数' : 'thinking segments · characters'}>
+                  {language === 'zh-CN'
+                    ? `思考 ${turn.thinkingBlocks} 段 · ${compactCount(turn.thinkingChars)} 字`
+                    : `thinking ${turn.thinkingBlocks} · ${compactCount(turn.thinkingChars)} chars`}
+                </span>
+              </>
+            )}
+            {turn.streaming && (
+              <>
+                <span className="text-[#3f3f46]">·</span>
+                <span className="text-[#a78bfa]">
+                  {language === 'zh-CN' ? (open ? '生成中（点此折叠）' : '已折叠，仍在生成') : open ? 'running (click to fold)' : 'folded, still running'}
+                </span>
+              </>
+            )}
           </button>
         );
       })()}
@@ -1158,11 +1223,7 @@ return (
           blocks={msg.blocks ?? []}
           streaming={msg.streaming}
           zh={language === 'zh-CN'}
-          hideWork={(() => {
-            const turn = turnMeta.get(msg.id);
-            if (!turn) return false;
-            return !(turn.streaming || workOpen[turn.turnId] === true);
-          })()}
+          hideWork={!isWorkOpen(turnMeta.get(msg.id))}
           metrics={
             msg.streaming
               ? {
@@ -1301,7 +1362,10 @@ return (
     [transcript, retryOriginByMsgId, editingEntryId, copiedMessageId, language, theme, accentColor,
      omp.isStreaming, omp.liveTokensPerSecond, omp.usage, omp.state, omp.slashCommands, modelLabelFor,
      handleRetryFrom, handleQuoteMessage, handleCopyMessage, speakText, handleStartEdit, handleForkAt,
-     insertCommandIntoComposer, msgRefs]
+     insertCommandIntoComposer, msgRefs,
+     // The folds are read inside the rows: without them here, a click would
+     // rebuild nothing and React would skip the subtree it was meant to update.
+     workOpen, skillOpen]
   );
   return (
     <div className="flex-1 flex w-full h-full min-h-0 min-w-0 overflow-hidden">

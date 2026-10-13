@@ -5,10 +5,29 @@
  */
 import type { OmpArchivedSession, OmpBridgeStatus, OmpFrame, OmpSessionPayload, OmpSessionSummary } from "./protocol";
 
+export interface OmpBridgeSessionEvent {
+  sessionKey: string | null;
+  workspace?: string;
+  resumePath?: string | null;
+  status?: OmpBridgeStatus;
+}
+
+export interface OmpBridgeStatusDetail {
+  workspace?: string;
+  resumePath?: string | null;
+  exit?: string | null;
+  /** Which conversation reported it (the bridge runs one child per session). */
+  sessionKey?: string | null;
+}
+
 export interface OmpBridgeHandlers {
   onFrame: (frame: OmpFrame) => void;
-  onStatus: (status: OmpBridgeStatus, detail: { workspace?: string; resumePath?: string | null; exit?: string | null }) => void;
+  onStatus: (status: OmpBridgeStatus, detail: OmpBridgeStatusDetail) => void;
   onLog: (level: "info" | "warn" | "error" | "stderr", message: string) => void;
+  /** The bridge moved to another conversation: the UI has to follow it. */
+  onSession?: (session: OmpBridgeSessionEvent) => void;
+  /** The list of conversations changed (a session file appeared, one was pruned). */
+  onSessionsChanged?: () => void;
 }
 
 export class OmpBridge {
@@ -26,9 +45,23 @@ export class OmpBridge {
 
     source.addEventListener("hello", (event) => {
       const payload = parseJson(event.data);
+      // `hello` is authoritative: it names the conversation the bridge serves now.
+      this.handlers.onSession?.(sessionEventOf(payload));
       this.handlers.onStatus((payload.status as OmpBridgeStatus) ?? "starting", {
         workspace: typeof payload.workspace === "string" ? payload.workspace : undefined,
+        sessionKey: typeof payload.sessionKey === "string" ? payload.sessionKey : null,
       });
+    });
+
+    /* The bridge switched conversations (another session was opened). Frames carry
+       their sessionKey, so this is the only event that may move the UI's pointer. */
+    source.addEventListener("session", (event) => {
+      const payload = parseJson(event.data);
+      this.handlers.onSession?.(sessionEventOf(payload));
+    });
+
+    source.addEventListener("sessions_changed", () => {
+      this.handlers.onSessionsChanged?.();
     });
 
     source.addEventListener("status", (event) => {
@@ -37,6 +70,7 @@ export class OmpBridge {
         workspace: typeof payload.workspace === "string" ? payload.workspace : undefined,
         resumePath: typeof payload.resumePath === "string" ? payload.resumePath : null,
         exit: typeof payload.exit === "string" ? payload.exit : null,
+        sessionKey: typeof payload.sessionKey === "string" ? payload.sessionKey : null,
       });
     });
 
@@ -123,6 +157,16 @@ export class OmpBridge {
     const res = await fetch("/api/git/diff");
     return (await res.json()) as { workspace: string; files: Array<{ path: string; status: string; additions: number; deletions: number; diff: string }> };
   }
+}
+
+/** The session-pointer payload the bridge sends on `hello` and `session`. */
+function sessionEventOf(payload: Record<string, unknown>): OmpBridgeSessionEvent {
+  return {
+    sessionKey: typeof payload.sessionKey === "string" ? payload.sessionKey : null,
+    workspace: typeof payload.workspace === "string" ? payload.workspace : undefined,
+    resumePath: typeof payload.resumePath === "string" ? payload.resumePath : null,
+    status: (payload.status as OmpBridgeStatus) ?? undefined,
+  };
 }
 
 async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {

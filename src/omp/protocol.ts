@@ -141,6 +141,8 @@ export interface OmpFrame {
   error?: string;
   code?: string;
   data?: unknown;
+  /** The conversation this frame belongs to (the bridge runs one child per session). */
+  sessionKey?: string;
   [key: string]: unknown;
 }
 
@@ -164,6 +166,10 @@ export interface OmpSessionSummary {
   live?: boolean;
   /** The session this bridge is currently running. */
   current?: boolean;
+  /** A child of this bridge has the conversation open (it may still be working). */
+  running?: boolean;
+  /** That child is mid-turn. */
+  busy?: boolean;
 }
 
 export interface OmpArchivedSession {
@@ -178,6 +184,8 @@ export interface OmpArchivedSession {
 }
 
 export interface OmpSessionPayload {
+  /** Which child of the bridge this conversation runs in (opaque, stable). */
+  sessionKey: string | null;
   workspace: string;
   resumePath: string | null;
   status: string;

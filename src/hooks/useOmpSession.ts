@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, FileDiffItem, SessionTokenUsage } from "../types";
 import { fetchSessionUsage, type SessionUsageSummary } from "../omp/cli";
-import { OmpBridge } from "../omp/client";
+import { OmpBridge, type OmpBridgeStatusDetail } from "../omp/client";
 import { repairSession as repairSessionHeader } from "../omp/cli";
 import { alertTurnComplete } from "../lib/alerts";
 import {
@@ -132,11 +132,17 @@ const LIVE_FLUSH_MS = 60;
 
 export function useOmpSession(): OmpSessionApi {
   const frameHandlerRef = useRef<(frame: OmpFrame) => void>(() => {});
+  /**
+   * The conversation the bridge serves (and this hook renders). The bridge keeps
+   * one child per session, so frames for the others are for a transcript this UI
+   * is not showing — they must not be folded into it.
+   */
+  const activeSessionKeyRef = useRef<string | null>(null);
   /** Read by the frame handler, which is installed once per connection. */
   const refreshSessionUsageRef = useRef<() => Promise<void>>(async () => {});
   /** omp's current session file (a fresh session has no resume path yet). */
   const sessionFileRef = useRef<string | null>(null);
-  const statusHandlerRef = useRef<(status: OmpBridgeStatus, detail: { workspace?: string; resumePath?: string | null; exit?: string | null }) => void>(() => {});
+  const statusHandlerRef = useRef<(status: OmpBridgeStatus, detail: OmpBridgeStatusDetail) => void>(() => {});
   const logHandlerRef = useRef<(level: OmpLogLine["level"], message: string) => void>(() => {});
   const [status, setStatus] = useState<OmpBridgeStatus>("connecting");
   const [workspace, setWorkspace] = useState("");
@@ -245,6 +251,22 @@ export function useOmpSession(): OmpSessionApi {
       pushLog("warn", `could not list sessions: ${String(error)}`);
     }
   }, [pushLog]);
+
+  /**
+   * Background conversations announce themselves constantly (a frame per token),
+   * so the list — the only place the running badge lives — refreshes at most
+   * once per burst instead of once per frame.
+   */
+  const sessionsRefreshTimer = useRef<number | null>(null);
+  const refreshSessionsSoonRef = useRef<() => void>(() => {});
+  const refreshSessionsSoon = useCallback(() => {
+    if (sessionsRefreshTimer.current !== null) return;
+    sessionsRefreshTimer.current = window.setTimeout(() => {
+      sessionsRefreshTimer.current = null;
+      void refreshSessions();
+    }, 800);
+  }, [refreshSessions]);
+  refreshSessionsSoonRef.current = refreshSessionsSoon;
 
   const refreshState = useCallback(async () => {
     const bridge = bridgeRef.current;
@@ -545,6 +567,26 @@ export function useOmpSession(): OmpSessionApi {
       onFrame: (frame) => frameHandlerRef.current(frame),
       onStatus: (next, detail) => statusHandlerRef.current(next, detail),
       onLog: (level, message) => logHandlerRef.current(level, message),
+      onSession: (session) => {
+        /* The bridge moved to another conversation (this UI, another tab, or a
+           script driving the API). Follow it: rendering one conversation while
+           the frames belong to another is how a transcript goes stale. */
+        const next = session.sessionKey ?? null;
+        const previous = activeSessionKeyRef.current;
+        activeSessionKeyRef.current = next;
+        if (session.workspace) setWorkspace(session.workspace);
+        if (session.resumePath !== undefined) setResumePath(session.resumePath);
+        if (session.status) setStatus(session.status);
+        // A first `hello` needs no read: the ready status that follows loads it.
+        if (next !== previous && previous !== null) {
+          clearLive();
+          void loadCurrentSessionRef.current();
+          // The row that just left the screen is no longer "current": its badge
+          // has to come from the bridge's own running/busy flags now.
+          refreshSessionsSoonRef.current();
+        }
+      },
+      onSessionsChanged: () => refreshSessionsSoonRef.current(),
     });
     bridgeRef.current = bridge;
     bridge.connect();
@@ -553,6 +595,10 @@ export function useOmpSession(): OmpSessionApi {
     return () => {
       bridge.close();
       bridgeRef.current = null;
+      if (sessionsRefreshTimer.current !== null) {
+        window.clearTimeout(sessionsRefreshTimer.current);
+        sessionsRefreshTimer.current = null;
+      }
     };
   }, [refreshSessions]);
 
@@ -575,6 +621,19 @@ export function useOmpSession(): OmpSessionApi {
 
   useEffect(() => {
     frameHandlerRef.current = (frame) => {
+      const key = typeof frame.sessionKey === "string" ? frame.sessionKey : null;
+      if (key && activeSessionKeyRef.current && key !== activeSessionKeyRef.current) {
+        /* Another conversation's frame. It keeps running in its own child — that
+           is the point — so the only thing this UI owes it is the running badge
+           in the session list, plus a line when one of its turns ends. */
+        if (frame.type === "agent_start" || frame.type === "prompt_result" || frame.type === "session_settled") {
+          refreshSessionsSoonRef.current();
+          if (frame.type === "prompt_result") {
+            pushLog("info", `another conversation finished a turn (it keeps running in the background)`);
+          }
+        }
+        return;
+      }
       if (frame.type === "ready") {
         void refreshState();
         void refreshSessionUsageRef.current();
@@ -582,6 +641,8 @@ export function useOmpSession(): OmpSessionApi {
       applyFrame(frame);
     };
     statusHandlerRef.current = (next, detail) => {
+      // A background child's status is not this conversation's status.
+      if (detail.sessionKey && activeSessionKeyRef.current && detail.sessionKey !== activeSessionKeyRef.current) return;
       setStatus(next);
       if (detail.workspace) setWorkspace(detail.workspace);
       if (detail.resumePath !== undefined) setResumePath(detail.resumePath);
@@ -597,6 +658,7 @@ export function useOmpSession(): OmpSessionApi {
   });
 
   const adoptSession = useCallback((payload: OmpSessionPayload) => {
+    activeSessionKeyRef.current = payload.sessionKey ?? activeSessionKeyRef.current;
     setWorkspace(payload.workspace);
     setResumePath(payload.resumePath);
     setState(payload.state);
@@ -905,29 +967,24 @@ export function useOmpSession(): OmpSessionApi {
     await Promise.all([refreshSessions(), refreshState(), refreshCatalog()]);
   }, [refreshCatalog, refreshSessions, refreshState]);
 
-  /** Point the agent at a real folder on this machine; the session starts fresh there. */
+  /**
+   * Point the agent at a real folder on this machine; the caller starts a fresh
+   * session there. Nothing is killed: the conversation on screen keeps its own
+   * child in the bridge (switching is not closing). The UI's workspace follows
+   * the session that opens in that folder, not this request.
+   */
   const switchWorkspace = useCallback(
     async (cwd: string) => {
       const bridge = bridgeRef.current;
       if (!bridge) return;
       try {
-        const result = await bridge.setWorkspace(cwd);
-        setWorkspace(result.workspace);
-        setResumePath(null);
-        setLive(null);
-        clearLive();
-        setUsage(null);
-        setSessionUsage(null);
-        setMessages([]);
-        setBranchAnchors([]);
-        pushLog("info", `workspace: ${result.workspace}`);
-        await refreshState();
-        await refreshSessions();
+        await bridge.setWorkspace(cwd);
+        pushLog("info", `workspace: the next session starts in ${cwd}`);
       } catch (error) {
         pushLog("error", `could not switch workspace: ${error instanceof Error ? error.message : String(error)}`);
       }
     },
-    [clearLive, pushLog, refreshSessions, refreshState]
+    [pushLog]
   );
 
   const searchSessionContent = useCallback(async (query: string) => {
