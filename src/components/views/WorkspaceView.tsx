@@ -71,7 +71,7 @@ import {
 } from '../../lib/panelLayout';
 import { renderMarkdown } from '../../lib/miniMarkdown';
 import { parseSkillInjection } from '../../lib/skillInjection';
-import { AssistantBlocks } from '../AssistantBlocks';
+import { AssistantBlocks, MarkdownBlock } from '../AssistantBlocks';
 import { SelectionToolbar } from '../SelectionToolbar';
 import { fetchApproval, savePastedImage, setApproval } from '../../omp/cli';
 import {
@@ -199,8 +199,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   /** One quoted context (a reply passage or file annotation) shown as a banner
    *  above the composer; sent silently with the next message, never typed out. */
   const [pendingQuote, setPendingQuote] = useState<{ preview: string; block: string } | null>(null);
-  const pendingQuoteRef = useRef<{ preview: string; block: string } | null>(null);
-  pendingQuoteRef.current = pendingQuote;
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   /** Label of the model being switched to, while omp applies it. */
   const [modelSwitching, setModelSwitching] = useState<string | null>(null);
@@ -706,39 +704,29 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     textareaRef.current?.focus();
   };
 
-  /** Mouse-up inside an assistant message: if text is selected, offer to ask
-   *  about it. The offer is published as an event on purpose — holding it in
-   *  this component's state would re-render the whole transcript on every
-   *  selection (hundreds of ms) and destroy the live selection while the user
-   *  is still dragging. */
+  /** One delegated mouse-up for the whole transcript. The offer travels as an
+   *  event: holding it in this component's state re-rendered every message per
+   *  selection (hundreds of ms) and destroyed the live selection mid-drag. */
   const captureReplySelection = (event: React.MouseEvent<HTMLElement>) => {
-    const bubble = event.currentTarget;
+    const target = event.target;
+    const bubble = target instanceof Element ? target.closest('.markdown-body') : null;
+    if (!bubble) return;
     window.requestAnimationFrame(() => {
+      const hide = () => window.dispatchEvent(new CustomEvent('omp:reply-selection', { detail: null }));
       const selection = window.getSelection();
-      const content = selection && !selection.isCollapsed ? selection.toString().trim() : '';
-      const anchor = selection?.anchorNode?.parentElement;
-      const focus = selection?.focusNode?.parentElement;
-      const inside = Boolean(anchor && focus && bubble.contains(anchor) && bubble.contains(focus));
-      if (!selection || selection.isCollapsed || !inside || content.length < 2) {
-        window.dispatchEvent(new CustomEvent('omp:reply-selection', { detail: null }));
-        return;
-      }
+      if (!selection || selection.isCollapsed) return hide();
+      const anchor = selection.anchorNode?.parentElement;
+      const focus = selection.focusNode?.parentElement;
+      const content = selection.toString().trim();
+      if (!anchor || !focus || !bubble.contains(anchor) || !bubble.contains(focus) || content.length < 2) return hide();
       const rect = selection.getRangeAt(0).getBoundingClientRect();
       window.dispatchEvent(
         new CustomEvent('omp:reply-selection', {
-          detail: {
-            content: content.slice(0, 1500),
-            top: rect.top - 40,
-            left: rect.right - 150,
-          },
+          detail: { content: content.slice(0, 1500), top: rect.top - 40, left: rect.right - 150 },
         }),
       );
     });
   };
-
-  /** Ask a running turn about a passage without re-rendering the transcript:
-   *  the selection toolbar publishes `omp:insert-quote`, which the composer
-   *  banner above already listens for. */
 
   // ---- Composer ----
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -924,7 +912,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
   const handleSubmit = () => {
     const trimmed = inputPrompt.trim();
-    const quote = pendingQuoteRef.current;
+    const quote = pendingQuote;
     setPendingQuote(null);
     if (!trimmed && !quote && attachedFiles.length === 0) return;
     const withQuote = (body: string) => [quote?.block, body].filter(Boolean).join('\n\n');
@@ -1289,7 +1277,6 @@ return (
       ) : (msg.blocks ?? []).length > 0 ? (
         /* pi-web's model: thinking / text / tool blocks in the
            order omp produced them. Copy stays markdown source. */
-        <div className="min-w-0" onMouseUp={captureReplySelection}>
         <AssistantBlocks
           blocks={msg.blocks ?? EMPTY_BLOCKS}
           streaming={msg.streaming}
@@ -1308,14 +1295,13 @@ return (
           }
           onInsertCommand={insertCommandIntoComposer}
         />
-        </div>
       ) : msg.content === '_(no text output)_' ? (
         <p className="text-[#52525b] italic">
           {language === 'zh-CN' ? '（该轮未返回文本）' : '(no text returned this turn)'}
         </p>
       ) : (
         /* Messages without blocks (imported/mock turns) still render markdown. */
-        <div className="markdown-body min-w-0" onMouseUp={captureReplySelection}>{renderMarkdown(msg.content)}</div>
+        <MarkdownBlock text={msg.content} />
       )}
 
       {/* Turn actions — the omp transcript is append-only, so no delete */}
@@ -2015,7 +2001,11 @@ return (
               /* ==================================================== */
               /* ACTIVE CONVERSATION THREAD                          */
               /* ==================================================== */
-              <div className="w-full mx-auto space-y-4" style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}>
+              <div
+                className="w-full mx-auto space-y-4"
+                style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}
+                onMouseUp={captureReplySelection}
+              >
                 {editingEntryId && (
                   <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#18181b] border border-[#a78bfa]/50 text-xs font-mono text-[#a1a1aa]">
                     <div className="flex items-center gap-2 min-w-0">

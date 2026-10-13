@@ -26,9 +26,7 @@ export const SelectionToolbar: React.FC = () => {
   const { theme } = useTheme();
   const zh = language === 'zh-CN';
   const [selection, setSelection] = useState<SelectionPayload | null>(null);
-  const selectionRef = useRef<SelectionPayload | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
-  selectionRef.current = selection;
 
   useEffect(() => {
     const onSelection = (event: Event) => {
@@ -67,10 +65,8 @@ export const SelectionToolbar: React.FC = () => {
   if (!selection) return null;
 
   const ask = () => {
-    const selected = selectionRef.current;
     setSelection(null);
-    if (!selected) return;
-    const snippet = selected.content.length > 200 ? `${selected.content.slice(0, 200)}...` : selected.content;
+    const snippet = selection.content.length > 200 ? `${selection.content.slice(0, 200)}...` : selection.content;
     window.dispatchEvent(
       new CustomEvent('omp:insert-quote', {
         detail: {

@@ -3,6 +3,17 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.41
+
+- Selection stays cheap by construction: one delegated mouse-up for the whole
+  transcript instead of a handler on every message, and the fallback markdown
+  branch now reuses the memoised block renderer instead of re-parsing on each
+  render. Two mirrored refs that only duplicated state are gone.
+- Deliberately NOT virtualised. `content-visibility: auto` on the turns was
+  tried and measured: scrolling 30 steps went from ~1.0s of frames to ~19.6s
+  because every step re-rendered a newly revealed turn. Scrolling the real
+  154-turn session costs zero JS long tasks, so the plain list stays.
+
 ## 0.3.40
 
 - Fixed the freezes while selecting text in a reply. Offering to quote a

@@ -29,7 +29,7 @@ interface AssistantBlocksProps {
 }
 
 /** Markdown is parsed once per text, not once per render of the transcript. */
-const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
+export const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
   const nodes = useMemo(() => renderMarkdown(text), [text]);
   return <div className="markdown-body min-w-0">{nodes}</div>;
 });
