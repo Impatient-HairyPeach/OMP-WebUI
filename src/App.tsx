@@ -96,6 +96,34 @@ export default function App() {
     return () => window.removeEventListener('omp:open-side-panel', onOpen);
   }, []);
 
+  /* Selecting text must never become a native drag-and-drop. Chrome starts
+     dragging the selection when the pointer moves inside it, which freezes the
+     selection and leaves the page stuck in a drag state (cursor kept in
+     selection mode, clicks ignored until a reload) — the select-to-quote flow
+     and plain "select, copy, select again" both hit it. Nothing in the app
+     consumes an HTML5 drag, so cancelling it is safe. */
+  useEffect(() => {
+    const onDragStart = (event: DragEvent) => {
+      if (window.getSelection()?.toString()) event.preventDefault();
+    };
+    /* Chrome also drags an existing selection when the press lands *inside* it;
+       with the drag cancelled nothing is selected and the gesture is wasted.
+       Dropping the old selection makes the gesture a plain new selection. */
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (event.button !== 0 || event.shiftKey) return;
+      if (!(target instanceof Element) || !target.closest('.markdown-body')) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) selection.removeAllRanges();
+    };
+    document.addEventListener('dragstart', onDragStart);
+    document.addEventListener('mousedown', onMouseDown, true);
+    return () => {
+      document.removeEventListener('dragstart', onDragStart);
+      document.removeEventListener('mousedown', onMouseDown, true);
+    };
+  }, []);
+
   /* Keyboard shortcuts (set in Settings → 界面主题与偏好): the right panel is ours,
      the left panel / search belong to the workspace view, which listens for the
      same event. Editable fields keep their keys unless the binding has a modifier. */

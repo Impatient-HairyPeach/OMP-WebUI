@@ -3,6 +3,18 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.48
+
+- Selecting text no longer freezes the page. Chrome turns a press inside an
+  existing selection into a native drag-and-drop of that selection; the drag
+  never completes, so the selection stayed frozen and the page was stuck in a
+  drag state — the cursor kept the text-selection look and clicks were ignored
+  until a reload. That is exactly what "select, copy, select again" produced.
+  Dragging selected text is now cancelled, and a press inside a selection
+  starts a plain new selection instead of wasting the gesture. Verified with
+  five consecutive select+copy cycles: each selects, and the UI stays
+  clickable afterwards.
+
 ## 0.3.47
 
 - `/cleanse` (detect and fix project diagnostics) joins the palette as a
