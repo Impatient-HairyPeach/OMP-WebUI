@@ -857,7 +857,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
             a.rank - b.rank ||
             SLASH_CATEGORY_ORDER.indexOf(a.category) - SLASH_CATEGORY_ORDER.indexOf(b.category) ||
             a.command.name.localeCompare(b.command.name)
-        );
+        )
+        .slice(0, 60);
       items = ranked.map(({ command, category }) => ({
         insert: `/${command.name}`,
         label: `/${command.name}`,
@@ -2500,26 +2501,10 @@ return (
                   if (completion) {
                     if (e.key === 'Tab') {
                       e.preventDefault();
-                      // Shell-style: complete the highlighted candidate into the
-                      // input, then stay on the popup with the next candidate so
-                      // repeated Tab walks the list (Shift+Tab backwards). The
-                      // token being completed is replaced, never chained.
-                      if (completion.items.length > 1) {
-                        const pick = completion.items[completion.index];
-                        const insertWithSpace = `${pick.insert} `;
-                        const next = `${inputPrompt.slice(0, completion.start)}${insertWithSpace}${inputPrompt.slice(completion.end)}`;
-                        setInputPrompt(next);
-                        const caretPos = completion.start + insertWithSpace.length;
-                        const nextIndex =
-                          (completion.index + (e.shiftKey ? -1 : 1) + completion.items.length) % completion.items.length;
-                        setCompletion((prev) => (prev ? { ...prev, end: caretPos, index: nextIndex } : prev));
-                        requestAnimationFrame(() => {
-                          textareaRef.current?.focus();
-                          textareaRef.current?.setSelectionRange(caretPos, caretPos);
-                        });
-                      } else {
-                        applyCompletion();
-                      }
+                      // Tab cycles matches shell-style; Shift+Tab walks backwards.
+                      setCompletion((prev) =>
+                        prev ? { ...prev, index: (prev.index + (e.shiftKey ? -1 : 1) + prev.items.length) % prev.items.length } : prev
+                      );
                       return;
                     }
                     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
