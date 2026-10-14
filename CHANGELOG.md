@@ -3,6 +3,24 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.44
+
+- The `/` palette shows every command: a 60-entry cap was silently dropping the
+  tail of the catalog (the full list is 72+ commands now).
+- Tab completes like the omp terminal. It inserts the highlighted candidate
+  into the input and keeps the popup open, so repeated Tab walks the matches
+  in place (Shift+Tab backwards); Enter still accepts and sends.
+
+## 0.3.43
+
+- The `/` palette matches the terminal again. omp's `/plan`, `/goal`,
+  `/review`, `/fix`, `/test`, `/explain`, `/simplify`, `/commit`, `/advisor`
+  and `/loop` are TUI-only builtins: the RPC prompt path neither lists nor runs
+  them, so the web offered none of them (not even `/plan`). They are now
+  offered client-side under 系统内置 and submitting one expands into a real
+  prompt — the agent receives "Create a plan for this task…", never a stray
+  "/plan" line. omp's own advertised command still wins for the same name.
+
 ## 0.3.42
 
 - The right panel's file tree expands at any depth. Rows past the first level
