@@ -1,7 +1,7 @@
 {
   "name": "omp-studio",
   "private": true,
-  "version": "0.3.46",
+  "version": "0.3.47",
   "description": "Browser workspace for the local omp coding agent: real sessions, tools, files, models and skills.",
   "license": "Apache-2.0",
   "author": "Shang-1999",

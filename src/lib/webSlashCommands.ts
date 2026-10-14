@@ -56,6 +56,11 @@ const ADVISOR = (args: string) =>
     ? `Act as an independent advisor reviewing this work: ${args}. Assess the approach, point out risks, gaps, and better alternatives, and give concrete recommendations without changing any code.`
     : `Act as an independent advisor reviewing the current work. Assess the recent changes and overall direction, point out risks, gaps, and better alternatives, and give concrete recommendations without changing any code.`;
 
+const CLEANSE = (args: string) =>
+  args
+    ? `Detect and fix diagnostics in the project related to ${args}: find build errors, lint and test failures, then fix the clearly-wrong ones. Run the relevant checks to verify each fix before moving on.`
+    : `Detect and fix project diagnostics: find build errors, lint and test failures, then fix the clearly-wrong ones. Run the relevant checks to verify each fix before moving on.`;
+
 const LOOP = (args: string) => {
   const match = args.match(/^(\d+)\s+([\s\S]+)$/);
   const attempts = match ? Math.min(Math.max(Number(match[1]) || 3, 1), 10) : 3;
@@ -67,6 +72,7 @@ const LOOP = (args: string) => {
 export const WEB_SLASH_COMMANDS: readonly WebSlashCommandDef[] = [
   { name: 'btw', hint: '问个题外话（转到副对话面板提问）· Ask a side question (Side Chat)', usage: '/btw <问题/question>', requiresArgs: true, sideChat: true, buildPrompt: (args: string) => args },
   { name: 'plan', hint: '先规划再执行 [任务/task]', usage: '/plan <任务/task>', requiresArgs: true, buildPrompt: PLAN },
+  { name: 'cleanse', hint: '检测并修复项目诊断（编译/语法/测试）', usage: '/cleanse [目标]', requiresArgs: false, buildPrompt: CLEANSE },
   { name: 'goal', hint: '会话剩余时间都朝这个目标推进 [目标/goal]', usage: '/goal <目标/goal>', requiresArgs: true, buildPrompt: GOAL },
   { name: 'review', hint: '审查代码 / 近期改动', usage: '/review [目标]', requiresArgs: false, buildPrompt: REVIEW },
   { name: 'fix', hint: '修复一个明确的问题 [问题/issue]', usage: '/fix <问题/issue>', requiresArgs: true, buildPrompt: FIX },

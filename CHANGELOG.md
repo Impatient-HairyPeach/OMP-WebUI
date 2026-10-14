@@ -3,6 +3,17 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.47
+
+- `/cleanse` (detect and fix project diagnostics) joins the palette as a
+  prompt-composing command. Audited omp's full 60-command TUI registry against
+  the palette: the prompt-composable gap is now closed (btw, plan, goal, review,
+  fix, test, explain, simplify, commit, advisor, loop, cleanse). The remaining
+  TUI-only commands (login, ssh, record, collab, debug, live, tree, hotkeys,
+  agents/hub, copy, open, omfg, tan, pause, skills and the session ones like
+  new/delete/fork/resume) are infrastructure the RPC prompt path cannot run —
+  the web UI already covers the session actions directly.
+
 ## 0.3.46
 
 - `@` file completion works again in non-git workspaces. The bridge returned
