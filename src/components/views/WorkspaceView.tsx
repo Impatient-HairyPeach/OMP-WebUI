@@ -920,6 +920,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       textareaRef.current?.focus();
       return;
     }
+    if (expanded.kind === 'side-chat') {
+      // /btw is a side question: open the Side Chat panel with the question
+      // typed in — nothing goes to the main agent's context.
+      window.dispatchEvent(new CustomEvent('omp:open-side-panel', { detail: { tab: 'sidechat' } }));
+      window.dispatchEvent(new CustomEvent('omp:side-chat', { detail: { question: expanded.question } }));
+      setInputPrompt('');
+      return;
+    }
     const message = expanded.kind === 'expand' ? expanded.prompt : trimmed;
     const quote = pendingQuote;
     setPendingQuote(null);

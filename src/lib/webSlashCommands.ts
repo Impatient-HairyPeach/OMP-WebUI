@@ -17,6 +17,9 @@ interface WebSlashCommandDef {
   /** Bilingual usage line, e.g. `/plan <任务/task>`. */
   usage: string;
   requiresArgs: boolean;
+  /** `/btw` is a side question: it opens the Side Chat panel instead of the
+   *  main thread, so it has no prompt expansion. */
+  sideChat?: boolean;
   buildPrompt: (args: string) => string;
 }
 
@@ -62,6 +65,7 @@ const LOOP = (args: string) => {
 
 /** omp's prompt-composable TUI builtins the RPC path does not carry. */
 export const WEB_SLASH_COMMANDS: readonly WebSlashCommandDef[] = [
+  { name: 'btw', hint: '问个题外话（转到副对话面板提问）· Ask a side question (Side Chat)', usage: '/btw <问题/question>', requiresArgs: true, sideChat: true, buildPrompt: (args: string) => args },
   { name: 'plan', hint: '先规划再执行 [任务/task]', usage: '/plan <任务/task>', requiresArgs: true, buildPrompt: PLAN },
   { name: 'goal', hint: '会话剩余时间都朝这个目标推进 [目标/goal]', usage: '/goal <目标/goal>', requiresArgs: true, buildPrompt: GOAL },
   { name: 'review', hint: '审查代码 / 近期改动', usage: '/review [目标]', requiresArgs: false, buildPrompt: REVIEW },
@@ -90,6 +94,7 @@ export function webSlashCommandCatalog(): OmpSlashCommand[] {
 
 export type WebSlashExpansion =
   | { kind: 'expand'; prompt: string }
+  | { kind: 'side-chat'; question: string }
   | { kind: 'usage-error'; command: string; usage: string }
   | { kind: 'none' };
 
@@ -101,5 +106,6 @@ export function expandWebSlashCommand(text: string): WebSlashExpansion {
   if (!def) return { kind: 'none' };
   const args = (match![2] ?? '').trim();
   if (def.requiresArgs && !args) return { kind: 'usage-error', command: `/${def.name}`, usage: def.usage };
+  if (def.sideChat) return { kind: 'side-chat', question: args };
   return { kind: 'expand', prompt: def.buildPrompt(args) };
 }

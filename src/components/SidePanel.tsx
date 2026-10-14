@@ -166,6 +166,19 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   // --- side chat tab: ephemeral omp runs, never the real conversation ---
   const [sideMessages, setSideMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string; error?: boolean; ms?: number }>>([]);
   const [sideInput, setSideInput] = useState('');
+  const sideInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  /** `/btw <question>` from the composer lands here as a side question. */
+  useEffect(() => {
+    const onSideChat = (event: Event) => {
+      const question = (event as CustomEvent<{ question?: string }>).detail?.question;
+      if (!question) return;
+      setSideInput(question);
+      requestAnimationFrame(() => sideInputRef.current?.focus());
+    };
+    window.addEventListener('omp:side-chat', onSideChat);
+    return () => window.removeEventListener('omp:side-chat', onSideChat);
+  }, []);
   const [sideBusy, setSideBusy] = useState(false);
   const [sideTools, setSideTools] = useState(false);
 
@@ -1581,6 +1594,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             <div className="border-t p-2" style={{ borderColor: theme.border }}>
               <textarea
                 rows={2}
+                ref={sideInputRef}
                 value={sideInput}
                 onChange={(event) => setSideInput(event.target.value)}
                 onKeyDown={(event) => {

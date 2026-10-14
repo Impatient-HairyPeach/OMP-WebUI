@@ -3,6 +3,15 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.45
+
+- `/btw` is back. omp ships it as a TUI-only builtin (ask a side question), so
+  the RPC path never advertises it — the same reason `/plan` was missing.
+  It is now offered in the palette, and `/btw <question>` opens the Side Chat
+  panel with the question already typed in, leaving the main thread untouched.
+- Reverted the previous Tab change: it was built on a misreading of the request.
+  Tab goes back to moving the highlight (Enter accepts); nothing else changed.
+
 ## 0.3.44
 
 - The `/` palette shows every command: a 60-entry cap was silently dropping the
