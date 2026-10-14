@@ -4075,12 +4075,39 @@ app.get("/api/omp/files", async (req, res) => {
     const { stdout } = await runGit(["ls-files", "--cached", "--others", "--exclude-standard"], workspace);
     for (const line of stdout.split("\n")) {
       const trimmed = line.trim();
-      if (trimmed) files.add(trimmed);
+      if (trimmed) files.add(trimmed.replace(/\\/g, "/"));
       if (files.size > 20000) break;
     }
   } catch {
     /* not a git repo — the walk below still fills the list */
   }
+  // Workspaces that are not git repos get a shallow walk so @-completion still
+  // has candidates. Derived/heavy dirs are skipped; capped like the git list.
+  // ponytail: flat full walk; swap for the SidePanel's lazy per-dir listing if
+  // a giant workspace ever makes this slow.
+  const IGNORE_DIR =
+    /(^|\/)(node_modules|\.git|\.hg|\.svn|\.next|\.nuxt|\.venv|venv|dist|build|out|target|coverage|\.idea|\.vscode)(\/|$)/;
+  const MAX_WALK_FILES = 20000;
+  const walk = (dir: string, depth: number): void => {
+    if (files.size >= MAX_WALK_FILES || depth > 12) return;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const absolute = path.join(dir, entry.name);
+      const rel = path.relative(workspace, absolute).replace(/\\/g, "/");
+      if (entry.isDirectory()) {
+        if (!IGNORE_DIR.test(`/${rel}/`)) walk(absolute, depth + 1);
+      } else if (!files.has(rel)) {
+        files.add(rel);
+        if (files.size >= MAX_WALK_FILES) return;
+      }
+    }
+  };
+  walk(workspace, 0);
   const matched = [...files]
     .filter((file) => (query ? file.toLowerCase().includes(query) : true))
     .slice(0, limit)

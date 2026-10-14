@@ -3,6 +3,14 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.46
+
+- `@` file completion works again in non-git workspaces. The bridge returned
+  only `git ls-files`, so a folder that isn't a git repo had zero candidates
+  (the "工作区文件" group came up empty). A shallow directory walk now fills
+  the list, skipping derived/heavy dirs and capped at 20k entries — verified
+  on a 863-file non-git workspace.
+
 ## 0.3.45
 
 - `/btw` is back. omp ships it as a TUI-only builtin (ask a side question), so
