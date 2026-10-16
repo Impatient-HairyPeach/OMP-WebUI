@@ -3,6 +3,14 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.51
+
+- The list above the composer now behaves like the omp terminal: it shows while
+  work is in flight and disappears once every task is done (it also stays while
+  a subagent is still running). The right panel's TODO tab keeps the finished
+  list, so what was completed stays visible. Verified on a session whose newest
+  list was 6/6: the HUD is gone and the panel still lists all six.
+
 ## 0.3.50
 
 - Withdrawing a prompt now actually retracts it. The button (icon only, no

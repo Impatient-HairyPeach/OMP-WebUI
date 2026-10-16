@@ -7,7 +7,7 @@
 import React, { useState } from 'react';
 import { Check, CircleDashed, Loader2, Ban, Users, ListChecks, ChevronDown, ChevronRight } from 'lucide-react';
 import type { SubagentRow } from '../omp/cli';
-import type { TodoGroup, TodoStatus } from '../lib/todoList';
+import { shouldHideTaskHud, type TodoGroup, type TodoStatus } from '../lib/todoList';
 
 interface TaskHudProps {
   todos: TodoGroup[] | null;
@@ -28,8 +28,8 @@ export function StatusIcon({ status, accentColor }: { status: TodoStatus; accent
 export const TaskHud: React.FC<TaskHudProps> = ({ todos, subagents, zh, accentColor, onOpenDetails }) => {
   /** Folded by default: the summary row still shows what is running. */
   const [open, setOpen] = useState(false);
+  if (shouldHideTaskHud(todos, subagents.length)) return null;
   const tasks = (todos ?? []).flatMap((group) => group.tasks);
-  if (tasks.length === 0 && subagents.length === 0) return null;
 
   const done = tasks.filter((task) => task.status === 'done').length;
   const running = tasks.filter((task) => task.status === 'in_progress').length;

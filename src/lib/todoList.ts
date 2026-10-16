@@ -84,3 +84,15 @@ export function todosFromTranscript(messages: ChatMessage[]): TodoGroup[] | null
   }
   return null;
 }
+
+/**
+ * The composer HUD belongs to work in flight (omp's terminal clears it the same
+ * way): it goes away once every task in the newest list is done and nothing is
+ * still running. The right panel's TODO tab keeps the finished list.
+ */
+export function shouldHideTaskHud(todos: TodoGroup[] | null, subagentCount: number): boolean {
+  const tasks = (todos ?? []).flatMap((group) => group.tasks);
+  if (tasks.length === 0) return subagentCount === 0;
+  if (subagentCount > 0) return false;
+  return tasks.every((task) => task.status === 'done');
+}
