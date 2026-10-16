@@ -3,6 +3,16 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.50
+
+- Withdrawing a prompt now actually retracts it. The button (icon only, no
+  label) stops the running turn, branches the session log at that prompt — so
+  the message and everything after it leave the transcript straight away — and
+  drops the text back into the composer. Earlier turns stay untouched, and it
+  works on a prompt sent seconds ago: the log anchor is resolved from a fresh
+  session read by matching the prompt text. Sending again simply continues from
+  there, with no duplicate.
+
 ## 0.3.49
 
 - Attachments stay attachments. A pasted image no longer writes an `@path`

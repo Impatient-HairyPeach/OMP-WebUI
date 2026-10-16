@@ -242,10 +242,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [steerModeDropdownOpen, setSteerModeDropdownOpen] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-  /** True while the composer holds a prompt withdrawn from the transcript. A
-   *  just-sent message has no session anchor yet, but the branch still resolves
-   *  by prompt text, so withdrawing must not depend on the anchor existing. */
+  /** True while the composer holds a prompt withdrawn from the transcript: the
+   *  message is already gone from the session log, so the next send just
+   *  continues from there (no branch, no duplicate). */
   const [withdrawing, setWithdrawing] = useState(false);
   const [activeMsgId, setActiveMsgId] = useState<string | null>(null);
   /** Default for reasoning visibility (a stored preference); each block toggles itself. */
@@ -578,21 +577,25 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   };
 
   /** Enter edit-from-here: the next send branches the omp log at this entry. */
-  /** Withdraw a sent prompt: stop whatever it started and put the text back in
-   *  the composer. Sending again branches the session at that entry, so the
-   *  withdrawn message and everything after it are dropped — the same "edit and
-   *  re-run" the omp terminal offers, driven from the message itself. */
+  /** Withdraw a sent prompt: stop whatever it started, retract the message from
+   *  the session (and so from the transcript), and put the text back in the
+   *  composer to edit. The next send simply continues from there. */
   const handleStartEdit = (msg: ChatMessage) => {
-    if (omp.isStreaming) {
-      onDispatchLog('INFO', 'prompt.withdraw: stopping the running turn');
-      void omp.abort();
-    }
-    setEditingEntryId(msg.entryId ?? null);
-    setWithdrawing(true);
-    setInputPrompt(msg.content);
-    setCompletion(null);
-    textareaRef.current?.focus();
-    onDispatchLog('INFO', `prompt.withdraw: ${msg.content.slice(0, 48)} back in the composer`);
+    void (async () => {
+      if (omp.isStreaming) {
+        onDispatchLog('INFO', 'prompt.withdraw: stopping the running turn');
+        await omp.abort();
+      }
+      const retracted = await omp.withdrawPrompt(msg.content);
+      if (!retracted) {
+        onDispatchLog('OVERRIDE', 'prompt.withdraw: no log anchor for that prompt; it stays in the session');
+      }
+      setWithdrawing(true);
+      setInputPrompt(msg.content);
+      setCompletion(null);
+      textareaRef.current?.focus();
+      onDispatchLog('INFO', `prompt.withdraw: ${msg.content.slice(0, 48)} back in the composer`);
+    })();
   };
 
   /** Folds the raw SKILL.md that omp injects as a user message. */
@@ -673,7 +676,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     turn ? workOpen[turn.turnId] ?? turn.streaming : false;
 
   const cancelEdit = () => {
-    setEditingEntryId(null);
     setWithdrawing(false);
     setInputPrompt('');
   };
@@ -950,39 +952,20 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     if (!trimmed && !quote && attachedFiles.length === 0) return;
     const withQuote = (body: string) => [quote?.block, body].filter(Boolean).join('\n\n');
 
-    if ((editingEntryId || withdrawing) && omp.isStreaming) {
-      // Editing an earlier turn while one is running: stop it, then branch from
-      // the edited turn. Steering would append to the wrong conversation.
-      setEditingEntryId(null);
-      setWithdrawing(false);
-      onDispatchLog('INFO', 'prompt.edit: stopping the running turn, then branching');
-      void omp
-        .abort()
-        .then(() => omp.branchAndPrompt(withQuote([attachmentBlock, pastedImageBlock, message].filter(Boolean).join('\n\n'))));
-      setInputPrompt('');
-      setAttachedFiles([]);
-      return;
-    }
     if (omp.isStreaming) {
       if (!trimmed) return;
       onDispatchLog('INFO', `agent.${steerOrQueueMode}: ${trimmed.slice(0, 48)}`);
       void omp.send(withQuote([pastedImageBlock, message].filter(Boolean).join('\n\n')), steerOrQueueMode);
     } else {
       const text = withQuote([attachmentBlock, pastedImageBlock, message].filter(Boolean).join('\n\n'));
-      if (editingEntryId || withdrawing) {
-        setEditingEntryId(null);
-        setWithdrawing(false);
-        onDispatchLog('INFO', 'prompt.edit: branching at that turn and re-running');
-        void omp.branchAndPrompt(text);
-      } else {
-        onDispatchLog('INFO', `prompt.send: ${trimmed.slice(0, 48)}`);
-        void omp.send(text);
-      }
+      onDispatchLog('INFO', `prompt.send: ${trimmed.slice(0, 48)}`);
+      void omp.send(text);
     }
 
     setInputPrompt('');
     setAttachedFiles([]);
     setPastedImages([]);
+    setWithdrawing(false);
   };
 
   // ---- Voice: dictation into the composer + omp TTS read-out ----
@@ -1213,7 +1196,7 @@ return (
     </div>
 
     <div
-      className={`select-text text-[13.5px] leading-[1.7] ${msg.pending ? 'opacity-70' : ''} ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}${editingEntryId && editingEntryId === msg.entryId ? ' ring-1 ring-[#a78bfa]/70' : ''}`}
+      className={`select-text text-[13.5px] leading-[1.7] ${msg.pending ? 'opacity-70' : ''} ${isUser ? 'p-3.5 rounded-lg max-w-[85%] bg-[#18181b] border border-[#27272a] text-[#fafafa]' : 'text-[#fafafa] w-full'}`}
     >
       {!isUser && turnMeta.get(msg.id)?.isFirst && (() => {
         const turn = turnMeta.get(msg.id)!;
@@ -1419,16 +1402,13 @@ return (
         type="button"
         onClick={() => handleStartEdit(msg)}
         title={
-          anchored
-            ? language === 'zh-CN'
-              ? '撤回这条指令并放回输入框修改；再次发送会从该轮分叉重跑（同 omp 终端）'
-              : 'Withdraw this prompt back into the composer; sending again branches the session here (like the omp terminal)'
-            : anchorTitle ?? (language === 'zh-CN' ? '撤回并放回输入框修改' : 'Withdraw back into the composer')
+          language === 'zh-CN'
+            ? '撤回这条消息并把内容放回输入框修改（同 omp 终端）'
+            : 'Withdraw this message and put it back in the composer to edit (like the omp terminal)'
         }
         className="flex items-center gap-1 px-1.5 py-1 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
       >
         <Pencil className="w-3.5 h-3.5 text-[#a78bfa]" />
-        <span>{language === 'zh-CN' ? '修改' : 'Edit'}</span>
       </button>
 
       <button
@@ -1454,7 +1434,7 @@ return (
   </div>
 );
       }),
-    [transcript, retryOriginByMsgId, editingEntryId, copiedMessageId, language, theme, accentColor,
+    [transcript, retryOriginByMsgId, withdrawing, copiedMessageId, language, theme, accentColor,
      omp.isStreaming, omp.liveTokensPerSecond, omp.usage, omp.state, omp.slashCommands, modelLabelFor,
      handleRetryFrom, handleQuoteMessage, handleCopyMessage, speakText, handleStartEdit, handleForkAt,
      insertCommandIntoComposer, msgRefs,
@@ -2028,7 +2008,7 @@ return (
                 style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}
                 onMouseUp={captureReplySelection}
               >
-                {(editingEntryId || withdrawing) && (
+                {withdrawing && (
                   <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#18181b] border border-[#a78bfa]/50 text-xs font-mono text-[#a1a1aa]">
                     <div className="flex items-center gap-2 min-w-0">
                       <Pencil className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />
@@ -2224,7 +2204,7 @@ return (
               }
             />
             {/* Editing an earlier turn banner */}
-            {(editingEntryId || withdrawing) && (
+            {withdrawing && (
               <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#18181b] border border-[#a78bfa]/50 text-xs font-mono text-[#a1a1aa]">
                 <div className="flex items-center gap-2 min-w-0">
                   <Pencil className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />
@@ -2542,7 +2522,7 @@ return (
                     void refreshCompletion(inputPrompt, textareaRef.current?.selectionStart ?? inputPrompt.length);
                     return;
                   }
-                  if (e.key === 'Escape' && (editingEntryId || withdrawing)) {
+                  if (e.key === 'Escape' && withdrawing) {
                     e.preventDefault();
                     cancelEdit();
                     return;

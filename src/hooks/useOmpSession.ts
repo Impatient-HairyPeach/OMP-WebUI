@@ -91,6 +91,9 @@ export interface OmpSessionApi {
   deleteSession: (path: string) => Promise<void>;
   /** Edit-from-here: branch the session log at that user turn and re-run with `text`. */
   branchAndPrompt: (text: string) => Promise<void>;
+  /** Retract a sent prompt (matched by its text) so the turn and everything
+   *  after it leave the transcript. The next send simply continues there. */
+  withdrawPrompt: (content: string) => Promise<boolean>;
   /** Snapshot the session at `entryId` into a new session file. */
   forkAt: (entryId: string) => Promise<void>;
   archived: OmpArchivedSession[];
@@ -921,6 +924,52 @@ export function useOmpSession(): OmpSessionApi {
     [branchAnchors, pushLog]
   );
 
+  const withdrawPrompt = useCallback(
+    async (content: string): Promise<boolean> => {
+      const bridge = bridgeRef.current;
+      if (!bridge) return false;
+      // A just-sent prompt arrives over the live stream without a log anchor, so
+      // re-read the session log first and match the prompt by its text — the
+      // same resolution `branchAndPrompt` uses.
+      let anchors = branchAnchors;
+      try {
+        const payload = await bridge.currentSession();
+        adoptSession(payload);
+        anchors = (payload.branches ?? [])
+          .filter((anchor) => anchor.entryId)
+          .map((anchor) => ({ entryId: anchor.entryId, text: anchor.text }));
+      } catch (error) {
+        pushLog("warn", `could not re-read the session before withdrawing: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const target = normalize(content);
+      const anchor =
+        anchors.find((candidate) => normalize(candidate.text) === target) ??
+        anchors.find(
+          (candidate) =>
+            normalize(candidate.text).startsWith(target.slice(0, 40)) ||
+            target.startsWith(normalize(candidate.text).slice(0, 40)),
+        );
+      if (!anchor) {
+        pushLog("error", "this prompt has no anchor in the omp session log");
+        return false;
+      }
+      const branch = await bridge.command({ type: "branch", entryId: anchor.entryId });
+      if (branch.success === false) {
+        pushLog("error", branch.error ?? "could not branch the session");
+        return false;
+      }
+      pushLog("info", "withdrew the prompt: the session branches here");
+      try {
+        adoptSession(await bridge.currentSession());
+      } catch {
+        /* the branch already landed; the transcript refreshes on the next turn */
+      }
+      return true;
+    },
+    [adoptSession, branchAnchors, pushLog]
+  );
+
   const archiveSession = useCallback(
     async (path: string) => {
       const bridge = bridgeRef.current;
@@ -1049,6 +1098,7 @@ export function useOmpSession(): OmpSessionApi {
     refreshSessions,
     deleteSession,
     branchAndPrompt,
+    withdrawPrompt,
     forkAt,
     archived,
     archiveSession,
