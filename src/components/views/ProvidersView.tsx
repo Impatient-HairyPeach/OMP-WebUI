@@ -26,6 +26,7 @@ import {
   fetchCustomEndpoints,
   saveCustomEndpoint,
   type CustomEndpoint,
+  discoverEndpointModels,
   fetchModelScope,
   fetchProviderBalances,
   fetchProviderUsage,
@@ -192,6 +193,27 @@ export const ProvidersView: React.FC = () => {
       setEndpointBusy(null);
     }
   };
+  /** Ask the endpoint which models it serves, so adding a provider needs no
+   *  hand-typed ids. */
+  const pullEndpointModels = async () => {
+    setEndpointBusy('discover');
+    setEndpointMessage(null);
+    try {
+      const { models } = await discoverEndpointModels(endpointForm.baseUrl.trim(), endpointForm.apiKey.trim());
+      setEndpointForm((prev) => ({
+        ...prev,
+        models: models.map((model) => (model.name ? `${model.id} | ${model.name}` : model.id)).join('\n'),
+      }));
+      setEndpointMessage(
+        zh ? `已拉取 ${models.length} 个模型，确认后保存。` : `fetched ${models.length} models; review then save.`
+      );
+    } catch (error) {
+      setEndpointMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setEndpointBusy(null);
+    }
+  };
+
   /** Both refresh buttons re-read omp's usage (billing) and quota reports. */
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
@@ -885,8 +907,25 @@ export const ProvidersView: React.FC = () => {
                 />
               </label>
               <label className="block sm:col-span-2">
-                <span className="block text-[10px] font-mono uppercase tracking-wide text-[#71717a] mb-1">
-                  {zh ? '模型（每行一个，可写 id | 显示名）' : 'models (one per line, id | display name)'}
+                <span className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-[10px] font-mono uppercase tracking-wide text-[#71717a]">
+                    {zh ? '模型（每行一个，可写 id | 显示名）' : 'models (one per line, id | display name)'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void pullEndpointModels()}
+                    disabled={!endpointForm.baseUrl.trim() || endpointBusy !== null}
+                    title={
+                      zh
+                        ? '从该 baseUrl 拉取模型列表（GET /models），自动填入下面的列表'
+                        : 'Fetch the model list from this baseUrl (GET /models) and fill the list below'
+                    }
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] cursor-pointer transition-colors disabled:opacity-40"
+                    style={{ borderColor: theme.border, color: theme.mode === 'light' ? '#334155' : '#a1a1aa' }}
+                  >
+                    <RefreshCw className={`w-3 h-3 ${endpointBusy === 'discover' ? 'animate-spin' : ''}`} />
+                    {zh ? '拉取模型' : 'Fetch models'}
+                  </button>
                 </span>
                 <textarea
                   rows={3}

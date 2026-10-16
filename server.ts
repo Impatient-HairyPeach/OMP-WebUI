@@ -1953,6 +1953,60 @@ app.get("/api/omp/custom-providers", (_req, res) => {
   }
 });
 
+/** Ask an OpenAI-compatible endpoint which models it serves (`GET {base}/models`). */
+async function discoverProviderModels(baseUrl: string, apiKey: string): Promise<Array<{ id: string; name?: string }>> {
+  const root = baseUrl.replace(/\/+$/, "");
+  const url = /\/models$/.test(root) ? root : `${root}/models`;
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+  const body = await response.text();
+  if (!response.ok) throw new Error(`${response.status} ${body.slice(0, 200)}`.trim());
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    throw new Error(`the endpoint did not answer JSON: ${body.slice(0, 120)}`);
+  }
+  const rows = Array.isArray(payload)
+    ? payload
+    : Array.isArray((payload as { data?: unknown }).data)
+    ? ((payload as { data: unknown[] }).data)
+    : Array.isArray((payload as { models?: unknown }).models)
+    ? ((payload as { models: unknown[] }).models)
+    : [];
+  return rows
+    .map((row) => {
+      if (typeof row === "string") return { id: row.trim() };
+      const record = row as { id?: unknown; name?: unknown };
+      return { id: String(record.id ?? "").trim(), name: typeof record.name === "string" ? record.name.trim() : "" };
+    })
+    .filter((model) => model.id)
+    .map((model) => ({ id: model.id.replace(/^models\//, ""), ...(model.name && model.name !== model.id ? { name: model.name } : {}) }));
+}
+
+/** Model ids a provider advertises, for the "add provider" form. */
+app.post("/api/omp/models/discover", async (req, res) => {
+  const baseUrl = String(req.body?.baseUrl || "").trim();
+  const apiKey = String(req.body?.apiKey || "").trim();
+  if (!/^https?:\/\/[^\s]+$/.test(baseUrl)) {
+    res.status(400).json({ error: "baseUrl must be an http(s) URL" });
+    return;
+  }
+  try {
+    const models = await discoverProviderModels(baseUrl, apiKey);
+    if (models.length === 0) {
+      res.status(400).json({ error: "the endpoint returned no models" });
+      return;
+    }
+    res.json({ ok: true, count: models.length, models });
+  } catch (error) {
+    res.status(400).json({
+      error: `could not read the model list: ${String(error instanceof Error ? error.message : error).slice(0, 300)}`,
+    });
+  }
+});
+
 /** Save (create or replace) or delete one custom provider, then restart omp. */
 app.post("/api/omp/custom-providers", async (req, res) => {
   const action = String(req.body?.action || "save");
@@ -1986,8 +2040,18 @@ app.post("/api/omp/custom-providers", async (req, res) => {
         return { id: model.id, name: model.name || before?.name || "", extra: before?.extra ?? [] };
       });
     if (models.length === 0) {
-      res.status(400).json({ error: "at least one model id is required" });
-      return;
+      // No models typed: ask the endpoint itself, the way the provider list is
+      // normally populated. The key may be the one just typed or the stored one.
+      try {
+        const discovered = await discoverProviderModels(baseUrl, requestedKey || previous?.apiKey || "");
+        if (discovered.length === 0) throw new Error("the endpoint returned no models");
+        models.push(...discovered.map((model) => ({ id: model.id, name: model.name ?? "", extra: previous?.models.find((m) => m.id === model.id)?.extra ?? [] })));
+      } catch (error) {
+        res.status(400).json({
+          error: `no model ids given and auto-discovery failed: ${String(error instanceof Error ? error.message : error).slice(0, 300)}`,
+        });
+        return;
+      }
     }
     keep.push({
       name,

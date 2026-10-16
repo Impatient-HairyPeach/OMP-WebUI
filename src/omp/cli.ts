@@ -290,6 +290,10 @@ export const saveCustomEndpoint = (body: {
   models?: CustomEndpointModel[];
 }) => postJson<{ ok: boolean; path: string; providers: string[]; restarted: boolean }>("/api/omp/custom-providers", body);
 
+/** Model ids an endpoint advertises, so "add provider" can fill them in. */
+export const discoverEndpointModels = (baseUrl: string, apiKey: string) =>
+  postJson<{ ok: boolean; count: number; models: CustomEndpointModel[] }>("/api/omp/models/discover", { baseUrl, apiKey });
+
 /** Refresh one provider's model catalog (`omp models refresh`). */
 export const refreshProviderModels = (provider: string) =>
   postJson<{ ok: boolean; provider: string; added: string[]; models: Array<{ id: string; name: string; selector: string }> }>(

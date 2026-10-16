@@ -3,6 +3,15 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.53
+
+- Adding a provider can discover its models instead of you typing ids. The
+  "add provider" form has a Fetch models button that asks the endpoint
+  (GET {baseUrl}/models) and fills the list with the ids and display names it
+  advertises; saving with an empty list now discovers them server-side rather
+  than refusing. Verified against DeepSeek (two models, names included), and the
+  real models.yml came back byte-identical after a create + delete round trip.
+
 ## 0.3.52
 
 - A new TODO always replaces the old one. The newest todo write in the
