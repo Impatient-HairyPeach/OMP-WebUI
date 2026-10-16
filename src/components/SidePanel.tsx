@@ -20,6 +20,7 @@ import {
   Folder,
   FolderGit2,
   MessagesSquare,
+  Ban,
   CornerDownLeft,
   FolderOpen,
   GitBranch,
@@ -130,6 +131,22 @@ function insertMention(text: string): void {
 function insertQuote(preview: string, block: string): void {
   window.dispatchEvent(new CustomEvent('omp:insert-quote', { detail: { preview, block } }));
 }
+
+/** omp subagent statuses -> one compact glyph (running spins). */
+const SubagentGlyph: React.FC<{ status: string; accentColor: string }> = ({ status, accentColor }) => {
+  if (status === 'running' || status === 'pending' || status === 'queued') {
+    return <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: accentColor }} />;
+  }
+  if (status === 'failed' || status === 'error') return <Ban className="w-3 h-3 shrink-0 text-[#ef4444]" />;
+  if (status === 'aborted' || status === 'cancelled') return <Ban className="w-3 h-3 shrink-0 text-[#f59e0b]" />;
+  return <Check className="w-3 h-3 shrink-0 text-[#34d399]" />;
+};
+
+const formatSubagentDuration = (durationMs: number): string => {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  return minutes > 0 ? `${minutes}m ${String(totalSeconds % 60).padStart(2, '0')}s` : `${totalSeconds}s`;
+};
 
 export const SidePanel: React.FC<SidePanelProps> = ({
   isOpen,
@@ -665,6 +682,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   /** Right panel task/subagent sections fold on their own. */
   const [tasksOpen, setTasksOpen] = useState(true);
   const [subagentsOpen, setSubagentsOpen] = useState(true);
+  /** One expanded subagent at a time; the rows stay compact by default. */
+  const [subagentOpen, setSubagentOpen] = useState<Record<string, boolean>>({});
 
   // --- extensions tab: this project's skills + extensions ---
   const [projectSkills, setProjectSkills] = useState<OmpSkillEntry[]>([]);
@@ -707,7 +726,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     { id: 'files', label: zh ? '文件' : 'Files', icon: <FileCode className="w-3.5 h-3.5" />, badge: annotations.length },
     { id: 'diffs', label: zh ? '改动' : 'Diffs', icon: <FilePlus className="w-3.5 h-3.5" />, badge: diffs.length },
     { id: 'extensions', label: zh ? '扩展' : 'Extras', icon: <Puzzle className="w-3.5 h-3.5" /> },
-    { id: 'tasks', label: zh ? '任务' : 'Tasks', icon: <ListChecks className="w-3.5 h-3.5" /> },
+    { id: 'tasks', label: 'TODO', icon: <ListChecks className="w-3.5 h-3.5" /> },
     { id: 'git', label: zh ? 'Git' : 'Git', icon: <GitBranch className="w-3.5 h-3.5" /> },
   ];
 
@@ -1501,32 +1520,79 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         </span>
                         <span className="text-[10px] text-[#52525b] shrink-0">{work.subagents.length}</span>
                       </button>
-                      {subagentsOpen &&
-                        work.subagents.map((agent, index) => {
-                          const label = String(agent.name ?? agent.agent ?? agent.id ?? `#${index + 1}`);
-                          const tokens = typeof agent.tokens === 'number' ? agent.tokens : null;
-                          const duration = typeof agent.durationMs === 'number' ? `${Math.round(agent.durationMs / 1000)}s` : null;
-                          return (
-                            <div key={`${label}-${index}`} className="p-2 rounded border space-y-0.5" style={{ borderColor: theme.border }}>
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px] truncate" style={{ color: accentColor }} title={label}>
-                                  {label}
+                      {subagentsOpen && (
+                        <div className="ml-1 pl-1.5 border-l" style={{ borderColor: theme.border }}>
+                          {work.subagents.map((agent, index) => {
+                            const key = String(agent.id ?? agent.name ?? index);
+                            const expanded = subagentOpen[key] === true;
+                            const label = String(agent.name ?? agent.id ?? `subagent-${index + 1}`);
+                            const kind = typeof agent.agent === 'string' && agent.agent ? agent.agent : null;
+                            const model = typeof agent.model === 'string' && agent.model ? agent.model : null;
+                            const task = typeof agent.task === 'string' && agent.task ? agent.task : null;
+                            const status = String(agent.status ?? 'running');
+                            const tokens = typeof agent.tokens === 'number' ? agent.tokens : null;
+                            const cost = typeof agent.cost === 'number' ? agent.cost : null;
+                            const duration = typeof agent.durationMs === 'number' ? formatSubagentDuration(agent.durationMs) : null;
+                            return (
+                              <div key={`${key}-${index}`} className="flex gap-1">
+                                {/* branch connector: the rows hang off the Subagents header */}
+                                <span aria-hidden="true" className="shrink-0 select-none pt-1 text-[10px] leading-none text-[#3f3f46]">
+                                  {index === work.subagents.length - 1 ? '└─' : '├─'}
                                 </span>
-                                <span className="text-[10px] text-[#52525b] shrink-0">{String(agent.status ?? 'running')}</span>
-                              </div>
-                              {Boolean(agent.task ?? agent.model) && (
-                                <div className="text-[10px] text-[#a1a1aa] break-words">{String(agent.task ?? agent.model)}</div>
-                              )}
-                              {(tokens !== null || duration) && (
-                                <div className="text-[10px] text-[#71717a]">
-                                  {tokens !== null ? `${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tok` : ''}
-                                  {tokens !== null && duration ? ' · ' : ''}
-                                  {duration ?? ''}
+                                <div className="flex-1 min-w-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSubagentOpen((prev) => ({ ...prev, [key]: !expanded }))}
+                                    aria-expanded={expanded}
+                                    title={task ?? label}
+                                    className="w-full flex items-center gap-1.5 py-1 text-left cursor-pointer"
+                                  >
+                                    <SubagentGlyph status={status} accentColor={accentColor} />
+                                    <span className="text-[11px] truncate" style={{ color: accentColor }}>
+                                      {label}
+                                    </span>
+                                    {kind && (
+                                      <span
+                                        className="text-[9px] px-1 rounded border shrink-0"
+                                        style={{ borderColor: theme.border, color: '#71717a' }}
+                                      >
+                                        {kind}
+                                      </span>
+                                    )}
+                                    {model && (
+                                      <span className="text-[10px] text-[#71717a] truncate min-w-0 hidden lg:inline">{model}</span>
+                                    )}
+                                    <span className="ml-auto shrink-0 text-[10px] text-[#52525b] tabular-nums">
+                                      {duration ?? status}
+                                    </span>
+                                    {expanded ? (
+                                      <ChevronDown className="w-3 h-3 shrink-0 text-[#52525b]" />
+                                    ) : (
+                                      <ChevronRight className="w-3 h-3 shrink-0 text-[#52525b]" />
+                                    )}
+                                  </button>
+                                  {expanded && (
+                                    <div className="pb-1.5 space-y-0.5 text-[10px]">
+                                      {task && <div className="text-[#a1a1aa] whitespace-pre-wrap break-words">{task}</div>}
+                                      <div className="text-[#71717a] font-mono break-words">
+                                        {[
+                                          model ? `model ${model}` : null,
+                                          tokens !== null ? `${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tok` : null,
+                                          cost !== null ? `$${cost.toFixed(4)}` : null,
+                                          status,
+                                          agent.id && String(agent.id) !== label ? `id ${agent.id}` : null,
+                                        ]
+                                          .filter(Boolean)
+                                          .join(' · ')}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </>

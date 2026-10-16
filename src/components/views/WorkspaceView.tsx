@@ -53,7 +53,7 @@ import { TaskHud } from '../TaskHud';
 import { PanelResizeHandle } from '../PanelResizeHandle';
 import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, fetchSubagents } from '../../omp/cli';
 import type { SubagentRow } from '../../omp/cli';
-import { currentTurnStart, todosFromTranscript } from '../../lib/todoList';
+import { todosFromTranscript } from '../../lib/todoList';
 import { publishWorkState } from '../../lib/workState';
 import { Mic, Volume2 } from 'lucide-react';
 import { useOmpSession } from '../../hooks/useOmpSession';
@@ -243,6 +243,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  /** True while the composer holds a prompt withdrawn from the transcript. A
+   *  just-sent message has no session anchor yet, but the branch still resolves
+   *  by prompt text, so withdrawing must not depend on the anchor existing. */
+  const [withdrawing, setWithdrawing] = useState(false);
   const [activeMsgId, setActiveMsgId] = useState<string | null>(null);
   /** Default for reasoning visibility (a stored preference); each block toggles itself. */
   /** Left panel sections: both collapse independently and remember it. */
@@ -444,8 +448,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   // Derived from the rendered transcript (settled turns + the live one) and
   // scoped to the turn in flight, so it updates while the agent is still working
   // and never shows the previous turn's finished list.
+  /* omp's terminal keeps showing the session's todo list until the agent writes
+     a new one; deriving it from "this turn only" made it vanish on a steer, which
+     appends a user message and so moved the turn boundary. */
   const transcriptTodos = useMemo(
-    () => todosFromTranscript(transcript.slice(currentTurnStart(transcript))),
+    () => todosFromTranscript(transcript),
     [transcript]
   );
   useEffect(() => {
@@ -455,10 +462,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const contextUsage = omp.state?.contextUsage ?? null;
   const statusColor =
     omp.status === 'ready' ? '#34d399' : omp.status === 'starting' || omp.status === 'connecting' ? '#f59e0b' : '#ef4444';
-  /** omp status chips minus the ones this UI already renders as controls. */
-  const statusChips = omp.statusChips.filter(
-    (chip) => !HIDDEN_STATUS_CHIP_PREFIXES.some((prefix) => chip.key.startsWith(prefix))
-  );
   /* Session metrics come from omp's session log (every call it recorded), not
      from the transcript, which is a trimmed view once a long session compacts. */
   const sessionTotals = omp.sessionUsage;
@@ -575,11 +578,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   };
 
   /** Enter edit-from-here: the next send branches the omp log at this entry. */
+  /** Withdraw a sent prompt: stop whatever it started and put the text back in
+   *  the composer. Sending again branches the session at that entry, so the
+   *  withdrawn message and everything after it are dropped — the same "edit and
+   *  re-run" the omp terminal offers, driven from the message itself. */
   const handleStartEdit = (msg: ChatMessage) => {
-    if (!msg.entryId) return;
-    setEditingEntryId(msg.entryId);
+    if (omp.isStreaming) {
+      onDispatchLog('INFO', 'prompt.withdraw: stopping the running turn');
+      void omp.abort();
+    }
+    setEditingEntryId(msg.entryId ?? null);
+    setWithdrawing(true);
     setInputPrompt(msg.content);
+    setCompletion(null);
     textareaRef.current?.focus();
+    onDispatchLog('INFO', `prompt.withdraw: ${msg.content.slice(0, 48)} back in the composer`);
   };
 
   /** Folds the raw SKILL.md that omp injects as a user message. */
@@ -661,6 +674,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
 
   const cancelEdit = () => {
     setEditingEntryId(null);
+    setWithdrawing(false);
     setInputPrompt('');
   };
 
@@ -775,8 +789,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
           ...prev,
           { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, relative: saved.relative, name: basename(saved.relative) },
         ]);
-        setInputPrompt((prev) => `${prev}${prev && !prev.endsWith(' ') ? ' ' : ''}@${saved.relative} `);
-        onDispatchLog('INFO', `composer.paste: saved ${saved.relative} (${Math.round(saved.bytes / 1024)} KB) and referenced it with @`);
+        onDispatchLog('INFO', `composer.paste: attached ${saved.relative} (${Math.round(saved.bytes / 1024)} KB) — referenced in the prompt, not typed into the box`);
       } catch (error) {
         onDispatchLog('OVERRIDE', `composer.paste failed: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -784,9 +797,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     textareaRef.current?.focus();
   };
 
-  const removePastedImage = (id: string, relative: string) => {
+  const removePastedImage = (id: string) => {
     setPastedImages((prev) => prev.filter((image) => image.id !== id));
-    setInputPrompt((prev) => prev.replace(new RegExp(`@${relative.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'g'), ''));
   };
 
   const removeAttachedFile = (id: string) => {
@@ -804,6 +816,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const attachmentBlock = attachedFiles
     .map((file) => `\`\`\`${file.name}\n${file.text}\n\`\`\``)
     .join('\n\n');
+
+  /** Pasted images ride along as @path references instead of being typed into
+   *  the composer: the thumbnail strip above it already shows them. */
+  const pastedImageBlock = pastedImages.map((image) => `@${image.relative}`).join(' ');
 
   // ---- Composer completion: `/` commands, `@` workspace files, Tab to cycle ----
   const [completion, setCompletion] = useState<{
@@ -934,12 +950,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     if (!trimmed && !quote && attachedFiles.length === 0) return;
     const withQuote = (body: string) => [quote?.block, body].filter(Boolean).join('\n\n');
 
-    if (editingEntryId && omp.isStreaming) {
+    if ((editingEntryId || withdrawing) && omp.isStreaming) {
       // Editing an earlier turn while one is running: stop it, then branch from
       // the edited turn. Steering would append to the wrong conversation.
       setEditingEntryId(null);
+      setWithdrawing(false);
       onDispatchLog('INFO', 'prompt.edit: stopping the running turn, then branching');
-      void omp.abort().then(() => omp.branchAndPrompt(withQuote([attachmentBlock, message].filter(Boolean).join('\n\n'))));
+      void omp
+        .abort()
+        .then(() => omp.branchAndPrompt(withQuote([attachmentBlock, pastedImageBlock, message].filter(Boolean).join('\n\n'))));
       setInputPrompt('');
       setAttachedFiles([]);
       return;
@@ -947,11 +966,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     if (omp.isStreaming) {
       if (!trimmed) return;
       onDispatchLog('INFO', `agent.${steerOrQueueMode}: ${trimmed.slice(0, 48)}`);
-      void omp.send(withQuote(message), steerOrQueueMode);
+      void omp.send(withQuote([pastedImageBlock, message].filter(Boolean).join('\n\n')), steerOrQueueMode);
     } else {
-      const text = withQuote([attachmentBlock, message].filter(Boolean).join('\n\n'));
-      if (editingEntryId) {
+      const text = withQuote([attachmentBlock, pastedImageBlock, message].filter(Boolean).join('\n\n'));
+      if (editingEntryId || withdrawing) {
         setEditingEntryId(null);
+        setWithdrawing(false);
         onDispatchLog('INFO', 'prompt.edit: branching at that turn and re-running');
         void omp.branchAndPrompt(text);
       } else {
@@ -1381,7 +1401,7 @@ return (
 
   {/* Your own message: actions sit under the bubble, not inside it */}
   {isUser && !msg.pending && (
-    <div className="mt-1 flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-60 hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <div className="mt-1 flex items-center justify-end gap-1.5 font-mono text-[10px] text-[#71717a] opacity-90 hover:opacity-100 focus-within:opacity-100 transition-opacity">
       <button
         type="button"
         onClick={() => handleCopyMessage(msg.id, msg.content)}
@@ -1398,17 +1418,17 @@ return (
       <button
         type="button"
         onClick={() => handleStartEdit(msg)}
-        disabled={!anchored}
         title={
           anchored
             ? language === 'zh-CN'
-              ? '编辑这条指令：发送后从该轮分叉并重新执行（同 omp 终端）'
-              : 'Edit this prompt: sending branches the session here and re-runs it (like the omp terminal)'
-            : anchorTitle ?? (language === 'zh-CN' ? '编辑并从此处分支重发' : 'Edit & resend from here')
+              ? '撤回这条指令并放回输入框修改；再次发送会从该轮分叉重跑（同 omp 终端）'
+              : 'Withdraw this prompt back into the composer; sending again branches the session here (like the omp terminal)'
+            : anchorTitle ?? (language === 'zh-CN' ? '撤回并放回输入框修改' : 'Withdraw back into the composer')
         }
-        className="p-1.5 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40"
+        className="flex items-center gap-1 px-1.5 py-1 rounded bg-[#121215] border border-[#27272a] hover:text-[#fafafa] hover:border-[#3f3f46] transition-colors cursor-pointer"
       >
         <Pencil className="w-3.5 h-3.5 text-[#a78bfa]" />
+        <span>{language === 'zh-CN' ? '修改' : 'Edit'}</span>
       </button>
 
       <button
@@ -1910,23 +1930,8 @@ return (
               </span>
             )}
 
-            {/* Status text published by omp extensions (setStatus): one span per chip,
-                each with its own tooltip, so a long value is not cut off mid-number.
-                Chips already covered by a control or by a session metric are
-                filtered out (see HIDDEN_STATUS_CHIP_PREFIXES). */}
-            {statusChips.length > 0 && (
-              <span className="hidden xl:flex items-center gap-1.5 text-[10px] text-[#71717a] min-w-0">
-                {statusChips.map((chip) => (
-                  <span
-                    key={chip.key}
-                    className="truncate max-w-[320px] shrink-0"
-                    title={`${chip.key}: ${chip.text}`}
-                  >
-                    {chip.text}
-                  </span>
-                ))}
-              </span>
-            )}
+            {/* Extension status text (omp setStatus — e.g. a skill's own badge) is
+                deliberately not shown: this bar reports model usage only. */}
 
             {/* Chat / diffs toggle */}
             <div className="flex items-center p-0.5 bg-[#18181b] border border-[#27272a] rounded">
@@ -2023,7 +2028,7 @@ return (
                 style={{ maxWidth: 'var(--chat-content-max-width, 960px)' }}
                 onMouseUp={captureReplySelection}
               >
-                {editingEntryId && (
+                {(editingEntryId || withdrawing) && (
                   <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#18181b] border border-[#a78bfa]/50 text-xs font-mono text-[#a1a1aa]">
                     <div className="flex items-center gap-2 min-w-0">
                       <Pencil className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />
@@ -2219,7 +2224,7 @@ return (
               }
             />
             {/* Editing an earlier turn banner */}
-            {editingEntryId && (
+            {(editingEntryId || withdrawing) && (
               <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#18181b] border border-[#a78bfa]/50 text-xs font-mono text-[#a1a1aa]">
                 <div className="flex items-center gap-2 min-w-0">
                   <Pencil className="w-3.5 h-3.5 text-[#a78bfa] shrink-0" />
@@ -2353,7 +2358,7 @@ return (
                       </span>
                       <button
                         type="button"
-                        onClick={() => removePastedImage(image.id, image.relative)}
+                        onClick={() => removePastedImage(image.id)}
                         title={language === 'zh-CN' ? '删除这张图片' : 'Remove this image'}
                         className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full bg-[#ef4444]/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                       >
@@ -2537,7 +2542,7 @@ return (
                     void refreshCompletion(inputPrompt, textareaRef.current?.selectionStart ?? inputPrompt.length);
                     return;
                   }
-                  if (e.key === 'Escape' && editingEntryId) {
+                  if (e.key === 'Escape' && (editingEntryId || withdrawing)) {
                     e.preventDefault();
                     cancelEdit();
                     return;

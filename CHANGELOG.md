@@ -3,6 +3,26 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.49
+
+- Attachments stay attachments. A pasted image no longer writes an `@path`
+  line into the composer — the thumbnail strip is the whole UI for it, and the
+  reference still rides along in the prompt that gets sent (verified: paste an
+  image, composer stays empty, the sent prompt carries the reference).
+- The top bar reports model usage only. Extension status chips (`setStatus`,
+  which is how a skill like ponytail puts its own badge up there) are no longer
+  rendered.
+- A sent prompt can be withdrawn. Every user message now carries a labelled
+  修改 / Edit button that stops the turn it started, puts the text back in the
+  composer and re-runs it through the session branch — no duplicate. It works
+  immediately after sending, before the message has a session anchor.
+- The right panel's task tab is TODO, and the list now comes from the whole
+  session (the newest list omp wrote) instead of the current turn, so steering
+  a running turn no longer empties it.
+- Subagents read as branches: compact rows with a tree connector, the agent
+  name and kind, the model and the duration, expanding to the task, tokens,
+  cost and id.
+
 ## 0.3.48
 
 - Selecting text no longer freezes the page. Chrome turns a press inside an
