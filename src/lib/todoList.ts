@@ -76,10 +76,13 @@ export function todosFromTranscript(messages: ChatMessage[]): TodoGroup[] | null
       .reverse();
     for (const call of tools) {
       if (call.kind !== 'tool' || !/todo/i.test(call.tool)) continue;
+      /* The newest todo write decides, even when it has nothing to parse: a
+         cleared or rewritten list must never let an older one come back. ponytail:
+         if a future omp reports only a summary line instead of the list, fall back
+         to scanning further back. */
       const output = typeof call.output === 'string' ? call.output : '';
-      if (!output) continue;
-      const groups = parseTodoText(output);
-      if (groups.length > 0) return groups;
+      const groups = output ? parseTodoText(output) : [];
+      return groups.length > 0 ? groups : null;
     }
   }
   return null;

@@ -3,6 +3,14 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.52
+
+- A new TODO always replaces the old one. The newest todo write in the
+  transcript now decides on its own — a new round's list appears above the
+  composer again, and a cleared list no longer lets the previous finished list
+  come back. Asserted: a newer pending list shows, a newer finished list hides,
+  a cleared list hides, and a brand-new session hides.
+
 ## 0.3.51
 
 - The list above the composer now behaves like the omp terminal: it shows while
