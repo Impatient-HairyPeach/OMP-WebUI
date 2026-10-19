@@ -3,6 +3,15 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.54
+
+- Attached files reach the conversation as attachments, not as their contents.
+  Selecting a file now uploads it into the workspace (`.omp-studio/uploads/`)
+  and sends an `@path` reference, exactly like a pasted image; the transcript
+  therefore shows the reference instead of a wall of file text. Verified end to
+  end at the bridge: the logged prompt is `@.omp-studio/uploads/…` with none of
+  the file body in it.
+
 ## 0.3.53
 
 - Adding a provider can discover its models instead of you typing ids. The

@@ -3213,6 +3213,40 @@ app.post("/api/fs/paste", (req, res) => {
 });
 
 /**
+ * Store an attached file inside the workspace so the prompt can reference it
+ * with `@path`. The agent reads the real file; nothing is inlined into the
+ * conversation, which keeps the transcript showing an attachment, not a dump.
+ */
+app.post("/api/fs/upload", (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  const dataUrl = String(req.body?.dataUrl || "");
+  const safe = path.basename(name).replace(/[^\w.\-()+\u4e00-\u9fa5]/g, "_");
+  const match = dataUrl.match(/^data:[^;,]+;base64,([A-Za-z0-9+/=]+)$/);
+  if (!safe || !match) {
+    res.status(400).json({ error: "expected { name, dataUrl } with a base64 data URL" });
+    return;
+  }
+  const bytes = Buffer.from(match[1], "base64");
+  if (bytes.length > 64 * 1024 * 1024) {
+    res.status(400).json({ error: "attachment too large (64 MB max)" });
+    return;
+  }
+  try {
+    const root = path.resolve(workspace);
+    const dir = path.join(root, ".omp-studio", "uploads");
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const file = path.join(dir, `${stamp}-${safe}`);
+    writeFileSync(file, bytes);
+    const relative = path.relative(root, file).replace(/\\/g, "/");
+    emit("log", { level: "info", message: `composer.upload: ${relative} (${bytes.length} bytes)` });
+    res.json({ ok: true, path: file, relative, bytes: bytes.length });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/**
  * Save a cropped/annotated image the preview produced. The crop lands inside the
  * workspace under `.omp-studio/annotations/`, so the agent can be pointed at it
  * with a normal `@path` reference and will find a real file.

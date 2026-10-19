@@ -238,6 +238,10 @@ export const installOmpUpdate = (force = false) => postJson<OmpUpdateResult>("/a
 export const savePastedImage = (dataUrl: string) =>
   postJson<{ ok: boolean; path: string; relative: string; bytes: number }>("/api/fs/paste", { dataUrl });
 
+/** Store an attached file in the workspace; the prompt references it with `@path`. */
+export const uploadAttachment = (name: string, dataUrl: string) =>
+  postJson<{ ok: boolean; path: string; relative: string; bytes: number }>("/api/fs/upload", { name, dataUrl });
+
 /** Save a cropped region of an image into the workspace for an @ reference. */
 export const saveImageCrop = (path: string, dataUrl: string) =>
   postJson<{ ok: boolean; path: string; relative: string; bytes: number }>("/api/fs/annotate", { path, dataUrl });

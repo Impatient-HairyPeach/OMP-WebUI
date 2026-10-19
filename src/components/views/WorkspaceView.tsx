@@ -51,7 +51,7 @@ import { DiffViewer } from '../DiffViewer';
 import { ExtensionRequest } from '../ExtensionRequest';
 import { TaskHud } from '../TaskHud';
 import { PanelResizeHandle } from '../PanelResizeHandle';
-import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, fetchSubagents } from '../../omp/cli';
+import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, fetchSubagents, uploadAttachment } from '../../omp/cli';
 import type { SubagentRow } from '../../omp/cli';
 import { todosFromTranscript } from '../../lib/todoList';
 import { publishWorkState } from '../../lib/workState';
@@ -91,7 +91,9 @@ interface AttachedFile {
   id: string;
   name: string;
   size: string;
-  text: string;
+  /** Workspace-relative path; the prompt references it with `@path` so the
+   *  transcript shows an attachment instead of the file's contents. */
+  relative: string;
 }
 
 const basename = (value: string): string =>
@@ -156,14 +158,13 @@ const relativeTime = (iso: string): string => {
   return new Date(then).toLocaleDateString();
 };
 
-const readFileAsText = (file: File): Promise<string> => {
-  const { promise, resolve, reject } = Promise.withResolvers<string>();
-  const reader = new FileReader();
-  reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-  reader.onerror = () => reject(reader.error);
-  reader.readAsText(file);
-  return promise;
-};
+const readFileAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 
 export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) => {
   const { theme, accentColor } = useTheme();
@@ -749,20 +750,31 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
-    const loaded = await Promise.all(
-      files.map(async (file) => ({
-        id: `file-${Date.now()}-${file.name}`,
-        name: file.name,
-        size: `${(file.size / 1024).toFixed(1)} KB`,
-        text: await readFileAsText(file).catch(() => ''),
-      }))
+    // Store the file in the workspace and reference it with @path: inlining the
+    // body would make the transcript show a wall of file contents.
+    const staged = await Promise.all(
+      files.map(async (file): Promise<AttachedFile | null> => {
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+          const saved = await uploadAttachment(file.name, dataUrl);
+          return {
+            id: `file-${Date.now()}-${file.name}`,
+            name: file.name,
+            size: `${(file.size / 1024).toFixed(1)} KB`,
+            relative: saved.relative,
+          };
+        } catch (error) {
+          onDispatchLog(
+            'OVERRIDE',
+            `context: could not attach ${file.name}: ${error instanceof Error ? error.message : String(error)}`
+          );
+          return null;
+        }
+      })
     );
-    setAttachedFiles((prev) => [...prev, ...loaded]);
-    onDispatchLog('INFO', `context: inlined ${files.length} file(s) into the next prompt (omp rpc prompts carry text only)`);
-    const unreadable = loaded.filter((file) => !file.text);
-    if (unreadable.length > 0) {
-      onDispatchLog('OVERRIDE', `context: could not read ${unreadable.map((file) => file.name).join(', ')} as text`);
-    }
+    const attached = staged.filter((file): file is AttachedFile => file !== null);
+    setAttachedFiles((prev) => [...prev, ...attached]);
+    onDispatchLog('INFO', `context: attached ${attached.length} file(s) by reference (omp reads them from the workspace)`);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -814,10 +826,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     void omp.newSession();
   };
 
-  /** omp's rpc prompt carries text only, so attachments are sent as fenced blocks. */
-  const attachmentBlock = attachedFiles
-    .map((file) => `\`\`\`${file.name}\n${file.text}\n\`\`\``)
-    .join('\n\n');
+  /** Attachments travel as @path references: omp reads the real file, and the
+   *  transcript only shows the reference (the chip carries the name). */
+  const attachmentBlock = attachedFiles.map((file) => `@${file.relative}`).join(' ');
 
   /** Pasted images ride along as @path references instead of being typed into
    *  the composer: the thumbnail strip above it already shows them. */
