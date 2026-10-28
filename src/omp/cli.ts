@@ -424,9 +424,16 @@ export interface ApprovalState {
   mode: string | null;
   modes: string[];
   autoApprove: boolean;
+  /** Read-only session: only tools that cannot change the workspace are mounted. */
+  readOnly?: boolean;
+  readOnlyTools?: string[];
 }
 
 export const fetchApproval = () => getJson<ApprovalState>("/api/omp/approval");
+
+/** Read-only sessions mount only tools that cannot change the workspace. */
+export const setReadOnly = (enabled: boolean) =>
+  postJson<{ ok: boolean; readOnly: boolean; tools: string[]; restarted: boolean }>("/api/omp/readonly", { enabled });
 export const setApproval = (mode: string) =>
   postJson<{ ok: boolean; mode: string; restarted: boolean }>("/api/omp/approval", { mode });
 

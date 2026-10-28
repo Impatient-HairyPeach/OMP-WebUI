@@ -3,6 +3,19 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.55
+
+- Formulas render. Replies and file previews now typeset TeX with KaTeX:
+  `$…$` / `\(…\)` inline and `$$…$$` / `\[…\]` as a display block, alongside
+  the existing bold/italic/code/link markdown, which is unchanged. TeX that
+  cannot be parsed falls back to showing its source instead of breaking the
+  message.
+- Tool permissions gained a read-only switch. It restarts omp with only tools
+  that cannot change the workspace (read, glob, grep, ask, todo, wait,
+  web_search), is remembered per project, and the composer's permission button
+  shows a lock while it is on. If omp ever rejects the tool list the switch
+  reverts itself rather than leaving the session down.
+
 ## 0.3.54
 
 - Attached files reach the conversation as attachments, not as their contents.

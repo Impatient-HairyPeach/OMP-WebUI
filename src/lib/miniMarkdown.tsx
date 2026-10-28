@@ -1,22 +1,53 @@
 /**
  * Minimal Markdown renderer for chat replies and the file preview: headings,
  * fenced code, ordered/unordered lists, GFM pipe tables, blockquotes, rules,
- * plus inline bold/italic/code/links. It renders React nodes (never HTML
- * strings), so nothing in a message or a file can inject markup.
+ * plus inline bold/italic/code/links, and TeX math through KaTeX (`$…$`,
+ * `$$…$$`, `\(…\)`, `\[…\]`). It renders React nodes, so nothing in a message
+ * or a file can inject markup; KaTeX output is the only HTML string, and KaTeX
+ * escapes the source itself.
  */
 import React from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 
 type Inline = (text: string) => React.ReactNode;
 
 const INLINE_PATTERN = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\)|\*[^*]+\*|_[^_]+_)/g;
 
-const renderInline: Inline = (text) => {
+/** One formula. Unparseable TeX shows as its source instead of throwing. */
+const renderMath = (latex: string, displayMode: boolean, key: React.Key): React.ReactNode => {
+  let html: string;
+  try {
+    html = katex.renderToString(latex, { displayMode, throwOnError: false, strict: 'ignore' });
+  } catch {
+    return <code key={key}>{latex}</code>;
+  }
+  return displayMode ? (
+    <div
+      key={key}
+      className="my-2 overflow-x-auto"
+      // KaTeX escapes the TeX source; this is its own generated markup.
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  ) : (
+    <span
+      key={key}
+      className="inline-block align-middle"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+};
+
+/** `$…$` / `\(…\)`: math wins over emphasis so `$a_1 * b$` is not italicised. */
+const INLINE_MATH_PATTERN = /(\$[^$\n]+\$|\\\([^\n]+?\\\))/;
+
+const renderPlainInline = (text: string, prefix: string): React.ReactNode[] => {
   const parts = text.split(INLINE_PATTERN).filter((part) => part !== '');
   return parts.map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) return <strong key={index}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={`${prefix}-${index}`}>{part.slice(2, -2)}</strong>;
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
-        <code key={index} className="px-1 py-0.5 rounded bg-[#18181b] border border-[#27272a] text-[0.92em]">
+        <code key={`${prefix}-${index}`} className="px-1 py-0.5 rounded bg-[#18181b] border border-[#27272a] text-[0.92em]">
           {part.slice(1, -1)}
         </code>
       );
@@ -24,16 +55,32 @@ const renderInline: Inline = (text) => {
     const link = part.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
     if (link) {
       return (
-        <a key={index} href={link[2]} target="_blank" rel="noreferrer" className="text-[#a78bfa] hover:underline">
+        <a key={`${prefix}-${index}`} href={link[2]} target="_blank" rel="noreferrer" className="text-[#a78bfa] hover:underline">
           {link[1]}
         </a>
       );
     }
     if ((part.startsWith('*') && part.endsWith('*')) || (part.startsWith('_') && part.endsWith('_'))) {
-      return <em key={index}>{part.slice(1, -1)}</em>;
+      return <em key={`${prefix}-${index}`}>{part.slice(1, -1)}</em>;
     }
-    return <React.Fragment key={index}>{part}</React.Fragment>;
+    return <React.Fragment key={`${prefix}-${index}`}>{part}</React.Fragment>;
   });
+};
+
+const renderInline: Inline = (text) => {
+  const nodes: React.ReactNode[] = [];
+  const chunks = text.split(INLINE_MATH_PATTERN);
+  chunks.forEach((chunk, chunkIndex) => {
+    if (!chunk) return;
+    const isParen = chunk.startsWith('\\(') && chunk.endsWith('\\)');
+    const isDollar = chunk.startsWith('$') && chunk.endsWith('$') && chunk.length > 2;
+    if (isParen || isDollar) {
+      nodes.push(renderMath(chunk.slice(isParen ? 2 : 1, isParen ? -2 : -1), false, `m-${chunkIndex}`));
+      return;
+    }
+    nodes.push(...renderPlainInline(chunk, `c${chunkIndex}`));
+  });
+  return nodes;
 };
 
 /** `| a | b |` cell split; outer pipes are optional in GFM. */
@@ -128,6 +175,27 @@ export function renderMarkdown(source: string): React.ReactNode[] {
       flushAll();
       code = [];
       codeLang = line.trim().slice(3);
+      continue;
+    }
+
+    // Display math: `$$ … $$` on one line, or an opening `$$` closed later.
+    const displayOneLine = line.match(/^\s*\$\$(.+?)\$\$\s*$/);
+    if (displayOneLine) {
+      flushAll();
+      blocks.push(renderMath(displayOneLine[1].trim(), true, `math-${blocks.length}`));
+      continue;
+    }
+    if (/^\s*\$\$\s*$/.test(line) || /^\s*\\\[\s*$/.test(line)) {
+      const closer = /\$\$/.test(line) ? /\$\$/ : /\\\]\s*$/;
+      const body: string[] = [];
+      let cursor = i + 1;
+      for (; cursor < lines.length; cursor += 1) {
+        if (closer.test(lines[cursor])) break;
+        body.push(lines[cursor]);
+      }
+      flushAll();
+      blocks.push(renderMath(body.join('\n').trim(), true, `math-${blocks.length}`));
+      i = cursor;
       continue;
     }
 

@@ -28,6 +28,7 @@ import {
   Layers,
   ListOrdered,
   Loader2,
+  Lock,
   MessageSquare,
   PanelLeftOpen,
   Paperclip,
@@ -74,7 +75,7 @@ import { parseSkillInjection } from '../../lib/skillInjection';
 import { AssistantBlocks, MarkdownBlock } from '../AssistantBlocks';
 import { SelectionToolbar } from '../SelectionToolbar';
 import { expandWebSlashCommand } from '../../lib/webSlashCommands';
-import { fetchApproval, savePastedImage, setApproval } from '../../omp/cli';
+import { fetchApproval, savePastedImage, setApproval, setReadOnly } from '../../omp/cli';
 import {
   SLASH_CATEGORY_LABEL,
   SLASH_CATEGORY_ORDER,
@@ -207,7 +208,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   const [compactMenuOpen, setCompactMenuOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   /** Tool approval mode as omp itself stores it (`tools.approvalMode`). */
-  const [approval, setApprovalState] = useState<{ mode: string | null; modes: string[] }>({ mode: null, modes: [] });
+  const [approval, setApprovalState] = useState<{ mode: string | null; modes: string[]; readOnly: boolean }>({
+    mode: null,
+    modes: [],
+    readOnly: false,
+  });
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approvalBusy, setApprovalBusy] = useState(false);
 
@@ -215,7 +220,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     let cancelled = false;
     void fetchApproval()
       .then((state) => {
-        if (!cancelled) setApprovalState({ mode: state.mode, modes: state.modes });
+        if (!cancelled) setApprovalState({ mode: state.mode, modes: state.modes, readOnly: state.readOnly === true });
       })
       .catch(() => undefined);
     return () => {
@@ -236,6 +241,20 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       setApprovalBusy(false);
     }
   };
+  /** Read-only toggle: restarts omp with only tools that cannot write. */
+  const applyReadOnly = async (enabled: boolean) => {
+    setApprovalBusy(true);
+    try {
+      const next = await setReadOnly(enabled);
+      setApprovalState((prev) => ({ ...prev, readOnly: next.readOnly }));
+      onDispatchLog('INFO', `tools.readOnly: ${next.readOnly ? 'on' : 'off'} (omp session restarted)`);
+    } catch (error) {
+      onDispatchLog('INFO', `read-only toggle failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setApprovalBusy(false);
+    }
+  };
+
   const [sessionViewMode, setSessionViewMode] = useState<'chat' | 'diffs'>('chat');
   const [sessionDiffs, setSessionDiffs] = useState<FileDiffItem[]>([]);
   const [sessionDiffError, setSessionDiffError] = useState<string | null>(null);
@@ -2837,14 +2856,22 @@ return (
                           language === 'zh-CN' ? '工具权限' : 'Tool approval'
                         }: ${APPROVAL_LABEL[approval.mode ?? '']?.[language === 'zh-CN' ? 'zh' : 'en'] ?? approval.mode ?? '…'} (${approval.mode ?? 'unset'})`}
                         className={`p-1.5 rounded border transition-colors cursor-pointer disabled:opacity-50 ${
-                          approval.mode === 'yolo'
+                          approval.readOnly
+                            ? 'bg-[#38bdf8]/10 border-[#38bdf8]/50 text-[#38bdf8] hover:border-[#38bdf8]'
+                            : approval.mode === 'yolo'
                             ? 'bg-[#f59e0b]/10 border-[#f59e0b]/50 text-[#f59e0b] hover:border-[#f59e0b]'
                             : approval.mode === 'always-ask'
                             ? 'bg-[#18181b] border-[#34d399]/50 text-[#34d399] hover:border-[#34d399]'
                             : 'bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#fafafa] hover:border-[#3f3f46]'
                         }`}
                       >
-                        {approvalBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                        {approvalBusy ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : approval.readOnly ? (
+                          <Lock className="w-3.5 h-3.5" />
+                        ) : (
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                        )}
                       </button>
 
                       {approvalOpen && (
@@ -2854,6 +2881,28 @@ return (
                             <div className="px-3 py-1 text-[10px] text-[#71717a] uppercase border-b border-[#27272a] mb-1">
                               {language === 'zh-CN' ? '工具权限（写入 omp 设置）' : 'Tool approval (writes omp settings)'}
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => void applyReadOnly(!approval.readOnly)}
+                              disabled={approvalBusy}
+                              className={`w-full text-left px-3 py-1.5 hover:bg-[#27272a] cursor-pointer transition-colors border-t border-[#27272a] mt-1 pt-2 disabled:opacity-50 ${
+                                approval.readOnly ? 'bg-[#27272a]/60' : ''
+                              }`}
+                            >
+                              <span className="flex items-center justify-between gap-2">
+                                <span className="flex items-center gap-1.5" style={{ color: '#38bdf8' }}>
+                                  <Lock className="w-3 h-3" />
+                                  {language === 'zh-CN' ? '只读' : 'Read-only'}
+                                </span>
+                                {approval.readOnly && <Check className="w-3 h-3 text-[#34d399]" />}
+                              </span>
+                              <span className="block text-[10px] text-[#71717a] mt-0.5">
+                                {language === 'zh-CN'
+                                  ? '只挂载只读工具（read/grep/glob/ls…），不能改文件；写入会重启会话'
+                                  : 'only read tools are mounted (read/grep/glob/ls…); files cannot change; writing restarts the session'}
+                              </span>
+                            </button>
+
                             {approval.modes.map((mode) => {
                               const label = APPROVAL_LABEL[mode]?.[language === 'zh-CN' ? 'zh' : 'en'] ?? mode;
                               const hint = APPROVAL_HINT[mode]?.[language === 'zh-CN' ? 'zh' : 'en'] ?? '';

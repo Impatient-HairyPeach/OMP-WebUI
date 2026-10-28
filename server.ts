@@ -616,14 +616,22 @@ const PROJECT_SCOPE_FILE = () => path.join(workspace, ".omp", "omp-studio.json")
 interface ProjectScopeFile {
   extensions?: Record<string, "off" | "project">;
   skills?: Record<string, "off">;
+  /** Read-only session: launch omp with only tools that cannot change anything. */
+  readOnly?: boolean;
 }
+
+/** Tools a read-only session keeps — everything that can write is left out.
+ *  Names must match omp's built-ins (`omp --mode rpc-ui --tools=bogus` prints the
+ *  list); a name omp rejects keeps the child from starting, so the toggle below
+ *  verifies the session came back and reverts itself when it did not. */
+const READ_ONLY_TOOLS = ["read", "glob", "grep", "ask", "todo", "wait", "web_search"];
 
 function readProjectScope(): ProjectScopeFile {
   const file = PROJECT_SCOPE_FILE();
   if (!existsSync(file)) return {};
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8")) as ProjectScopeFile;
-    return { extensions: parsed.extensions ?? {}, skills: parsed.skills ?? {} };
+    return { extensions: parsed.extensions ?? {}, skills: parsed.skills ?? {}, readOnly: parsed.readOnly === true };
   } catch {
     return {};
   }
@@ -685,6 +693,9 @@ async function installedPluginEntries(): Promise<Map<string, string[]>> {
 function projectScopeArgs(): string[] {
   const scope = readProjectScope();
   const args: string[] = [];
+
+  // Read-only: omp only mounts tools that cannot change the workspace.
+  if (scope.readOnly) args.push(`--tools=${READ_ONLY_TOOLS.join(",")}`);
 
   const skills = discoverSkillNames();
   const offSkills = skills.filter((name) => isSwitchedOffHere(scope.skills, name));
@@ -1637,6 +1648,42 @@ app.post("/api/omp/models/refresh", async (req, res) => {
       added,
       models: models.filter((model) => model.provider === provider).map((model) => ({ id: model.id, name: model.name ?? model.id, selector: selectorOf(model) })),
     });
+  } catch (error) {
+    res.status(400).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
+  }
+});
+
+/** Read-only mode: persisted per project and applied by restarting the session. */
+app.post("/api/omp/readonly", async (req, res) => {
+  const enabled = req.body?.enabled === true;
+  const scope = readProjectScope();
+  try {
+    writeProjectScope({ ...scope, readOnly: enabled });
+    await enqueue(restartChildren);
+    if (enabled) {
+      // A tool name omp rejects takes the session down with it: give the child a
+      // moment, and put the project back the way it was if it never came up.
+      let status = activeRunner()?.status ?? "stopped";
+      for (let attempt = 0; attempt < 12 && status !== "ready" && status !== "exited"; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        status = activeRunner()?.status ?? "stopped";
+      }
+      if (status !== "ready") {
+        writeProjectScope({ ...scope, readOnly: false });
+        await enqueue(restartChildren);
+        emit("log", { level: "error", message: "tools.readOnly: omp refused the read-only tool list; read-only is back off" });
+        res.status(400).json({
+          error: `omp did not start with the read-only tool list (${status}); read-only turned back off`,
+          readOnly: false,
+        });
+        return;
+      }
+    }
+    emit("log", {
+      level: "info",
+      message: `tools.readOnly: ${enabled ? "on (read tools only)" : "off"} (session restarted)`,
+    });
+    res.json({ ok: true, readOnly: enabled, tools: enabled ? READ_ONLY_TOOLS : [], restarted: true });
   } catch (error) {
     res.status(400).json({ error: String(error instanceof Error ? error.message : error).slice(0, 1000) });
   }
@@ -3718,9 +3765,12 @@ app.post("/api/extensions/scope", async (req, res) => {
 app.get("/api/omp/approval", async (_req, res) => {
   try {
     const mode = await readOmpConfigValue("tools.approvalMode");
+    const scope = readProjectScope();
     res.json({
       mode: isApprovalMode(mode) ? mode : null,
       modes: APPROVAL_MODES,
+      readOnly: scope.readOnly === true,
+      readOnlyTools: READ_ONLY_TOOLS,
       // The launch flag wins for this session and is what the security page shows.
       autoApprove: process.argv.includes("--auto-approve") || OMP_ARGS.includes("--auto-approve"),
     });

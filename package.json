@@ -1,7 +1,7 @@
 {
   "name": "omp-studio",
   "private": true,
-  "version": "0.3.54",
+  "version": "0.3.55",
   "description": "Browser workspace for the local omp coding agent: real sessions, tools, files, models and skills.",
   "license": "Apache-2.0",
   "author": "Shang-1999",
@@ -52,6 +52,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "express": "^4.21.2",
     "jszip": "^3.10.1",
+    "katex": "^0.19.1",
     "lucide-react": "^0.546.0",
     "mammoth": "^1.13.0",
     "react": "^19.0.1",
