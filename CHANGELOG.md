@@ -3,6 +3,17 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.56
+
+- Running subagents actually show up now, in the composer HUD and the right
+  panel. The list was polled only while a turn looked streamed, every 3s, so a
+  subagent that outlived its turn — or one short enough to fall between samples
+  — never appeared at all. The poll is continuous now (1.5s), and the rows read
+  the figures omp really sends (`progress.resolvedModelIdentity`,
+  `progress.durationMs`, tokens, cost, current tool) instead of the top-level
+  fields that are always empty. Verified against a live subagent: omp reports
+  `opencode-go/deepseek-v4.1-flash`, 145ms and the task text.
+
 ## 0.3.55
 
 - Formulas render. Replies and file previews now typeset TeX with KaTeX:

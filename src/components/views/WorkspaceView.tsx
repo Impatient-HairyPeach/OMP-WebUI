@@ -430,7 +430,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     }
   }, [logs, onDispatchLog]);
 
-  // Subagents come from omp itself; poll while a turn is running (and once after it ends).
+  // Subagents come from omp itself. Poll continuously: a subagent can outlive
+  // the turn that spawned it, and gating the poll on `isStreaming` (3s) missed
+  // short ones entirely — verified against a 6s subagent that never showed.
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -442,13 +444,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       }
     };
     void load();
-    if (!omp.isStreaming) return;
-    const timer = window.setInterval(() => void load(), 3000);
+    const timer = window.setInterval(() => void load(), 1500);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [omp.isStreaming, omp.sessionId]);
+  }, [omp.sessionId]);
 
   // ---- Derived session state (all real) ----
   const sessionActive = Boolean(omp.resumePath || omp.sessionId);

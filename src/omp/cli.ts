@@ -594,6 +594,22 @@ export const fetchMcpServers = () => getJson<{ path: string; exists: boolean; se
 export const revealFile = (filePath: string) =>
   postJson<{ ok: boolean; path: string }>("/api/reveal", { path: filePath });
 
+/** What omp reports per running subagent (`get_subagents` → subagents[]). */
+export interface SubagentProgress {
+  status?: string;
+  durationMs?: number;
+  tokens?: number;
+  cost?: number;
+  toolCount?: number;
+  /** `provider/model` the subagent actually runs on. */
+  resolvedModelIdentity?: string;
+  resolvedModel?: string;
+  resolvedThinkingLevel?: string;
+  currentTool?: string;
+  lastIntent?: string;
+  recentOutput?: string[];
+}
+
 export interface SubagentRow {
   id?: string;
   name?: string;
@@ -604,6 +620,8 @@ export interface SubagentRow {
   tokens?: number;
   cost?: number;
   durationMs?: number;
+  /** omp keeps the live counters here; the top-level fields are usually absent. */
+  progress?: SubagentProgress;
   [key: string]: unknown;
 }
 

@@ -1527,12 +1527,26 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                             const expanded = subagentOpen[key] === true;
                             const label = String(agent.name ?? agent.id ?? `subagent-${index + 1}`);
                             const kind = typeof agent.agent === 'string' && agent.agent ? agent.agent : null;
-                            const model = typeof agent.model === 'string' && agent.model ? agent.model : null;
+                            const progress = agent.progress ?? {};
                             const task = typeof agent.task === 'string' && agent.task ? agent.task : null;
-                            const status = String(agent.status ?? 'running');
-                            const tokens = typeof agent.tokens === 'number' ? agent.tokens : null;
-                            const cost = typeof agent.cost === 'number' ? agent.cost : null;
-                            const duration = typeof agent.durationMs === 'number' ? formatSubagentDuration(agent.durationMs) : null;
+                            const status = String(agent.status ?? progress.status ?? 'running');
+                            // omp reports the live figures under `progress`; top-level fields are usually absent.
+                            const modelRaw =
+                              progress.resolvedModelIdentity ?? progress.resolvedModel ?? agent.model ?? null;
+                            const model = modelRaw ? String(modelRaw).split(':')[0] : null;
+                            const numberOrNull = (value: unknown): number | null => (typeof value === 'number' ? value : null);
+                            const tokens = numberOrNull(progress.tokens ?? agent.tokens);
+                            const cost = numberOrNull(progress.cost ?? agent.cost);
+                            const durationMs = progress.durationMs ?? agent.durationMs;
+                            const duration = typeof durationMs === 'number' ? formatSubagentDuration(durationMs) : null;
+                            const activity =
+                              typeof progress.currentTool === 'string'
+                                ? progress.currentTool
+                                : typeof progress.lastIntent === 'string'
+                                ? progress.lastIntent
+                                : task
+                                ? task.split('\n').filter(Boolean).slice(-1)[0]?.slice(0, 60) ?? null
+                                : null;
                             return (
                               <div key={`${key}-${index}`} className="flex gap-1">
                                 {/* branch connector: the rows hang off the Subagents header */}
@@ -1565,6 +1579,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                                     <span className="ml-auto shrink-0 text-[10px] text-[#52525b] tabular-nums">
                                       {duration ?? status}
                                     </span>
+                                    {!expanded && activity && (
+                                      <span className="hidden md:inline text-[10px] text-[#71717a] truncate max-w-[130px] shrink-0">
+                                        {activity}
+                                      </span>
+                                    )}
                                     {expanded ? (
                                       <ChevronDown className="w-3 h-3 shrink-0 text-[#52525b]" />
                                     ) : (
