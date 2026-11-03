@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Search, RefreshCw, Loader2, AlertCircle, FileCode } from 'lucide-react';
+import { Sparkles, Search, RefreshCw, Loader2, AlertCircle, FileCode, Trash2 } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext';
-import { fetchSkills, OmpSkillEntry } from '../../omp/cli';
+import { fetchSkills, removeInstalledSkill, OmpSkillEntry } from '../../omp/cli';
 
 interface SkillsLibraryViewProps {
   onInstallSkill: () => void;
@@ -15,6 +15,33 @@ export const SkillsLibraryView: React.FC<SkillsLibraryViewProps> = ({ onInstallS
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  /** Skill currently being uninstalled (one at a time). */
+  const [uninstalling, setUninstalling] = useState<string | null>(null);
+
+  /** Delete the skill's directory (project or user root) through omp's CLI. */
+  const handleUninstall = async (skill: OmpSkillEntry) => {
+    if (
+      !window.confirm(
+        zh
+          ? `卸载技能 ${skill.name}？目录 ${skill.path} 将被删除。`
+          : `Uninstall skill ${skill.name}? Its directory ${skill.path} will be deleted.`
+      )
+    ) {
+      return;
+    }
+    setUninstalling(skill.name);
+    setError(null);
+    try {
+      // The bridge reports code 0 once the skill's directory is actually gone.
+      const result = await removeInstalledSkill(skill.name, skill.source === 'user');
+      if (result.code !== 0) throw new Error(result.stderr || result.stdout || 'omp refused to remove the skill');
+      setSkills((prev) => (prev ?? []).filter((entry) => entry.path !== skill.path));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUninstalling(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,7 +171,21 @@ export const SkillsLibraryView: React.FC<SkillsLibraryViewProps> = ({ onInstallS
 
               <div className="pt-2 border-t border-[#1e1e24] flex items-center gap-1.5 text-[10px] font-mono text-[#71717a] min-w-0">
                 <FileCode className="w-3 h-3 shrink-0" />
-                <span className="truncate">{skill.path}</span>
+                <span className="truncate flex-1">{skill.path}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleUninstall(skill)}
+                  disabled={uninstalling !== null}
+                  title={zh ? '卸载技能（删除其目录）' : 'Uninstall this skill (deletes its directory)'}
+                  aria-label={zh ? '卸载技能' : 'Uninstall skill'}
+                  className="shrink-0 flex items-center gap-1 text-[#ef4444] hover:text-[#f87171] transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {uninstalling === skill.name ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3 h-3" />
+                  )}
+                </button>
               </div>
             </div>
           ))}

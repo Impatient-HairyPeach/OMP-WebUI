@@ -3,6 +3,16 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.59
+
+- The skills library (Settings → 技能库) can uninstall a skill now, not just
+  list it: each card carries a delete action that removes the skill's directory
+  through omp and drops the card. Verified end to end by creating a scratch
+  skill, seeing it listed, removing it, and confirming the listing and the
+  directory are both gone.
+- Plugin uninstall already existed in Settings → MCP 与扩展服务; its path is
+  verified against omp 18.16 (a nonexistent name reports `is not installed`).
+
 ## 0.3.58
 
 - The `/` commands now mean what they mean in the terminal. `/btw`, `/goal`,
