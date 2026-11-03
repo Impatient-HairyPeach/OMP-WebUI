@@ -11,6 +11,22 @@ import type { OmpContentBlock, OmpMessage, OmpSessionEntry, OmpToolExecution } f
 
 const TOOL_OUTPUT_LIMIT = 4000;
 
+/** Host context omp injects into a stored prompt (device/tool inventory, MCP
+ *  docs, …). The terminal keeps it out of the transcript; so do we. */
+const SYSTEM_BLOCK = /<system-(?:notice|reminder)>([\s\S]*?)<\/system-(?:notice|reminder)>/gi;
+
+export function stripSystemBlocks(text: string): string {
+  return text
+    .replace(SYSTEM_BLOCK, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+const SYSTEM_BLOCK_ANY = /<system-(?:notice|reminder)>[\s\S]*?<\/system-(?:notice|reminder)>/i;
+
+/** True when a message was nothing but injected host context. */
+const isOnlySystemBlocks = (raw: string): boolean => SYSTEM_BLOCK_ANY.test(raw) && stripSystemBlocks(raw).length === 0;
+
 export interface LiveTurn {
   messageId: string;
   blocks: MessageBlock[];
@@ -79,8 +95,8 @@ function blockSequence(
       return;
     }
     if (block.type === "text") {
-      const text = block.text ?? "";
-      if (!text.trim()) return;
+      const text = stripSystemBlocks(block.text ?? "");
+      if (!text) return;
       blocks.push({ kind: "text", id, text });
       return;
     }
@@ -227,11 +243,15 @@ export function transcriptToChatMessages(messages: OmpMessage[], entries?: OmpSe
     }
 
     if (message.role === "user" || message.role === "system") {
+      const raw = blockText(message.content, "text");
+      const content = stripSystemBlocks(raw);
+      // A prompt that was only injected host context has nothing to show.
+      if (!content && isOnlySystemBlocks(raw)) return;
       out.push({
         id: entryId ?? fallbackId(message.role, message.timestamp, out.length),
         entryId,
         role: message.role,
-        content: blockText(message.content, "text"),
+        content,
         timestamp: clockOf(message.timestamp),
       });
       return;

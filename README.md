@@ -118,6 +118,8 @@ omp-studio           # serves dist/ and runs omp in the directory you launched f
 ```
 
 Requirements: `omp` on `PATH` (or `OMP_BIN`), Node.js 22+ or Bun.
+Verified against `omp 18.16` — every RPC command, CLI subcommand, launch
+flag and config file this UI touches was checked against that build.
 
 ### Environment
 

@@ -52,8 +52,7 @@ import { DiffViewer } from '../DiffViewer';
 import { ExtensionRequest } from '../ExtensionRequest';
 import { TaskHud } from '../TaskHud';
 import { PanelResizeHandle } from '../PanelResizeHandle';
-import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, fetchSubagents, uploadAttachment } from '../../omp/cli';
-import type { SubagentRow } from '../../omp/cli';
+import { speakWithOmp, fetchWorkspaceFiles, fetchDirs, fetchGitDiff, uploadAttachment } from '../../omp/cli';
 import { todosFromTranscript } from '../../lib/todoList';
 import { publishWorkState } from '../../lib/workState';
 import { Mic, Volume2 } from 'lucide-react';
@@ -123,16 +122,6 @@ const compactCount = (value: number): string =>
   value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
 
 /** omp's approval modes, worded the way the agent behaves. */
-/**
- * omp extension status chips this UI deliberately does not show.
- *
- * `pi-permission-system` repeats the composer's permission control, and
- * `pi-cache-stats` reports the cache from its own process-lifetime window (it
- * resets on restart), which contradicts the session-wide figure read from omp's
- * session log — one cache number, and it is the one that survives a restart.
- */
-const HIDDEN_STATUS_CHIP_PREFIXES = ['pi-permission-system', 'pi-cache-stats'];
-
 const APPROVAL_LABEL: Record<string, { zh: string; en: string }> = {
   'always-ask': { zh: '每次询问', en: 'Always ask' },
   write: { zh: '允许写入', en: 'Allow writes' },
@@ -276,8 +265,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
   /** Hovered tick in the message rail → a floating preview of that turn. */
   const [railPreview, setRailPreview] = useState<{ id: string; top: number; right: number } | null>(null);
   const [atBottom, setAtBottom] = useState(true);
-  /** Running subagents reported by omp's `get_subagents` command. */
-  const [subagents, setSubagents] = useState<SubagentRow[]>([]);
+  /** Running subagents: omp pushes them, the hook keeps the snapshot. */
+  const subagents = omp.subagents;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
@@ -429,27 +418,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       onDispatchLog(line.level === 'info' || line.level === 'omp' ? 'INFO' : 'OVERRIDE', line.message);
     }
   }, [logs, onDispatchLog]);
-
-  // Subagents come from omp itself. Poll continuously: a subagent can outlive
-  // the turn that spawned it, and gating the poll on `isStreaming` (3s) missed
-  // short ones entirely — verified against a 6s subagent that never showed.
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const rows = await fetchSubagents();
-        if (!cancelled) setSubagents(rows);
-      } catch {
-        if (!cancelled) setSubagents([]);
-      }
-    };
-    void load();
-    const timer = window.setInterval(() => void load(), 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [omp.sessionId]);
 
   // ---- Derived session state (all real) ----
   const sessionActive = Boolean(omp.resumePath || omp.sessionId);

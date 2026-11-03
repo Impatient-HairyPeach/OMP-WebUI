@@ -3,6 +3,24 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.57
+
+- Injected host context no longer leaks into the chat. omp stores the device /
+  tool inventory it adds to a prompt as `<system-notice>` blocks (and
+  `<system-reminder>` ones); they showed up above your own message on every
+  send. Both are stripped while mapping the transcript, and a message that was
+  nothing but that context is dropped outright.
+- Running subagents now come from omp's own push (`set_subagent_subscription`
+  level `events`) instead of a 1.5s poll: the UI refreshes the moment omp
+  reports a lifecycle/progress event, and re-subscribes whenever the child
+  restarts. Verified on the bridge: 45 `subagent_event`, 12 `subagent_progress`
+  and 2 `subagent_lifecycle` frames during one subagent run.
+- Pruned dead weight found while auditing against `omp 18.16`: the unused
+  extension status-chip state and its frame branch, the orphaned
+  `currentTurnStart` helper, and the `WorkspaceView` subagent poll. The audit
+  found every RPC command, CLI subcommand, launch flag and config file in use to
+  be current in 18.16.
+
 ## 0.3.56
 
 - Running subagents actually show up now, in the composer HUD and the right

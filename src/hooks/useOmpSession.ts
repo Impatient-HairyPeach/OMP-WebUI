@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, FileDiffItem, SessionTokenUsage } from "../types";
-import { fetchSessionUsage, type SessionUsageSummary } from "../omp/cli";
+import { fetchSessionUsage, fetchSubagents, type SessionUsageSummary, type SubagentRow } from "../omp/cli";
 import { OmpBridge, type OmpBridgeStatusDetail } from "../omp/client";
 import { repairSession as repairSessionHeader } from "../omp/cli";
 import { alertTurnComplete } from "../lib/alerts";
@@ -73,7 +73,6 @@ export interface OmpSessionApi {
   removeQueuedMessage: (message: string, queue: "steering" | "followUp") => Promise<boolean>;
   slashCommands: OmpSlashCommand[];
   logs: OmpLogLine[];
-  statusChips: Array<{ key: string; text: string }>;
   dialog: OmpDialogRequest | null;
   sessions: OmpSessionSummary[];
   sessionRoot: string;
@@ -89,6 +88,8 @@ export interface OmpSessionApi {
   newSession: (cwd?: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
   deleteSession: (path: string) => Promise<void>;
+  /** Running subagents, kept live by omp's own push (`set_subagent_subscription`). */
+  subagents: SubagentRow[];
   /** Edit-from-here: branch the session log at that user turn and re-run with `text`. */
   branchAndPrompt: (text: string) => Promise<void>;
   /** Retract a sent prompt (matched by its text) so the turn and everything
@@ -171,6 +172,8 @@ export function useOmpSession(): OmpSessionApi {
   const liveDirty = useRef(false);
   /** Set below once `loadCurrentSession` exists; the status handler is wired first. */
   const loadCurrentSessionRef = useRef<() => Promise<void>>(async () => {});
+  /** Re-sent whenever the child comes up: a restart loses the subscription. */
+  const subscribeSubagentsRef = useRef<() => Promise<void>>(async () => {});
   /* Live generation rate: a 3s rolling window over streamed characters, divided
      by the chars-per-token ratio measured on the last finished turn (omp's own
      `tokensPerSecond` is a per-turn figure, so it cannot move while streaming). */
@@ -234,11 +237,13 @@ export function useOmpSession(): OmpSessionApi {
     setSlashCommands([...commands, ...webSlashCommandCatalog().filter((command) => !own.has(command.name))]);
   };
   const [logs, setLogs] = useState<OmpLogLine[]>([]);
-  const [statusChips, setStatusChips] = useState<Array<{ key: string; text: string }>>([]);
   const [dialogs, setDialogs] = useState<OmpDialogRequest[]>([]);
   const [sessions, setSessions] = useState<OmpSessionSummary[]>([]);
   const [archived, setArchived] = useState<OmpArchivedSession[]>([]);
   const [branchAnchors, setBranchAnchors] = useState<Array<{ entryId: string; text: string }>>([]);
+  const [subagents, setSubagents] = useState<SubagentRow[]>([]);
+  /** Coalesces the refreshes a burst of subagent frames would otherwise fire. */
+  const subagentRefreshRef = useRef<number | null>(null);
   const [sessionRoot, setSessionRoot] = useState("");
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   sessionTitleRef.current = sessionTitle;
@@ -301,6 +306,20 @@ export function useOmpSession(): OmpSessionApi {
     }
   }, []);
 
+  /** Turn on omp's subagent push and take one snapshot of what is running now. */
+  const subscribeSubagents = useCallback(async () => {
+    const bridge = bridgeRef.current;
+    if (!bridge) return;
+    try {
+      await bridge.command({ type: "set_subagent_subscription", level: "events" });
+    } catch (error) {
+      pushLog("warn", `subagent subscription unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    void fetchSubagents()
+      .then((rows) => setSubagents(rows))
+      .catch(() => undefined);
+  }, [pushLog]);
+
   const refreshCatalog = useCallback(async () => {
     const bridge = bridgeRef.current;
     if (!bridge) return;
@@ -310,6 +329,7 @@ export function useOmpSession(): OmpSessionApi {
       // omp only *pushes* available_commands_update, and it may not re-send it on
       // a resumed session — ask for the catalog so `/` completion always has it.
       bridge.command({ type: "get_available_commands" }),
+      subscribeSubagents(),
     ]);
     const modelData = modelResponse.data as { models?: OmpModelOption[] } | undefined;
     const levelData = levelResponse.data as { levels?: string[] } | undefined;
@@ -317,7 +337,7 @@ export function useOmpSession(): OmpSessionApi {
     if (modelData?.models) setModels(modelData.models);
     if (levelData?.levels) setThinkingLevels(withAuto(levelData.levels));
     if (commandData?.commands && commandData.commands.length > 0) mergeSlashCommands(commandData.commands);
-  }, []);
+  }, [subscribeSubagents]);
 
   /** omp reports the levels the *active model* supports; `auto` is always valid. */
   const refreshThinkingLevels = useCallback(async () => {
@@ -350,6 +370,21 @@ export function useOmpSession(): OmpSessionApi {
   const applyFrame = useCallback(
     (frame: OmpFrame) => {
       switch (frame.type) {
+        case "subagent_lifecycle":
+        case "subagent_progress":
+        case "subagent_event": {
+          // omp pushes these once the subscription is on; ask for the snapshot
+          // instead of trusting each frame's payload shape.
+          if (subagentRefreshRef.current === null) {
+            subagentRefreshRef.current = window.setTimeout(() => {
+              subagentRefreshRef.current = null;
+              void fetchSubagents()
+                .then((rows) => setSubagents(rows))
+                .catch(() => undefined);
+            }, 250);
+          }
+          break;
+        }
         case "agent_start": {
           setTurnActive(true);
           resetLiveRate();
@@ -541,11 +576,8 @@ export function useOmpSession(): OmpSessionApi {
           } else if (method === "setTitle") {
             setSessionTitle(String(request.title ?? ""));
           } else if (method === "setStatus") {
-            const key = String(request.statusKey ?? "");
-            setStatusChips((prev) => {
-              const rest = prev.filter((chip) => chip.key !== key);
-              return request.statusText ? [...rest, { key, text: String(request.statusText) }] : rest;
-            });
+            // Extension status text is no longer rendered: the top bar reports
+            // model usage only, so there is nothing to keep here.
           } else if (method === "open_url") {
             pushLog("info", `extension wants to open ${String(request.url ?? "")}`);
           } else if (method === "cancel") {
@@ -663,6 +695,8 @@ export function useOmpSession(): OmpSessionApi {
         // The child is up (fresh start, resume, workspace switch): pull the
         // transcript it is holding so the chat is never blank on load.
         void loadCurrentSessionRef.current();
+        // A restarted child forgets the subagent subscription.
+        void subscribeSubagentsRef.current();
       }
       if (next === "exited") pushLog("warn", `omp process exited${detail.exit ? ` (${detail.exit})` : ""}`);
     };
@@ -835,6 +869,7 @@ export function useOmpSession(): OmpSessionApi {
   );
 
   loadCurrentSessionRef.current = loadCurrentSession;
+  subscribeSubagentsRef.current = subscribeSubagents;
 
   const abort = useCallback(async () => {
     const bridge = bridgeRef.current;
@@ -1081,7 +1116,6 @@ export function useOmpSession(): OmpSessionApi {
     removeQueuedMessage,
     slashCommands,
     logs,
-    statusChips,
     dialog: dialogs[0] ?? null,
     sessions,
     sessionRoot,
@@ -1097,6 +1131,7 @@ export function useOmpSession(): OmpSessionApi {
     newSession,
     refreshSessions,
     deleteSession,
+    subagents,
     branchAndPrompt,
     withdrawPrompt,
     forkAt,
