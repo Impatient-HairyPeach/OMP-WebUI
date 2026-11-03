@@ -51,7 +51,6 @@ import {
   fetchWorkspaceFiles,
   convertLegacyDocx,
   saveImageCrop,
-  sendSideChat,
   setExtensionEnabled,
   setProjectScope,
   type GitDiffFile,
@@ -181,45 +180,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [diffError, setDiffError] = useState<string | null>(null);
 
   // --- side chat tab: ephemeral omp runs, never the real conversation ---
-  const [sideMessages, setSideMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string; error?: boolean; ms?: number }>>([]);
   const [sideInput, setSideInput] = useState('');
   const sideInputRef = useRef<HTMLTextAreaElement | null>(null);
-
-  /** `/btw <question>` from the composer lands here as a side question. */
-  useEffect(() => {
-    const onSideChat = (event: Event) => {
-      const question = (event as CustomEvent<{ question?: string }>).detail?.question;
-      if (!question) return;
-      setSideInput(question);
-      requestAnimationFrame(() => sideInputRef.current?.focus());
-    };
-    window.addEventListener('omp:side-chat', onSideChat);
-    return () => window.removeEventListener('omp:side-chat', onSideChat);
-  }, []);
-  const [sideBusy, setSideBusy] = useState(false);
-  const [sideTools, setSideTools] = useState(false);
-
-  const runSideChat = async () => {
-    const text = sideInput.trim();
-    if (!text || sideBusy) return;
-    setSideInput('');
-    setSideMessages((prev) => [...prev, { role: 'user', text }]);
-    setSideBusy(true);
-    try {
-      const result = await sendSideChat(text, sideTools);
-      setSideMessages((prev) => [
-        ...prev,
-        { role: 'assistant', text: result.ok ? result.reply : result.error ?? 'failed', error: !result.ok, ms: result.ms },
-      ]);
-    } catch (error) {
-      setSideMessages((prev) => [
-        ...prev,
-        { role: 'assistant', text: error instanceof Error ? error.message : String(error), error: true },
-      ]);
-    } finally {
-      setSideBusy(false);
-    }
-  };
 
   // --- git tab ---
   const [commitMessage, setCommitMessage] = useState('');
@@ -1621,59 +1583,57 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         )}
 
         {/* ============================== GIT ============================== */}
-        {/* ========================= SIDE CHAT ========================= */}
+        {/* ========================= BTW (omp side questions) ========================= */}
         {activeTab === 'sidechat' && (
           <div className="flex-1 min-h-0 flex flex-col font-mono text-xs">
             <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b" style={{ borderColor: theme.border }}>
-              <label className="flex items-center gap-1.5 text-[10px] text-[#71717a] cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={sideTools}
-                  onChange={(event) => setSideTools(event.target.checked)}
-                  className="accent-[#a78bfa]"
-                />
-                {zh ? '允许工具（默认关闭）' : 'allow tools (off by default)'}
-              </label>
-              <button
-                type="button"
-                onClick={() => setSideMessages([])}
-                disabled={sideMessages.length === 0}
-                className="text-[10px] text-[#71717a] hover:text-[#fafafa] transition-colors cursor-pointer disabled:opacity-40"
-              >
-                {zh ? '清空' : 'clear'}
-              </button>
+              <span className="text-[10px] uppercase text-[#71717a]">
+                {zh ? 'omp 副问答（/btw）' : 'omp side questions (/btw)'}
+              </span>
+              {work.btw.some((record) => record.status === 'running') && (
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('omp:btw-cancel'))}
+                  className="text-[10px] text-[#f59e0b] hover:text-[#fafafa] transition-colors cursor-pointer"
+                >
+                  {zh ? '取消' : 'cancel'}
+                </button>
+              )}
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-2">
-              {sideMessages.length === 0 && (
+              {work.btw.length === 0 && (
                 <div className="p-2.5 rounded border text-[10px] text-[#71717a]" style={{ borderColor: theme.border }}>
-                  {t.sideChatEmpty}
+                  {zh
+                    ? '还没有副问答。在输入框用 /btw 提问，或在这里直接问——答案不进主上下文。'
+                    : 'No side questions yet. Ask with /btw in the composer, or right here — answers stay out of the main context.'}
                 </div>
               )}
-              {sideMessages.map((entry, index) => (
-                <div key={index} className={entry.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-                  <div
-                    className={`max-w-[92%] rounded px-2 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap break-words border ${
-                      entry.role === 'user'
-                        ? 'bg-[#18181b] border-[#27272a] text-[#fafafa]'
-                        : entry.error
-                        ? 'bg-[#ef4444]/10 border-[#ef4444]/40 text-[#f87171]'
-                        : 'bg-[#121215] border-[#27272a] text-[#d4d4d8]'
-                    }`}
-                  >
-                    {entry.text}
-                    {entry.role === 'assistant' && entry.ms !== undefined && !entry.error && (
-                      <span className="block text-[9px] text-[#52525b] mt-1">{entry.ms} ms</span>
-                    )}
+              {work.btw.map((record) => (
+                <div key={record.id} className="space-y-1">
+                  <div className="flex justify-end">
+                    <div
+                      className="max-w-[92%] rounded px-2 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap break-words border bg-[#18181b] border-[#27272a] text-[#fafafa]"
+                    >
+                      {record.question}
+                    </div>
+                  </div>
+                  <div className="flex justify-start">
+                    <div
+                      className={`max-w-[92%] rounded px-2 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap break-words border ${
+                        record.status === 'error'
+                          ? 'bg-[#ef4444]/10 border-[#ef4444]/40 text-[#f87171]'
+                          : 'bg-[#121215] border-[#27272a] text-[#d4d4d8]'
+                      }`}
+                    >
+                      {record.answer || (record.status === 'running' ? (zh ? '思考中…' : 'thinking…') : '')}
+                      {record.status === 'running' && (
+                        <Loader2 className="inline-block w-3 h-3 ml-1.5 animate-spin" style={{ color: accentColor }} />
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
-              {sideBusy && (
-                <div className="flex items-center gap-1.5 text-[10px] text-[#71717a]">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  {zh ? 'omp 正在回答（独立进程，不影响当前会话）' : 'omp is answering (separate process, your session is untouched)'}
-                </div>
-              )}
             </div>
 
             <div className="border-t p-2" style={{ borderColor: theme.border }}>
@@ -1685,7 +1645,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
-                    void runSideChat();
+                    const question = sideInput.trim();
+                    if (!question) return;
+                    window.dispatchEvent(new CustomEvent('omp:ask-btw', { detail: { question } }));
+                    setSideInput('');
                   }
                 }}
                 placeholder={t.sideChatPlaceholder}
@@ -1693,15 +1656,20 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               />
               <div className="flex items-center justify-between gap-2 mt-1.5">
                 <span className="text-[9px] text-[#52525b]">
-                  {zh ? '每次提问 = 一次独立 omp 调用，不写入会话日志' : 'each message is one standalone omp run, not written to the session log'}
+                  {zh ? 'omp 原生副问答，不写入主对话上下文' : "omp's own side question, outside the main context"}
                 </span>
                 <button
                   type="button"
-                  onClick={() => void runSideChat()}
-                  disabled={!sideInput.trim() || sideBusy}
+                  onClick={() => {
+                    const question = sideInput.trim();
+                    if (!question) return;
+                    window.dispatchEvent(new CustomEvent('omp:ask-btw', { detail: { question } }));
+                    setSideInput('');
+                  }}
+                  disabled={!sideInput.trim()}
                   className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40 active:translate-y-px"
                 >
-                  {sideBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <CornerDownLeft className="w-3 h-3" />}
+                  <CornerDownLeft className="w-3 h-3" />
                   {t.sideChatSend}
                 </button>
               </div>

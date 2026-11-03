@@ -401,11 +401,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       textareaRef.current?.focus();
     };
     window.addEventListener('omp:insert-quote', onQuote);
+    // Side questions from the panel go through omp's own `btw` command.
+    const onAskBtw = (event: Event) => {
+      const question = (event as CustomEvent<{ question?: string }>).detail?.question?.trim();
+      if (question) void omp.askBtw(question);
+    };
+    const onCancelBtw = () => void omp.cancelBtw();
+    window.addEventListener('omp:ask-btw', onAskBtw);
+    window.addEventListener('omp:btw-cancel', onCancelBtw);
     return () => {
       window.removeEventListener('omp:insert-mention', onInsert);
       window.removeEventListener('omp:insert-quote', onQuote);
+      window.removeEventListener('omp:ask-btw', onAskBtw);
+      window.removeEventListener('omp:btw-cancel', onCancelBtw);
     };
-  }, []);
+  }, [omp.askBtw, omp.cancelBtw]);
 
   // Forward every freshly appended omp log line to the bottom terminal.
   useEffect(() => {
@@ -444,8 +454,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     [transcript]
   );
   useEffect(() => {
-    publishWorkState({ todos: transcriptTodos, subagents });
-  }, [transcriptTodos, subagents]);
+    publishWorkState({ todos: transcriptTodos, subagents, btw: omp.btwHistory });
+  }, [transcriptTodos, subagents, omp.btwHistory]);
 
   const contextUsage = omp.state?.contextUsage ?? null;
   const statusColor =
@@ -937,11 +947,24 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
       textareaRef.current?.focus();
       return;
     }
-    if (expanded.kind === 'side-chat') {
-      // /btw is a side question: open the Side Chat panel with the question
-      // typed in — nothing goes to the main agent's context.
-      window.dispatchEvent(new CustomEvent('omp:open-side-panel', { detail: { tab: 'sidechat' } }));
-      window.dispatchEvent(new CustomEvent('omp:side-chat', { detail: { question: expanded.question } }));
+    if (expanded.kind === 'native') {
+      // Terminal semantics: these run omp's own commands, not prompt text.
+      const { command, args } = expanded;
+      void (async () => {
+        if (command === 'btw') {
+          window.dispatchEvent(new CustomEvent('omp:open-side-panel', { detail: { tab: 'sidechat' } }));
+          await omp.askBtw(args);
+        } else if (command === 'goal') {
+          await omp.runGoal(args ? 'create' : 'get', args || undefined);
+        } else if (command === 'handoff') {
+          await omp.handoffSession(args || undefined);
+        } else if (command === 'export') {
+          const path = await omp.exportSession();
+          if (path) onDispatchLog('OK', `exported ${path}`);
+        } else if (command === 'rename') {
+          await omp.renameSession(args);
+        }
+      })();
       setInputPrompt('');
       return;
     }

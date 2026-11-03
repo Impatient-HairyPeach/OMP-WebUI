@@ -37,6 +37,17 @@ import type {
   OmpToolExecution,
 } from "../omp/protocol";
 
+/** One omp side question (`/btw`). */
+export interface BtwRecord {
+  id: string;
+  question: string;
+  answer: string;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+  leafId?: string;
+}
+
 export interface OmpDialogRequest {
   id: string;
   method: "confirm" | "select" | "input" | "editor" | "ask";
@@ -90,6 +101,19 @@ export interface OmpSessionApi {
   deleteSession: (path: string) => Promise<void>;
   /** Running subagents, kept live by omp's own push (`set_subagent_subscription`). */
   subagents: SubagentRow[];
+  /** omp's own side questions (`/btw`) and their history. */
+  btwHistory: BtwRecord[];
+  askBtw: (question: string) => Promise<void>;
+  cancelBtw: () => Promise<void>;
+  /** Goal mode (`/goal`): `get` | `create` | `resume` | `pause` | `drop`. */
+  goalState: Record<string, unknown> | null;
+  runGoal: (op: "get" | "create" | "resume" | "pause" | "drop", objective?: string) => Promise<void>;
+  /** `/handoff`: summarise into a fresh session. */
+  handoffSession: (instructions?: string) => Promise<void>;
+  /** `/export`: write the session as HTML and return the path. */
+  exportSession: () => Promise<string | null>;
+  /** `/rename`: rename the current session. */
+  renameSession: (name: string) => Promise<void>;
   /** Edit-from-here: branch the session log at that user turn and re-run with `text`. */
   branchAndPrompt: (text: string) => Promise<void>;
   /** Retract a sent prompt (matched by its text) so the turn and everything
@@ -242,6 +266,8 @@ export function useOmpSession(): OmpSessionApi {
   const [archived, setArchived] = useState<OmpArchivedSession[]>([]);
   const [branchAnchors, setBranchAnchors] = useState<Array<{ entryId: string; text: string }>>([]);
   const [subagents, setSubagents] = useState<SubagentRow[]>([]);
+  const [btwHistory, setBtwHistory] = useState<BtwRecord[]>([]);
+  const [goalState, setGoalState] = useState<Record<string, unknown> | null>(null);
   /** Coalesces the refreshes a burst of subagent frames would otherwise fire. */
   const subagentRefreshRef = useRef<number | null>(null);
   const [sessionRoot, setSessionRoot] = useState("");
@@ -370,6 +396,10 @@ export function useOmpSession(): OmpSessionApi {
   const applyFrame = useCallback(
     (frame: OmpFrame) => {
       switch (frame.type) {
+        case "btw_record": {
+          void refreshBtw();
+          break;
+        }
         case "subagent_lifecycle":
         case "subagent_progress":
         case "subagent_event": {
@@ -889,6 +919,99 @@ export function useOmpSession(): OmpSessionApi {
     await bridgeRef.current?.command({ type: "compact" });
   }, []);
 
+  /** omp's own side questions: one topic per record, answers arrive over frames. */
+  const refreshBtw = useCallback(async () => {
+    const bridge = bridgeRef.current;
+    if (!bridge) return;
+    const response = await bridge.command({ type: "get_btw_history" });
+    const records = response.success ? (response.data as { records?: BtwRecord[] } | undefined)?.records : undefined;
+    if (Array.isArray(records)) setBtwHistory(records);
+  }, []);
+
+  const askBtw = useCallback(
+    async (question: string) => {
+      const bridge = bridgeRef.current;
+      if (!bridge) return;
+      const response = await bridge.command({ type: "btw", question });
+      if (response.success === false) {
+        pushLog("error", response.error ?? "side question rejected");
+        return;
+      }
+      await refreshBtw();
+    },
+    [pushLog, refreshBtw]
+  );
+
+  const cancelBtw = useCallback(async () => {
+    const bridge = bridgeRef.current;
+    if (!bridge) return;
+    await bridge.command({ type: "btw_cancel" });
+    await refreshBtw();
+  }, [refreshBtw]);
+
+  /** Goal mode: the terminal's `/goal` lifecycle (get/create/resume/pause/drop). */
+  const runGoal = useCallback(
+    async (op: "get" | "create" | "resume" | "pause" | "drop", objective?: string) => {
+      const bridge = bridgeRef.current;
+      if (!bridge) return;
+      const response = await bridge.command({ type: "goal", op, ...(objective ? { objective } : {}) });
+      if (response.success === false) {
+        pushLog("error", response.error ?? `goal ${op} failed`);
+        return;
+      }
+      setGoalState((response.data as Record<string, unknown> | undefined) ?? null);
+      pushLog("info", `goal: ${op}${objective ? ` ${objective.slice(0, 40)}` : ""}`);
+    },
+    [pushLog]
+  );
+
+  /** `/handoff`: omp writes the handoff, starts a fresh session, and we reload it. */
+  const handoffSession = useCallback(
+    async (instructions?: string) => {
+      const bridge = bridgeRef.current;
+      if (!bridge) return;
+      const response = await bridge.command({ type: "handoff", ...(instructions ? { customInstructions: instructions } : {}) });
+      if (response.success === false) {
+        pushLog("error", response.error ?? "handoff failed");
+        return;
+      }
+      pushLog("info", "handoff: conversation carried into a fresh session");
+      adoptSession(await bridge.currentSession());
+    },
+    [adoptSession, pushLog]
+  );
+
+  /** `/export`: omp writes the HTML; the path is returned for the UI to reveal. */
+  const exportSession = useCallback(async (): Promise<string | null> => {
+    const bridge = bridgeRef.current;
+    if (!bridge) return null;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const outputPath = `${workspace.replace(/\\/g, "/")}/.omp-studio/exports/session-${stamp}.html`;
+    const response = await bridge.command({ type: "export_html", outputPath });
+    if (response.success === false) {
+      pushLog("error", response.error ?? "export failed");
+      return null;
+    }
+    const path = (response.data as { path?: string } | undefined)?.path ?? outputPath;
+    pushLog("info", `export: ${path}`);
+    return path;
+  }, [pushLog, workspace]);
+
+  const renameSession = useCallback(
+    async (name: string) => {
+      const bridge = bridgeRef.current;
+      if (!bridge) return;
+      const response = await bridge.command({ type: "set_session_name", name });
+      if (response.success === false) {
+        pushLog("error", response.error ?? "rename failed");
+        return;
+      }
+      setSessionTitle(name);
+      pushLog("info", `session renamed: ${name}`);
+    },
+    [pushLog]
+  );
+
   const setAutoCompaction = useCallback(
     async (enabled: boolean) => {
       const bridge = bridgeRef.current;
@@ -1132,6 +1255,14 @@ export function useOmpSession(): OmpSessionApi {
     refreshSessions,
     deleteSession,
     subagents,
+    btwHistory,
+    askBtw,
+    cancelBtw,
+    goalState,
+    runGoal,
+    handoffSession,
+    exportSession,
+    renameSession,
     branchAndPrompt,
     withdrawPrompt,
     forkAt,

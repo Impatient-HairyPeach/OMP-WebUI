@@ -7,14 +7,17 @@
  */
 import { useEffect, useState } from 'react';
 import type { SubagentRow } from '../omp/cli';
+import type { BtwRecord } from '../hooks/useOmpSession';
 import type { TodoGroup } from './todoList';
 
 export interface WorkState {
   todos: TodoGroup[] | null;
   subagents: SubagentRow[];
+  /** omp's own side questions (`/btw`), newest first. */
+  btw: BtwRecord[];
 }
 
-let state: WorkState = { todos: null, subagents: [] };
+let state: WorkState = { todos: null, subagents: [], btw: [] };
 const listeners = new Set<(next: WorkState) => void>();
 
 export function publishWorkState(next: WorkState): void {

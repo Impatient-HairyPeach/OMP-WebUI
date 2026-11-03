@@ -252,17 +252,6 @@ export const convertLegacyDocx = (docPath: string) =>
 
 
 /** One ephemeral omp run for the side chat (`--no-session`, tools opt-in). */
-export interface SideChatReply {
-  ok: boolean;
-  ms: number;
-  reply: string;
-  error?: string;
-  tools: boolean;
-}
-
-export const sendSideChat = (message: string, tools = false) =>
-  postJson<SideChatReply>("/api/side-chat", { message, tools });
-
 /** Custom endpoints from omp's own `models.yml` (the file it actually reads). */
 export interface CustomEndpointModel {
   id: string;

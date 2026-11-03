@@ -46,7 +46,6 @@ export interface Translations {
   gitTab: string;
   sideChatPlaceholder: string;
   sideChatSend: string;
-  sideChatEmpty: string;
   
   // Current Tasks Section
   activeOrchestration: string;
@@ -306,7 +305,6 @@ const zhCN: Translations = {
   gitTab: 'Git 版本变更',
   sideChatPlaceholder: '输入临时提问、工具测试或草稿指令...',
   sideChatSend: '发送',
-  sideChatEmpty: '暂无副对话记录，可输入指令调试工具与草稿逻辑。',
 
   activeOrchestration: '当前活跃编排流水线',
   taskProgress: '整体流水线进度',
@@ -564,7 +562,6 @@ const enUS: Translations = {
   gitTab: 'Git Changes',
   sideChatPlaceholder: 'Ask a side question, debug a tool, or draft prompts...',
   sideChatSend: 'Send',
-  sideChatEmpty: 'No side conversation yet. Use this thread for scratchpad queries and tool test runs.',
 
   activeOrchestration: 'Active Orchestration Pipeline',
   taskProgress: 'Overall Pipeline Progress',

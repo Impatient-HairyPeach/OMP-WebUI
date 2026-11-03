@@ -3,6 +3,22 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.58
+
+- The `/` commands now mean what they mean in the terminal. `/btw`, `/goal`,
+  `/handoff`, `/export` and `/rename` call omp's own commands (`btw`, `goal`,
+  `handoff`, `export_html`, `set_session_name`) instead of sending invented
+  prompt text; `/cleanse` stays a prompt because omp keeps it inside the TUI.
+- The Side Chat tab is now omp's native side-question view: it lists the `btw`
+  history, shows answers as they land, and can cancel a running one. The old
+  separate-process implementation (its own `omp -p` run, the tools toggle and
+  the `/api/side-chat` route) is gone.
+- Dropped commands the terminal does not have (`review`, `fix`, `test`,
+  `explain`, `simplify`, `advisor`, `loop`).
+- `/plan` remains a prompt composer: omp exposes no RPC for its plan-mode
+  toggle (checked against its full command surface), so the terminal's mode
+  switch is not reachable from the web yet.
+
 ## 0.3.57
 
 - Injected host context no longer leaks into the chat. omp stores the device /
