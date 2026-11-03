@@ -50,8 +50,8 @@
   </tr>
   <tr>
     <td align="center" width="33%">
-      <img src="assets/screenshots/side-chat.png" alt="Side chat: standalone omp runs that never touch the session log" width="100%" />
-      <br /><sub>Side chat: standalone omp runs, tools opt-in.<br />辅助对话：独立调用，工具可选。</sub>
+      <img src="assets/screenshots/side-chat.png" alt="Side questions: omp's own btw thread, outside the main context" width="100%" />
+      <br /><sub>Side questions: omp's own `/btw` thread with history and cancel.<br />辅助对话：omp 原生副问答，带历史与取消。</sub>
     </td>
     <td align="center" width="33%">
       <img src="assets/screenshots/providers.png" alt="Providers: quota windows, model tests, custom endpoints" width="100%" />
@@ -96,7 +96,7 @@ It exists because the terminal is great for the agent and awkward for everything
 The right panel is not a read-only viewer: highlight text in the source view (or click a line, a paragraph, a notebook cell or a slide) and a small box opens with the anchored reference (`file:lines`) and the quoted text. Write what should change and either ask straight away or drop it in the notes tray; `发送到输入框` turns the whole tray into one prompt with every `@file:lines` reference and its quote. On an image, drag a rectangle: the exact pixels are cropped into `.omp-studio/annotations/` and referenced as a real `@path`, so the agent opens the region you drew on rather than guessing from coordinates.
 
 <p align="center">
-  <img src="assets/screenshots/side-chat.png" alt="Side chat: standalone omp runs that never touch the session log" width="300" />
+  <img src="assets/screenshots/side-chat.png" alt="Side questions: omp's own btw thread, outside the main context" width="300" />
 </p>
 
 ### Quickstart
