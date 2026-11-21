@@ -3,6 +3,20 @@
 All notable changes to OMP Studio. Versions match the app version shown in
 Settings (`v<version> · <build date>`).
 
+## 0.3.60
+
+- A side question can no longer fail silently. The panel used to clear the input
+  as soon as you pressed Enter, so a rejected or failed `btw` looked like
+  "nothing happens". Now the text stays until omp acknowledges the question
+  (the send button spins meanwhile), and any failure is printed above the input
+  while your text is kept for a retry — verified by killing the omp child and
+  watching `副问答没发出去：omp rpc process is not running` appear with the
+  question still in the box.
+- Repeated side questions could not be reproduced as broken on this build:
+  panel twice, `/btw` then panel, duplicates, rapid sends and asks during a
+  streaming turn all delivered. If it still happens, the reason now shows in
+  the panel.
+
 ## 0.3.59
 
 - The skills library (Settings → 技能库) can uninstall a skill now, not just

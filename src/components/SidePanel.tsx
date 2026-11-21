@@ -182,6 +182,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   // --- side chat tab: ephemeral omp runs, never the real conversation ---
   const [sideInput, setSideInput] = useState('');
   const sideInputRef = useRef<HTMLTextAreaElement | null>(null);
+  /** Question sent but not yet visible in the btw history: keeps the text in the
+   *  box until omp acknowledges it, so a failed send never looks like a no-op. */
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
 
   // --- git tab ---
   const [commitMessage, setCommitMessage] = useState('');
@@ -641,6 +644,18 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
   // --- tasks tab: the current turn's todo list and subagents (published by the workspace) ---
   const work = useWorkState();
+
+  useEffect(() => {
+    if (!pendingQuestion) return;
+    if (work.btw.some((record) => record.question === pendingQuestion)) {
+      setPendingQuestion(null);
+      setSideInput('');
+      return;
+    }
+    // A failure keeps the text so it can be retried; the error shows below.
+    if (work.btwError) setPendingQuestion(null);
+  }, [work.btw, work.btwError, pendingQuestion]);
+
   /** Right panel task/subagent sections fold on their own. */
   const [tasksOpen, setTasksOpen] = useState(true);
   const [subagentsOpen, setSubagentsOpen] = useState(true);
@@ -1637,6 +1652,12 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             </div>
 
             <div className="border-t p-2" style={{ borderColor: theme.border }}>
+              {work.btwError && (
+                <div className="mb-1.5 text-[10px] text-[#f87171] break-words">
+                  {zh ? '副问答没发出去：' : 'side question failed: '}
+                  {work.btwError}
+                </div>
+              )}
               <textarea
                 rows={2}
                 ref={sideInputRef}
@@ -1647,8 +1668,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     event.preventDefault();
                     const question = sideInput.trim();
                     if (!question) return;
+                    setPendingQuestion(question);
                     window.dispatchEvent(new CustomEvent('omp:ask-btw', { detail: { question } }));
-                    setSideInput('');
                   }
                 }}
                 placeholder={t.sideChatPlaceholder}
@@ -1663,13 +1684,13 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   onClick={() => {
                     const question = sideInput.trim();
                     if (!question) return;
+                    setPendingQuestion(question);
                     window.dispatchEvent(new CustomEvent('omp:ask-btw', { detail: { question } }));
-                    setSideInput('');
                   }}
-                  disabled={!sideInput.trim()}
+                  disabled={!sideInput.trim() || pendingQuestion !== null}
                   className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#a78bfa] hover:bg-[#bca6fc] text-[#09090b] text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40 active:translate-y-px"
                 >
-                  <CornerDownLeft className="w-3 h-3" />
+                  {pendingQuestion !== null ? <Loader2 className="w-3 h-3 animate-spin" /> : <CornerDownLeft className="w-3 h-3" />}
                   {t.sideChatSend}
                 </button>
               </div>

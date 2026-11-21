@@ -103,6 +103,8 @@ export interface OmpSessionApi {
   subagents: SubagentRow[];
   /** omp's own side questions (`/btw`) and their history. */
   btwHistory: BtwRecord[];
+  /** Last `/btw` failure, shown in the panel instead of only in the log. */
+  btwError: string | null;
   askBtw: (question: string) => Promise<void>;
   cancelBtw: () => Promise<void>;
   /** Goal mode (`/goal`): `get` | `create` | `resume` | `pause` | `drop`. */
@@ -267,6 +269,7 @@ export function useOmpSession(): OmpSessionApi {
   const [branchAnchors, setBranchAnchors] = useState<Array<{ entryId: string; text: string }>>([]);
   const [subagents, setSubagents] = useState<SubagentRow[]>([]);
   const [btwHistory, setBtwHistory] = useState<BtwRecord[]>([]);
+  const [btwError, setBtwError] = useState<string | null>(null);
   const [goalState, setGoalState] = useState<Record<string, unknown> | null>(null);
   /** Coalesces the refreshes a burst of subagent frames would otherwise fire. */
   const subagentRefreshRef = useRef<number | null>(null);
@@ -932,12 +935,21 @@ export function useOmpSession(): OmpSessionApi {
     async (question: string) => {
       const bridge = bridgeRef.current;
       if (!bridge) return;
-      const response = await bridge.command({ type: "btw", question });
-      if (response.success === false) {
-        pushLog("error", response.error ?? "side question rejected");
-        return;
+      setBtwError(null);
+      try {
+        const response = await bridge.command({ type: "btw", question });
+        if (response.success === false) {
+          const error = response.error ?? "side question rejected";
+          setBtwError(error);
+          pushLog("error", error);
+          return;
+        }
+        await refreshBtw();
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        setBtwError(detail);
+        pushLog("error", `side question failed: ${detail}`);
       }
-      await refreshBtw();
     },
     [pushLog, refreshBtw]
   );
@@ -1256,6 +1268,7 @@ export function useOmpSession(): OmpSessionApi {
     deleteSession,
     subagents,
     btwHistory,
+    btwError,
     askBtw,
     cancelBtw,
     goalState,

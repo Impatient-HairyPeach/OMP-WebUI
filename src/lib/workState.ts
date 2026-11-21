@@ -15,9 +15,11 @@ export interface WorkState {
   subagents: SubagentRow[];
   /** omp's own side questions (`/btw`), newest first. */
   btw: BtwRecord[];
+  /** Last `/btw` failure, if any. */
+  btwError: string | null;
 }
 
-let state: WorkState = { todos: null, subagents: [], btw: [] };
+let state: WorkState = { todos: null, subagents: [], btw: [], btwError: null };
 const listeners = new Set<(next: WorkState) => void>();
 
 export function publishWorkState(next: WorkState): void {

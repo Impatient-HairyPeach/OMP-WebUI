@@ -454,8 +454,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ onDispatchLog }) =
     [transcript]
   );
   useEffect(() => {
-    publishWorkState({ todos: transcriptTodos, subagents, btw: omp.btwHistory });
-  }, [transcriptTodos, subagents, omp.btwHistory]);
+    publishWorkState({ todos: transcriptTodos, subagents, btw: omp.btwHistory, btwError: omp.btwError });
+  }, [transcriptTodos, subagents, omp.btwHistory, omp.btwError]);
 
   const contextUsage = omp.state?.contextUsage ?? null;
   const statusColor =
